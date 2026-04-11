@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { User, Mail, Shield, Plus, Trash2, Camera, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
-import { T } from '../../app';
+import { T } from '../../App';
 
 export default function UsuarioMgmtView() {
   const [usuarios, setUsuarios] = useState([]);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, User, Bus, Smartphone, FileText, ChevronRight } from 'lucide-react';
-import { T } from '../../app'; // Importación de tokens
+import { T } from '../../App'; // Importación de tokens
 import { pdfGen } from '../../utils/pdfGenerator';
 
 export default function CotizadorView({ vehiculos, onSave, historial }) {

@@ -12,7 +12,7 @@ import {
   CheckCircle,
   Save
 } from 'lucide-react';
-import { T } from '../../app';
+import { T } from '../../App';
 
 const TABS_CONFIG = [
   {

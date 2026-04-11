@@ -1,5 +1,5 @@
 import React from 'react';
-import { T } from '../../app';
+import { T } from '../../App';
 
 export default function VistaMovil({ params, socio, resData, vehiculo }) {
   const vIco = "🚐"; // Se puede abstraer
