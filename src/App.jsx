@@ -826,18 +826,34 @@ function AppContent() {
   const [modalTarea, setModal]   = useState(null);
   const [theme,      setTheme]   = useState('dark');
   const [loading, setLoading] = useState(false);
+  
+  // CONFIGURACIÓN GLOBAL (Empresa, Logo, etc)
+  const [empresaConfig, setEmpresaConfig] = useState({
+    nombre: 'Transportes Miguel',
+    tel: '+506 8000-0000',
+    email: 'info@transop.com',
+    web: 'www.transop.com',
+    cedJur: '3-101-000000',
+    pais: 'San José, Costa Rica',
+    dir: 'San José Centro',
+    tituloPDF: 'PROFORMA DE SERVICIO DE TRANSPORTE',
+    terminos: 'Esta proforma tiene validez por los días indicados. Los precios están sujetos a cambio sin previo aviso...',
+    nota: ''
+  });
+  const [logoData, setLogoData] = useState(localStorage.getItem('transop_logo') || null);
 
   async function fetchData() {
     if (!token) return;
     setLoading(true);
     try {
       const headers = { 'Authorization': `Bearer ${token}` };
-      const [resT, resC, resV, resE, resK] = await Promise.all([
+      const [resT, resC, resV, resE, resK, resG] = await Promise.all([
         fetch('/api/tms/tareas', { headers }),
         fetch('/api/tms/conductores', { headers }),
         fetch('/api/tms/vehiculos', { headers }),
         fetch('/api/tms/eventos', { headers }),
-        fetch('/api/tms/dashboard/kpis', { headers })
+        fetch('/api/tms/dashboard/kpis', { headers }),
+        fetch('/api/tms/config/global', { headers })
       ]);
 
       if (resT.ok) setTareas(await resT.json());
@@ -845,6 +861,10 @@ function AppContent() {
       if (resV.ok) setVehiculos(await resV.json());
       if (resE.ok) setEventos(await resE.json());
       if (resK.ok) setKpis(await resK.json());
+      if (resG.ok) {
+        const gData = await resG.json();
+        if (gData && gData.empresa) setEmpresaConfig(prev => ({ ...prev, ...gData.empresa }));
+      }
     } catch (err) {
       console.error("Error fetching dashboard data:", err);
     } finally {
@@ -938,13 +958,13 @@ function AppContent() {
         {/* Content */}
         <div style={{ flex:1, padding:28, overflowY:'auto' }}>
           {view === 'dashboard'   && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} />}
-          {view === 'cotizaciones'&& <CotizadorView vehiculos={vehiculos} onSave={()=>{}} historial={[]} />}
+          {view === 'cotizaciones'&& <CotizadorView vehiculos={vehiculos} onSave={()=>{}} empresaConfig={empresaConfig} logoData={logoData} />}
           {view === 'eventos'     && <EventosView eventos={eventos} />}
           {view === 'tareas'      && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} />}
           {view === 'conductores' && <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} />}
           {view === 'vehiculos'   && <VehiculosView vehiculos={vehiculos} conductores={conductores} />}
           {view === 'usuarios'    && <UsuarioMgmtView />}
-          {view === 'config'      && <ConfiguracionesView />}
+          {view === 'config'      && <ConfiguracionesView empresaConfig={empresaConfig} setEmpresaConfig={setEmpresaConfig} logoData={logoData} setLogoData={setLogoData} />}
           {view === 'gastos'      && <PlaceholderView titulo="Módulo de Gastos" icono={Receipt}   />}
           {view === 'reportes'    && <PlaceholderView titulo="Módulo de Reportes" icono={BarChart3} />}
         </div>

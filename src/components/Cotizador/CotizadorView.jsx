@@ -5,11 +5,11 @@ import { useAuth } from '../../context/AuthContext';
 import { pdfGen } from '../../utils/pdfGenerator';
 import VistaMovil from './VistaMovil';
 
-export default function CotizadorView({ vehiculos, onSave, historial }) {
+export default function CotizadorView({ vehiculos, empresaConfig, logoData }) {
   const { token } = useAuth();
   const [tab, setTab] = useState('calc');
   const [subTab, setSubTab] = useState('s1');
-  const [configTab, setConfigTab] = useState('empresa');
+  const [itinTab, setItinTab] = useState('list'); // internal toggle for itin
 
   // 1. ESTADOS DE DATOS
   const [vehiculoActivo, setVehiculoActivo] = useState(null);
@@ -74,20 +74,6 @@ export default function CotizadorView({ vehiculos, onSave, historial }) {
     { hora: '12:00 - 13:00', actividad: 'Almuerzo / descanso', detalle: 'Parada programada' }
   ]);
 
-  // Configuración de empresa
-  const [empresaConfig, setEmpresaConfig] = useState({
-    nombre: 'Transportes Miguel',
-    tel: '+506 8000-0000',
-    email: 'info@transop.com',
-    web: 'www.transop.com',
-    cedJur: '3-101-000000',
-    pais: 'San José, Costa Rica',
-    dir: 'San José Centro',
-    tituloPDF: 'PROFORMA DE SERVICIO DE TRANSPORTE',
-    terminos: 'Esta proforma tiene validez por los días indicados. Los precios están sujetos a cambio sin previo aviso. El servicio se confirma con el pago del adelanto acordado. Cancelación con menos de 24 horas: se cobra el 50% del servicio.',
-    nota: ''
-  });
-
   const [resData, setResData] = useState({});
 
   // 2. EFECTOS E INICIALIZACIÓN
@@ -112,7 +98,6 @@ export default function CotizadorView({ vehiculos, onSave, historial }) {
       setDbHistorial(hData);
 
       const cData = await cRes.json();
-      if (cData && cData.empresa) setEmpresaConfig(prev => ({ ...prev, ...cData.empresa }));
       if (cData && cData.franjas_base) setFranjasDia(cData.franjas_base);
     } catch (err) {
       console.error("Error fetching initial data", err);
@@ -280,9 +265,9 @@ export default function CotizadorView({ vehiculos, onSave, historial }) {
         <div style={{ display:'flex', borderBottom:`1px solid ${T.bdr}`, overflowX:'auto' }}>
           <TabBtn id="calc" label="Cotización" icon={FileText} active={tab==='calc'} onClick={()=>setTab('calc')} />
           <TabBtn id="socio" label="Datos del cliente" icon={User} active={tab==='socio'} onClick={()=>setTab('socio')} />
+          <TabBtn id="itin" label="Itinerario" icon={Clock} active={tab==='itin'} onClick={()=>setTab('itin')} />
           <TabBtn id="movil" label="Vista Móvil" icon={Smartphone} active={tab==='movil'} onClick={()=>setTab('movil')} />
-          <TabBtn id="hist" label="Historial" icon={Clock} active={tab==='hist'} onClick={()=>setTab('hist')} />
-          <TabBtn id="config" label="Configuración" icon={Settings} active={tab==='config'} onClick={()=>setTab('config')} />
+          <TabBtn id="hist" label="Historial" icon={Calculator} active={tab==='hist'} onClick={()=>setTab('hist')} />
         </div>
 
         {/* CONTENIDO DE PESTAÑAS */}
@@ -407,60 +392,24 @@ export default function CotizadorView({ vehiculos, onSave, historial }) {
             </div>
           )}
 
-          {tab === 'config' && (
-            <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
-              <div style={{ display:'flex', gap:6, borderBottom:`1px solid ${T.bdr2}`, paddingBottom:10 }}>
-                {[['empresa','Empresa'], ['itinerario','Itinerario'], ['textos','Textos PDF']].map(([id, label]) => (
-                  <button key={id} onClick={() => setConfigTab(id)}
-                    style={{
-                      padding:'6px 14px', borderRadius:8, background: configTab === id ? T.ambDim : 'transparent',
-                      color: configTab === id ? T.AMB : T.mute, border: 'none', cursor:'pointer', fontSize:13, fontWeight:600
-                    }}>{label}</button>
+          {tab === 'itin' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                <h3 style={{ margin:0, color:T.txt, fontSize: 16 }}>Cronograma del Servicio</h3>
+                <button onClick={addFranja} style={{ padding:'8px 16px', background:T.ambDim, color:T.AMB, border:`1px dashed ${T.AMB}44`, borderRadius:8, fontSize:12, fontWeight:600, cursor:'pointer' }}>+ Añadir actividad</button>
+              </div>
+              <p style={{ fontSize:12, color:T.mute, marginBottom:10 }}>Configure el itinerario propuesto para esta cotización específica.</p>
+              
+              <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                {franjasDia.map((f, i) => (
+                  <div key={i} style={{ display:'grid', gridTemplateColumns:'150px 1fr 1fr auto', gap:12, alignItems:'flex-start', background:T.card2, padding:12, borderRadius:10, border:`1px solid ${T.bdr}` }}>
+                    <div className="field" style={{margin:0}}><label style={{fontSize:10}}>Horario</label><input type="text" value={f.hora} onChange={(e)=>franjaChange(i, 'hora', e.target.value)} style={{fontSize:12, padding:6}}/></div>
+                    <div className="field" style={{margin:0}}><label style={{fontSize:10}}>Actividad</label><input type="text" value={f.actividad} onChange={(e)=>franjaChange(i, 'actividad', e.target.value)} style={{fontSize:12, padding:6}}/></div>
+                    <div className="field" style={{margin:0}}><label style={{fontSize:10}}>Detalle</label><input type="text" value={f.detalle} onChange={(e)=>franjaChange(i, 'detalle', e.target.value)} style={{fontSize:12, padding:6}}/></div>
+                    <button onClick={()=>removeFranja(i)} style={{ color:T.RED, background:'transparent', border:'none', cursor:'pointer', marginTop:20 }}><Trash2 size={16}/></button>
+                  </div>
                 ))}
               </div>
-
-              {configTab === 'empresa' && (
-                <div style={{ display:'grid', gap:20 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:20 }}>
-                    <div style={{ width:100, height:60, border:`1px dashed ${T.bdr2}`, borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', background:T.card2 }}>
-                      {logoData ? <img src={logoData} style={{ maxWidth:'100%', maxHeight:'100%' }} alt="Logo" /> : <ImageIcon size={24} color={T.mute} />}
-                    </div>
-                    <div>
-                      <input type="file" id="logoInp" style={{display:'none'}} onChange={handleLogoUpload} />
-                      <button onClick={()=>document.getElementById('logoInp').click()} style={{ padding:'8px 16px', background:T.ambDim, color:T.AMB, border:'none', borderRadius:8, fontSize:12, fontWeight:600, cursor:'pointer' }}>Cambiar Logo</button>
-                    </div>
-                  </div>
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-                    <div className="field"><label>Nombre Empresa</label><input type="text" name="nombre" value={empresaConfig.nombre} onChange={cChange}/></div>
-                    <div className="field"><label>Teléfono</label><input type="text" name="tel" value={empresaConfig.tel} onChange={cChange}/></div>
-                    <div className="field"><label>Email</label><input type="text" name="email" value={empresaConfig.email} onChange={cChange}/></div>
-                    <div className="field"><label>Sitio Web</label><input type="text" name="web" value={empresaConfig.web} onChange={cChange}/></div>
-                  </div>
-                </div>
-              )}
-
-              {configTab === 'itinerario' && (
-                <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-                  <p style={{ fontSize:12, color:T.mute }}>Configura el itinerario tipo para las proformas:</p>
-                  {franjasDia.map((f, i) => (
-                    <div key={i} style={{ display:'grid', gridTemplateColumns:'150px 1fr 1fr auto', gap:8, alignItems:'end' }}>
-                      <div className="field"><label>Horario</label><input type="text" value={f.hora} onChange={(e)=>franjaChange(i, 'hora', e.target.value)}/></div>
-                      <div className="field"><label>Actividad</label><input type="text" value={f.actividad} onChange={(e)=>franjaChange(i, 'actividad', e.target.value)}/></div>
-                      <div className="field"><label>Detalle</label><input type="text" value={f.detalle} onChange={(e)=>franjaChange(i, 'detalle', e.target.value)}/></div>
-                      <button onClick={()=>removeFranja(i)} style={{ color:T.RED, background:'transparent', border:'none', cursor:'pointer', marginBottom:5 }}><Trash2 size={16}/></button>
-                    </div>
-                  ))}
-                  <button onClick={addFranja} style={{ padding:'10px', background:T.ambDim, color:T.AMB, border:`1px dashed ${T.AMB}44`, borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>+ Añadir actividad</button>
-                </div>
-              )}
-
-              {configTab === 'textos' && (
-                <div style={{ display:'grid', gap:16 }}>
-                  <div className="field"><label>Título PDF</label><input type="text" name="tituloPDF" value={empresaConfig.tituloPDF} onChange={cChange}/></div>
-                  <div className="field"><label>Términos y Condiciones</label><textarea name="terminos" rows={4} value={empresaConfig.terminos} onChange={cChange}/></div>
-                  <div className="field"><label>Nota pie de página</label><input type="text" name="nota" value={empresaConfig.nota} onChange={cChange}/></div>
-                </div>
-              )}
             </div>
           )}
 

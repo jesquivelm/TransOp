@@ -69,26 +69,6 @@ export default function VistaMovil({ params, socio, resData, vehiculo, franjasDi
            </div>
         </div>
 
-        {/* Itinerario Timeline */}
-        <div>
-            <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', marginBottom:12, display:'flex', alignItems:'center', gap:6 }}>
-                <Clock size={12} /> Itinerario Propuesto
-            </div>
-            <div style={{ display:'flex', flexDirection:'column', paddingLeft:10 }}>
-                {franjasDia?.map((f, i) => (
-                    <div key={i} style={{ position:'relative', paddingLeft:20, paddingBottom:20 }}>
-                        {/* Linea vertical */}
-                        {i < franjasDia.length - 1 && <div style={{ position:'absolute', left:0, top:16, bottom:0, width:2, background:'#cbd5e1' }}></div>}
-                        {/* Punto */}
-                        <div style={{ position:'absolute', left:-4, top:4, width:10, height:10, borderRadius:'50%', background:'#3b82f6', border:'2px solid #fff' }}></div>
-                        
-                        <div style={{ fontSize:11, fontWeight:700, color:'#3b82f6' }}>{f.hora}</div>
-                        <div style={{ fontSize:13, fontWeight:700, color:'#1e293b' }}>{f.actividad}</div>
-                        <div style={{ fontSize:11, color:'#64748b' }}>{f.detalle}</div>
-                    </div>
-                ))}
-            </div>
-        </div>
 
         {/* Totales */}
         <div style={{ background:'#fff', borderRadius:16, padding:16, border:'1px solid #e2e8f0', marginTop:'auto' }}>
