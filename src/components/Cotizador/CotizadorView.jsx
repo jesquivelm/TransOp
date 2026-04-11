@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, User, Bus, Smartphone, FileText, ChevronRight, Plus, Trash2, Image as ImageIcon, LayoutDashboard, Clock } from 'lucide-react';
+import { Settings, User, Bus, Smartphone, FileText, ChevronRight, Plus, Trash2, Image as ImageIcon, LayoutDashboard, Clock, CheckCircle, X } from 'lucide-react';
 import { T } from '../../App'; 
 import { useAuth } from '../../context/AuthContext';
 import { pdfGen } from '../../utils/pdfGenerator';
@@ -232,11 +232,28 @@ export default function CotizadorView({ vehiculos, socios, refreshSocios, empres
     if (!confirm("¿Eliminar esta proforma?")) return;
     try {
       await fetch(`/api/tms/proformas/${id}`, { 
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
       });
       setDbHistorial(prev => prev.filter(p => p.id !== id));
     } catch (err) { console.error("Error deleting proforma", err); }
+  };
+
+  const patchStatus = async (id, status, motivo = '') => {
+    try {
+      const res = await fetch(`/api/tms/proforma/${id}/status`, {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ status, motivo_rechazo: motivo })
+      });
+      if (res.ok) {
+        setModalStatus(null);
+        fetchInitialData();
+      }
+    } catch (err) { console.error("Error patching status", err); }
   };
 
   // 4. COMPONENTES UI
@@ -514,10 +531,6 @@ function StatusBadge({ status }) {
     </div>
   );
 }
-
-const CheckCircle = ({size, color}) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-);
 
 const Calculator = FileText;
 const XCircle = X;
