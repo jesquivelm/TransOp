@@ -1,4 +1,15 @@
+import express from 'express';
+import path from 'path';
+import cors from 'cors';
+import bodyParser from 'body-parser';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { query as pgQuery } from './db/postgres.js';
+import dotenv from 'dotenv';
 
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
