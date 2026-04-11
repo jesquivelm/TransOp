@@ -1,10 +1,4 @@
 import { useState, useMemo, useEffect } from "react";
-
-// Las constantes de inicialización se mantienen vacías ya que los datos se cargarán del servidor
-const CONDUCTORES_INIT = [];
-const VEHICULOS_INIT = [];
-const EVENTOS_INIT = [];
-const TAREAS_INIT = [];
 import {
   LayoutDashboard, CalendarDays, CheckSquare, Users, Bus, Receipt,
   BarChart3, AlertTriangle, CheckCircle, XCircle, Clock, MapPin,
