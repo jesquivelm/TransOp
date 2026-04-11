@@ -10,6 +10,7 @@ import CotizadorView from './components/Cotizador/CotizadorView';
 import LoginView from './components/Auth/LoginView';
 import UsuarioMgmtView from './components/Admin/UsuarioMgmtView';
 import ConfiguracionesView from './components/Admin/ConfiguracionesView';
+import SociosView from './components/Socios/SociosView';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 // ─────────────────────────────────────────────────────────────
