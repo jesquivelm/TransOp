@@ -7465,6 +7465,11 @@ app.post('/api/cotizador/flexografia/calcular', (req, res) => {
     try {
         res.json(calcularCotizacionFlexografia(req.body || {}));
 
+    } catch (error) {
+        res.status(400).json({ error: error.message || 'No fue posible calcular la cotización.' });
+    }
+});
+
 app.get('/cotizaciones', (req, res) => {
     shouldServeSellerMobile(req)
         .then((useMobile) => {
