@@ -7464,116 +7464,6 @@ app.post('/api/flexo/calcular-preview', async (req, res) => {
 app.post('/api/cotizador/flexografia/calcular', (req, res) => {
     try {
         res.json(calcularCotizacionFlexografia(req.body || {}));
-    } catch (error) {
-        res.status(400).json({ error: error.message || 'No fue posible calcular la cotización.' });
-    }
-});
-
-app.get('/flexo-calculo', (req, res) => {
-    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-    res.redirect(`/calculo-flexografia${query}`);
-});
-
-app.get('/configuracion-general', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'configuracion-general.html'));
-});
-
-app.get('/proforma', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'proforma.html'));
-});
-
-app.get('/socios', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'socios.html'));
-});
-
-app.get('/socios/documento', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'socios-documento.html'));
-});
-
-app.get('/inventario-materiales', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'catalogo.html'));
-});
-
-app.get('/inventario-troqueles', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'inventario-troqueles.html'));
-});
-
-app.get('/inventario-troqueles/documento', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'troquel-documento.html'));
-});
-
-app.get('/inventario-maquinas', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'catalogo.html'));
-});
-
-app.get('/inventario-procesos', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'catalogo.html'));
-});
-
-app.get('/inventario-tipos-salida', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'catalogo.html'));
-});
-
-app.get('/costos', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'costos.html'));
-});
-
-app.get('/calculo-flexografia', (req, res) => {
-    try {
-        res.type('html').send(renderIntegratedFlexoHtml());
-    } catch (error) {
-        res.status(500).send(error.message || 'No fue posible abrir el cotizador integrado.');
-    }
-});
-
-app.get('/cotizador-flexografia-pro', (req, res) => {
-    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-    res.redirect(`/calculo-flexografia${query}`);
-});
-
-app.get('/orden-produccion/:codigo', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'orden-produccion.html'));
-});
-
-app.get('/ordenes-produccion', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'ordenes-produccion.html'));
-});
-
-app.get('/planificacion/gantt', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'planificacion', 'gantt.html'));
-});
-
-app.get('/planificacion/lanzamiento', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'planificacion', 'lanzamiento.html'));
-});
-
-app.get('/planificacion', (req, res) => {
-    res.redirect('/planificacion/lanzamiento');
-});
-
-app.get('/planificacion/configuracion', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'planificacion', 'configuracion.html'));
-});
-
-app.get('/planificacion/preturno', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'planificacion', 'preturno.html'));
-});
-
-app.get('/planificacion/mes-operario', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'planificacion', 'mes-operario.html'));
-});
-
-app.get('/planificacion/mes-planchas', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'planificacion', 'mes-planchas.html'));
-});
-
-app.get('/planificacion/dashboard-kpi', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'planificacion', 'dashboard-kpi.html'));
-});
-
-app.get('/cotizaciones/documento', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
 
 app.get('/cotizaciones', (req, res) => {
     shouldServeSellerMobile(req)
@@ -7597,17 +7487,7 @@ app.get('/vendedores', (req, res) => {
     }
 });
 
-app.get('/dashboard', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
-});
 
-app.get('/login', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'login.html'));
-});
-
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'login.html'));
-});
 
 // =============================================================
 // AUTHENTICATION & SECURITY
