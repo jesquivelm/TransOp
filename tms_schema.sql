@@ -56,6 +56,7 @@ CREATE TABLE clientes (
     telefono        VARCHAR(30),
     email           VARCHAR(150),
     direccion       TEXT,
+    cedula          VARCHAR(50),
     notas           TEXT,
     activo          BOOLEAN DEFAULT TRUE,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
@@ -588,6 +589,9 @@ CREATE TABLE tms_cotizaciones (
     cliente_empresa VARCHAR(200),
     fecha_emision   TIMESTAMPTZ DEFAULT NOW(),
     total_usd       DECIMAL(12,2),
+    estado          VARCHAR(20) DEFAULT 'pendiente', -- pendiente, aprobada, rechazada
+    motivo_rechazo  TEXT,
+    socio_id        UUID REFERENCES clientes(id),
     data_json       JSONB NOT NULL, -- Almacena todos los inputs/parámetros como snapshot
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW()

@@ -158,6 +158,39 @@ app.put('/api/tms/vehiculos/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// Socios / Clientes
+app.get('/api/tms/socios', authenticateToken, async (req, res) => {
+    try {
+        const result = await pgQuery('SELECT * FROM clientes WHERE activo = TRUE ORDER BY nombre ASC');
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/tms/socios', authenticateToken, async (req, res) => {
+    const { id, nombre, telefono, email, direccion, cedula, tipo, notas } = req.body;
+    try {
+        if (id) {
+            await pgQuery(
+                `UPDATE clientes SET nombre = $1, telefono = $2, email = $3, direccion = $4, cedula = $5, tipo = $6, notas = $7, updated_at = NOW()
+                 WHERE id = $8`,
+                [nombre, telefono, email, direccion, cedula, tipo || 'persona', notas, id]
+            );
+            res.json({ success: true, id });
+        } else {
+            const result = await pgQuery(
+                `INSERT INTO clientes (nombre, telefono, email, direccion, cedula, tipo, notas) 
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+                [nombre, telefono, email, direccion, cedula, tipo || 'persona', notas]
+            );
+            res.json({ success: true, id: result.rows[0].id });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Proformas / Cotizaciones
 app.get('/api/tms/proformas', authenticateToken, async (req, res) => {
     try {
@@ -169,21 +202,47 @@ app.get('/api/tms/proformas', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/tms/proformas', authenticateToken, async (req, res) => {
-    const { numero, cliente_nombre, cliente_empresa, total_usd, data_json } = req.body;
+    const { numero, cliente_nombre, cliente_empresa, total_usd, data_json, socio_id, save_as_socio } = req.body;
     try {
+        let final_socio_id = socio_id;
+
+        // Auto-crear socio si se solicita
+        if (save_as_socio && !final_socio_id && cliente_nombre) {
+            const sRes = await pgQuery(
+                `INSERT INTO clientes (nombre, tipo, notas) VALUES ($1, $2, $3) RETURNING id`,
+                [cliente_nombre, 'persona', 'Auto-generado desde proforma ' + numero]
+            );
+            final_socio_id = sRes.rows[0].id;
+        }
+
         const result = await pgQuery(
-            `INSERT INTO tms_cotizaciones (numero, cliente_nombre, cliente_empresa, total_usd, data_json)
-             VALUES ($1, $2, $3, $4, $5)
+            `INSERT INTO tms_cotizaciones (numero, cliente_nombre, cliente_empresa, total_usd, data_json, socio_id, estado)
+             VALUES ($1, $2, $3, $4, $5, $6, 'pendiente')
              ON CONFLICT (numero) DO UPDATE SET
                 cliente_nombre = EXCLUDED.cliente_nombre,
                 cliente_empresa = EXCLUDED.cliente_empresa,
                 total_usd = EXCLUDED.total_usd,
                 data_json = EXCLUDED.data_json,
+                socio_id = EXCLUDED.socio_id,
                 updated_at = NOW()
              RETURNING id`,
-            [numero, cliente_nombre, cliente_empresa, total_usd, JSON.stringify(data_json)]
+            [numero, cliente_nombre, cliente_empresa, total_usd, JSON.stringify(data_json), final_socio_id]
         );
-        res.json({ success: true, id: result.rows[0].id });
+        res.json({ success: true, id: result.rows[0].id, socio_id: final_socio_id });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+app.patch('/api/tms/proformas/:id/status', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { estado, motivo_rechazo } = req.body;
+    try {
+        await pgQuery(
+            `UPDATE tms_cotizaciones SET estado = $1, motivo_rechazo = $2, updated_at = NOW() 
+             WHERE id = $3 OR numero = $3`,
+            [estado, motivo_rechazo, id]
+        );
+        res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

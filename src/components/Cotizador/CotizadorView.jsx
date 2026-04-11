@@ -5,11 +5,15 @@ import { useAuth } from '../../context/AuthContext';
 import { pdfGen } from '../../utils/pdfGenerator';
 import VistaMovil from './VistaMovil';
 
-export default function CotizadorView({ vehiculos, empresaConfig, logoData }) {
+export default function CotizadorView({ vehiculos, socios, refreshSocios, empresaConfig, logoData }) {
   const { token } = useAuth();
+  const [view, setView] = useState('list'); // 'list' or 'editor'
+  const [editorMode, setEditorMode] = useState('new'); // 'new', 'edit', 'duplicate'
   const [tab, setTab] = useState('calc');
   const [subTab, setSubTab] = useState('s1');
-  const [itinTab, setItinTab] = useState('list'); // internal toggle for itin
+  const [itinTab, setItinTab] = useState('list');
+  const [modalStatus, setModalStatus] = useState(null); // Para finalizar proforma
+  const [motivoRechazo, setMotivo] = useState('Presupuesto');
 
   // 1. ESTADOS DE DATOS
   const [vehiculoActivo, setVehiculoActivo] = useState(null);
@@ -45,7 +49,7 @@ export default function CotizadorView({ vehiculos, empresaConfig, logoData }) {
   });
 
   // Datos del socio / cliente
-  const [socio, setSocio] = useState({
+  const INITIAL_SOCIO = {
     cfNumero: 'PRO-' + Math.floor(1000 + Math.random() * 9000),
     cfValidez: 15,
     cfPago: '50% adelanto, 50% al cierre',
@@ -63,8 +67,12 @@ export default function CotizadorView({ vehiculos, empresaConfig, logoData }) {
     sFecha: '',
     sHora: '',
     sOrigen: '',
-    sDestino: ''
-  });
+    sDestino: '',
+    socioId: '',
+    saveAsSocio: false
+  };
+
+  const [socio, setSocio] = useState(INITIAL_SOCIO);
 
   // Itinerario (Franjas del día)
   const [franjasDia, setFranjasDia] = useState([
@@ -84,10 +92,9 @@ export default function CotizadorView({ vehiculos, empresaConfig, logoData }) {
   const fetchInitialData = async () => {
     try {
       const headers = { 'Authorization': `Bearer ${token}` };
-      const [vRes, hRes, cRes] = await Promise.all([
+      const [vRes, hRes] = await Promise.all([
         fetch('/api/tms/vehiculos', { headers }),
-        fetch('/api/tms/proformas', { headers }),
-        fetch('/api/tms/config/global', { headers })
+        fetch('/api/tms/proformas', { headers })
       ]);
       
       const vData = await vRes.json();
@@ -95,10 +102,7 @@ export default function CotizadorView({ vehiculos, empresaConfig, logoData }) {
       if (vData.length > 0) setVehiculoActivo(vData[0].id);
 
       const hData = await hRes.json();
-      setDbHistorial(hData);
-
-      const cData = await cRes.json();
-      if (cData && cData.franjas_base) setFranjasDia(cData.franjas_base);
+      setDbHistorial(hData.sort((a,b) => new Date(b.fecha_emision) - new Date(a.fecha_emision)));
     } catch (err) {
       console.error("Error fetching initial data", err);
     }
@@ -165,56 +169,35 @@ export default function CotizadorView({ vehiculos, empresaConfig, logoData }) {
   };
 
   const sChange = (e) => {
-    const { name, value } = e.target;
-    setSocio(prev => ({ ...prev, [name]: value }));
-  };
-
-  const cChange = (e) => {
-    const { name, value } = e.target;
-    setEmpresaConfig(prev => ({ ...prev, [name]: value }));
-  };
-
-  const franjaChange = (index, field, value) => {
-    const newFranjas = [...franjasDia];
-    newFranjas[index][field] = value;
-    setFranjasDia(newFranjas);
-  };
-
-  const addFranja = () => setFranjasDia([...franjasDia, { hora: '00:00 - 00:00', actividad: '', detalle: '' }]);
-  const removeFranja = (index) => setFranjasDia(franjasDia.filter((_, i) => i !== index));
-
-  const handleLogoUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setLogoData(event.target.result);
-        localStorage.setItem('transop_logo', event.target.result);
-      };
-      reader.readAsDataURL(file);
-    }
+    const { name, value, type, checked } = e.target;
+    setSocio(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
   const generarPDF = async () => {
     const u = dbVehiculos.find(v => v.id === vehiculoActivo);
     
-    // Guardar en la base de datos
     try {
-      await fetch('/api/tms/proformas', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          numero: socio.cfNumero,
-          cliente_nombre: socio.sNombre,
-          cliente_empresa: socio.sEmpresa,
-          total_usd: resData.total,
-          data_json: { params, socio, vehiculoId: vehiculoActivo, franjasDia, empresaConfig }
-        })
-      });
-      fetchInitialData(); 
+        const res = await fetch('/api/tms/proformas', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                numero: socio.cfNumero,
+                cliente_nombre: socio.sNombre,
+                cliente_empresa: socio.sNombre,
+                total_usd: resData.total,
+                socio_id: socio.socioId,
+                save_as_socio: socio.saveAsSocio,
+                data_json: { params, socio, franjasDia, resData, vehiculoId: vehiculoActivo, empresaConfig }
+            })
+        });
+        if (res.ok) {
+            if (socio.saveAsSocio && refreshSocios) refreshSocios();
+            fetchInitialData();
+            alert("Proforma guardada correctamente");
+        }
     } catch (err) { console.error("Error saving proforma", err); }
 
     pdfGen({
@@ -222,14 +205,28 @@ export default function CotizadorView({ vehiculos, empresaConfig, logoData }) {
     });
   };
 
-  const cargarHistorial = (p) => {
+  const cargarHistorial = (p, mode = 'edit') => {
     if (p.data_json) {
       setParams(p.data_json.params);
       setSocio(p.data_json.socio);
       if (p.data_json.franjasDia) setFranjasDia(p.data_json.franjasDia);
       if (p.data_json.vehiculoId) setVehiculoActivo(p.data_json.vehiculoId);
-      setTab('calc');
+      
+      if (mode === 'duplicate') {
+        setSocio(prev => ({ ...prev, cfNumero: 'PRO-' + Math.floor(1000 + Math.random() * 9000) }));
+        setEditorMode('duplicate');
+      } else {
+        setEditorMode('edit');
+      }
+      setView('editor');
     }
+  };
+
+  const nuevoClick = () => {
+    setParams({ ...params, km: 0, diasGAM: 0, diasSM: 0, noches: 0 });
+    setSocio({ ...INITIAL_SOCIO, cfNumero: 'PRO-' + Math.floor(1000 + Math.random() * 9000) });
+    setEditorMode('new');
+    setView('editor');
   };
 
   const borrarProforma = async (id) => {
@@ -256,202 +253,273 @@ export default function CotizadorView({ vehiculos, empresaConfig, logoData }) {
   );
 
   return (
-    <div style={{ display:'flex', gap:24, alignItems:'flex-start' }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
       
-      {/* Columna Principal */}
-      <div style={{ flex:1, display:'flex', flexDirection:'column', gap:20 }}>
-        
-        {/* Navegación del Módulo */}
-        <div style={{ display:'flex', borderBottom:`1px solid ${T.bdr}`, overflowX:'auto' }}>
-          <TabBtn id="calc" label="Cotización" icon={FileText} active={tab==='calc'} onClick={()=>setTab('calc')} />
-          <TabBtn id="socio" label="Datos del cliente" icon={User} active={tab==='socio'} onClick={()=>setTab('socio')} />
-          <TabBtn id="itin" label="Itinerario" icon={Clock} active={tab==='itin'} onClick={()=>setTab('itin')} />
-          <TabBtn id="movil" label="Vista Móvil" icon={Smartphone} active={tab==='movil'} onClick={()=>setTab('movil')} />
-          <TabBtn id="hist" label="Historial" icon={Calculator} active={tab==='hist'} onClick={()=>setTab('hist')} />
-        </div>
-
-        {/* CONTENIDO DE PESTAÑAS */}
-        <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 12, padding: 24, minHeight: 500 }}>
-          
-          {tab === 'calc' && (
+      {view === 'list' ? (
+        <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 12, padding: 24 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
             <div>
-              <h3 style={{ margin:'0 0 16px', color:T.txt, fontSize: 16 }}>Unidad de Transporte</h3>
-              <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:24 }}>
-                {dbVehiculos.map(v => (
-                  <div key={v.id} onClick={() => setVehiculoActivo(v.id)}
-                    style={{
-                      padding:'12px', border:`2px solid ${vehiculoActivo === v.id ? T.AMB : T.bdr}`, borderRadius:10,
-                      cursor:'pointer', background: vehiculoActivo === v.id ? T.ambDim : 'transparent', 
-                      width: 140, textAlign:'center', transition: 'all 0.2s'
-                     }}>
-                    <div style={{ fontSize:24, marginBottom:6 }}>{v.tipo === 'Bus' ? '🚌' : '🚐'}</div>
-                    <div style={{ fontSize:14, fontWeight:700, color:T.txt }}>{v.marca || 'N/A'} {v.modelo || ''}</div>
-                    <div style={{ fontSize:11, color:T.mute, marginTop:2 }}>{v.capacidad_pasajeros} pax · {v.placa}</div>
-                  </div>
-                ))}
-                {dbVehiculos.length === 0 && <div style={{color:T.mute, fontSize:13}}>No hay unidades configuradas en la base de datos.</div>}
-              </div>
-
-              <div style={{ display:'flex', gap:6, marginBottom:20 }}>
-                {[['s1','Base'], ['s2','Fijas'], ['s3','Noches']].map(([id, label]) => (
-                  <button key={id} onClick={() => setSubTab(id)}
-                    style={{
-                      padding:'6px 14px', borderRadius:20, border:`1px solid ${subTab === id ? T.AMB : T.bdr2}`,
-                      background: subTab === id ? T.AMB : 'transparent', color: subTab === id ? '#000' : T.sub,
-                      cursor:'pointer', fontSize:12, fontWeight:600
-                    }}>{label}</button>
-                ))}
-              </div>
-
-              {subTab === 's1' && (
-                <div style={{ display:'grid', gap:16 }}>
-                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:16 }}>
-                    <div className="field"><label>Kilómetros</label><input type="number" name="km" value={params.km} onChange={pChange}/></div>
-                    <div className="field"><label>Costo combustible/km</label><input type="number" name="combustible" step="0.01" value={params.combustible} onChange={pChange}/></div>
-                    <div className="field"><label>T/C ₡/$</label><input type="number" name="tc" value={params.tc} onChange={pChange}/></div>
-                  </div>
-                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:16 }}>
-                    <div className="field"><label>Colaborador ($)</label><input type="number" name="colaborador" value={params.colaborador} onChange={pChange}/></div>
-                    <div className="field"><label>Peajes ($)</label><input type="number" name="peajes" value={params.peajes} onChange={pChange}/></div>
-                    <div className="field"><label>Utilidad ($)</label><input type="number" name="utilidad" value={params.utilidad} onChange={pChange}/></div>
-                  </div>
-                  <div className="chk-row">
-                    <input type="checkbox" name="chkDia" checked={params.chkDia} onChange={pChange}/>
-                    <label>Incluir adicionales viaje de un día (${(params.adic_col || 15) + (params.adic_viat || 15)})</label>
-                  </div>
-                </div>
-              )}
-
-              {subTab === 's2' && (
-                <div style={{ display:'grid', gap:20 }}>
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-                    <div className="field"><label>Tarifa GAM ($)</label><input type="number" name="tarifa_gam" value={params.tarifa_gam || 150} onChange={pChange}/></div>
-                    <div className="field"><label>Días GAM</label><input type="number" name="diasGAM" value={params.diasGAM} onChange={pChange}/></div>
-                  </div>
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10 }}>
-                    <div className="chk-row"><input type="checkbox" name="ckThinSJ" checked={params.ckTinSJ} onChange={pChange}/><label>T. In SJ</label></div>
-                    <div className="chk-row"><input type="checkbox" name="ckToutSJ" checked={params.ckToutSJ} onChange={pChange}/><label>T. Out SJ</label></div>
-                    <div className="chk-row"><input type="checkbox" name="ckTinCTG" checked={params.ckTinCTG} onChange={pChange}/><label>T. In CTG</label></div>
-                    <div className="chk-row"><input type="checkbox" name="ckToutCTG" checked={params.ckToutCTG} onChange={pChange}/><label>T. Out CTG</label></div>
-                  </div>
-                </div>
-              )}
-
-              {subTab === 's3' && (
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:16 }}>
-                  <div className="field"><label>Hospedaje/noche ($)</label><input type="number" name="hospedaje" value={params.hospedaje || 40} onChange={pChange}/></div>
-                  <div className="field"><label>Noches</label><input type="number" name="noches" value={params.noches} onChange={pChange}/></div>
-                  <div className="field"><label>Viático diario/pax ($)</label><input type="number" name="viatDiario" value={params.viatDiario} onChange={pChange}/></div>
-                  <div className="field"><label>Personas</label><input type="number" name="persViat" value={params.persViat} onChange={pChange}/></div>
-                </div>
-              )}
+              <h2 style={{ margin:0, fontSize:22, fontWeight:700, color:T.txt }}>Gestión de Proformas</h2>
+              <p style={{ margin:'4px 0 0', color:T.mute, fontSize:13 }}>Historial de cotizaciones emitidas (orden descendente)</p>
             </div>
-          )}
-
-          {tab === 'socio' && (
-            <div style={{ display:'grid', gap:20 }}>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-                <div className="field"><label>Proforma No.</label><input type="text" name="cfNumero" value={socio.cfNumero} onChange={sChange}/></div>
-                <div className="field"><label>Válida (días)</label><input type="number" name="cfValidez" value={socio.cfValidez} onChange={sChange}/></div>
-              </div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-                <div className="field"><label>Nombre Cliente / Empresa</label><input type="text" name="sNombre" value={socio.sNombre} placeholder="Ej: John Doe" onChange={sChange}/></div>
-                <div className="field"><label>Identificación</label><input type="text" name="sCedula" value={socio.sCedula} onChange={sChange}/></div>
-              </div>
-              <div className="field"><label>Descripción del servicio</label><textarea name="cfDescripcion" rows={3} value={socio.cfDescripcion} placeholder="Ej: Tour a Volcán Poás para 10 personas" onChange={sChange}/></div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
-                <div className="field"><label>Fecha</label><input type="date" name="sFecha" value={socio.sFecha} onChange={sChange}/></div>
-                <div className="field"><label>Hora recogida</label><input type="time" name="sHora" value={socio.sHora} onChange={sChange}/></div>
-                <div className="field"><label>No. Pax</label><input type="number" name="sPax" value={socio.sPax} onChange={sChange}/></div>
-              </div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-                <div className="field"><label>Origen</label><input type="text" name="sOrigen" value={socio.sOrigen} onChange={sChange}/></div>
-                <div className="field"><label>Destino</label><input type="text" name="sDestino" value={socio.sDestino} onChange={sChange}/></div>
-              </div>
-            </div>
-          )}
-
-          {tab === 'movil' && <VistaMovil params={params} socio={socio} resData={resData} vehiculo={dbVehiculos.find(v=>v.id===vehiculoActivo)} franjasDia={franjasDia} empresaConfig={empresaConfig} logoData={logoData} />}
-
-          {tab === 'hist' && (
-            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-              {dbHistorial.map(p => (
-                <div key={p.id} style={{ padding:14, background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:10, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <div>
-                    <div style={{fontWeight:700, color:T.txt}}>{p.numero}</div>
-                    <div style={{fontSize:12, color:T.mute}}>{p.cliente_nombre || 'S/N'} · {new Date(p.fecha_emision).toLocaleDateString()}</div>
-                  </div>
-                  <div style={{display:'flex', gap:10, alignItems:'center'}}>
-                    <div style={{fontWeight:700, color:T.AMB}}>${Number(p.total_usd).toFixed(2)}</div>
-                    <button onClick={() => cargarHistorial(p)} style={{padding:'6px 12px', background:T.ambDim, color:T.AMB, border:'none', borderRadius:6, cursor:'pointer', fontSize:12, fontWeight:600}}>Cargar</button>
-                    <button onClick={() => borrarProforma(p.id)} style={{color:T.RED, background:'transparent', border:'none', cursor:'pointer'}}><Trash2 size={16}/></button>
-                  </div>
-                </div>
-              ))}
-              {dbHistorial.length === 0 && <div style={{textAlign:'center', color:T.mute, padding:20}}>No hay proformas guardadas.</div>}
-            </div>
-          )}
-
-          {tab === 'itin' && (
-            <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-                <h3 style={{ margin:0, color:T.txt, fontSize: 16 }}>Cronograma del Servicio</h3>
-                <button onClick={addFranja} style={{ padding:'8px 16px', background:T.ambDim, color:T.AMB, border:`1px dashed ${T.AMB}44`, borderRadius:8, fontSize:12, fontWeight:600, cursor:'pointer' }}>+ Añadir actividad</button>
-              </div>
-              <p style={{ fontSize:12, color:T.mute, marginBottom:10 }}>Configure el itinerario propuesto para esta cotización específica.</p>
-              
-              <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-                {franjasDia.map((f, i) => (
-                  <div key={i} style={{ display:'grid', gridTemplateColumns:'150px 1fr 1fr auto', gap:12, alignItems:'flex-start', background:T.card2, padding:12, borderRadius:10, border:`1px solid ${T.bdr}` }}>
-                    <div className="field" style={{margin:0}}><label style={{fontSize:10}}>Horario</label><input type="text" value={f.hora} onChange={(e)=>franjaChange(i, 'hora', e.target.value)} style={{fontSize:12, padding:6}}/></div>
-                    <div className="field" style={{margin:0}}><label style={{fontSize:10}}>Actividad</label><input type="text" value={f.actividad} onChange={(e)=>franjaChange(i, 'actividad', e.target.value)} style={{fontSize:12, padding:6}}/></div>
-                    <div className="field" style={{margin:0}}><label style={{fontSize:10}}>Detalle</label><input type="text" value={f.detalle} onChange={(e)=>franjaChange(i, 'detalle', e.target.value)} style={{fontSize:12, padding:6}}/></div>
-                    <button onClick={()=>removeFranja(i)} style={{ color:T.RED, background:'transparent', border:'none', cursor:'pointer', marginTop:20 }}><Trash2 size={16}/></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-        </div>
-      </div>
-
-      {/* Columna Derecha Resultante */}
-      <div style={{ width: 340, display:'flex', flexDirection:'column', gap:16, position:'sticky', top: 20 }}>
-        <div style={{ background: T.card, border: `1px solid ${T.AMB}44`, borderRadius: 14, padding: 24, boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
-          <h3 style={{ margin:'0 0 20px', color:T.txt, fontSize:16, fontWeight:700 }}>Resumen Ejecutivo</h3>
-          <div style={{ display:'flex', flexDirection:'column', gap:12, fontSize:14 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', color:T.sub }}><span>Base Operativa</span><span>${resData.base?.toFixed(2)}</span></div>
-            <div style={{ display:'flex', justifyContent:'space-between', color:T.sub }}><span>Tarifas / Transfers</span><span>${resData.tarFijas?.toFixed(2)}</span></div>
-            <div style={{ display:'flex', justifyContent:'space-between', color:T.sub }}><span>Hospedaje / Viáticos</span><span>${resData.extras?.toFixed(2)}</span></div>
-            <div style={{ height:1, background:T.bdr2, margin:'6px 0' }}></div>
-            <div style={{ display:'flex', justifyContent:'space-between', fontWeight:600 }}><span>Subtotal</span><span>${resData.subtotal?.toFixed(2)}</span></div>
-            <div style={{ display:'flex', justifyContent:'space-between', color:T.mute }}><span>IVA ({params.iva}%)</span><span>${resData.ivaAmt?.toFixed(2)}</span></div>
-            <div style={{ display:'flex', justifyContent:'space-between', color:T.AMB, fontSize:20, fontWeight:800, marginTop:8 }}>
-              <span>TOTAL USD</span><span>${resData.total?.toFixed(2)}</span>
-            </div>
-            <div style={{ fontSize:12, color:T.mute, textAlign:'right' }}>₡{Math.round(resData.totalCRC || 0).toLocaleString()} (TC {params.tc})</div>
+            <button onClick={nuevoClick} style={{ display:'flex', alignItems:'center', gap:8, padding:'12px 20px', background:T.AMB, color:'#000', border:'none', borderRadius:10, fontWeight:700, cursor:'pointer', fontSize:14 }}>
+              <Plus size={18} /> Nueva Cotización
+            </button>
           </div>
-          <button onClick={generarPDF} style={{
-            width:'100%', padding:'14px', background:T.AMB, color:'#000', border:'none', borderRadius:10, fontWeight:700, marginTop:24, cursor:'pointer', fontSize:14, boxShadow:`0 4px 15px ${T.ambDim}`
-          }}>
-            GENERAR PROFORMA PDF
-          </button>
+
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom:`1px solid ${T.bdr2}`, textAlign:'left' }}>
+                  {['No. Proforma', 'Cliente', 'Destino', 'Monto (USD)', 'Estado', 'Acciones'].map(h => (
+                    <th key={h} style={{ padding:'12px 8px', fontSize:11, fontWeight:600, color:T.mute, letterSpacing:1, textTransform:'uppercase' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {dbHistorial.map(p => (
+                  <tr key={p.id} style={{ borderBottom:`1px solid ${T.bdr}`, transition:'background .2s' }}>
+                    <td style={{ padding:'16px 8px' }}>
+                      <div style={{ fontWeight:700, color:T.txt }}>{p.numero}</div>
+                      <div style={{ fontSize:10, color:T.mute }}>{new Date(p.fecha_emision).toLocaleDateString()}</div>
+                    </td>
+                    <td style={{ padding:'16px 8px', fontSize:13, color:T.sub }}>{p.cliente_nombre || '---'}</td>
+                    <td style={{ padding:'16px 8px', fontSize:13, color:T.sub }}>{p.data_json?.socio?.sDestino || '---'}</td>
+                    <td style={{ padding:'16px 8px', fontWeight:700, color:T.AMB }}>${Number(p.total_usd).toFixed(2)}</td>
+                    <td style={{ padding:'16px 8px' }}><StatusBadge status={p.estado} /></td>
+                    <td style={{ padding:'16px 8px' }}>
+                      <div style={{ display:'flex', gap:8 }}>
+                        <button onClick={() => cargarHistorial(p, 'edit')} title="Editar / Ver" style={{ p:6, background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:6, color:T.sub, cursor:'pointer' }}><FileText size={14}/></button>
+                        <button onClick={() => cargarHistorial(p, 'duplicate')} title="Duplicar" style={{ p:6, background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:6, color:T.sub, cursor:'pointer' }}><ImageIcon size={14}/></button>
+                        {p.estado === 'pendiente' && (
+                          <button onClick={() => setModalStatus(p)} title="Finalizar" style={{ p:6, background:T.grnDim, border:`1px solid ${T.GRN}33`, borderRadius:6, color:T.GRN, cursor:'pointer' }}><CheckCircle size={14}/></button>
+                        )}
+                        <button onClick={() => borrarProforma(p.id)} title="Borrar" style={{ p:6, background:T.redDim, border:`1px solid ${T.RED}33`, borderRadius:6, color:T.RED, cursor:'pointer' }}><Trash2 size={14}/></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {dbHistorial.length === 0 && (
+                  <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:T.mute, fontSize:14 }}>No se encontraron proformas guardadas.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-        
-        {/* Atajos / Info */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-           <div style={{ background: T.card2, padding: 12, borderRadius: 10, border: `1px solid ${T.bdr}` }}>
-              <div style={{ fontSize:10, color:T.mute, textTransform:'uppercase' }}>Km Ruta</div>
-              <div style={{ fontSize:18, fontWeight:700, color:T.txt }}>{params.km} <span style={{fontSize:10, color:T.mute}}>km</span></div>
+      ) : (
+        /* POP-OVER / EDITOR MODAL MOCKED AS A FULL PAGE VIEW FOR NOW */
+        <div style={{ position:'fixed', inset:0, background:T.card, zIndex:100, overflowY:'auto', display:'flex', flexDirection:'column' }}>
+           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'16px 28px', borderBottom:`1px solid ${T.bdr}`, background:T.card2 }}>
+              <div>
+                <span style={{ fontSize:10, color:T.mute, fontWeight:700 }}>{editorMode.toUpperCase()}</span>
+                <h2 style={{ margin:0, fontSize:18, color:T.txt }}>Cotización {socio.cfNumero}</h2>
+              </div>
+              <button onClick={()=>setView('list')} style={{ padding:'8px 16px', borderRadius:8, border:`1px solid ${T.bdr}`, background:T.card3, color:T.sub, cursor:'pointer' }}>Cerrar Editor</button>
            </div>
-           <div style={{ background: T.card2, padding: 12, borderRadius: 10, border: `1px solid ${T.bdr}` }}>
-              <div style={{ fontSize:10, color:T.mute, textTransform:'uppercase' }}>Pasajeros</div>
-              <div style={{ fontSize:18, fontWeight:700, color:T.txt }}>{socio.sPax} <span style={{fontSize:10, color:T.mute}}>pax</span></div>
+           
+           <div style={{ padding:28, display:'flex', gap:28 }}>
+              {/* Columna Editor */}
+              <div style={{ flex:1, display:'flex', flexDirection:'column', gap:20 }}>
+                 <div style={{ display:'flex', borderBottom:`1px solid ${T.bdr}`, overflowX:'auto' }}>
+                    <TabBtn id="calc" label="Cálculo" icon={FileText} active={tab==='calc'} onClick={()=>setTab('calc')} />
+                    <TabBtn id="socio" label="Cliente" icon={User} active={tab==='socio'} onClick={()=>setTab('socio')} />
+                    <TabBtn id="itin" label="Itinerario" icon={Clock} active={tab==='itin'} onClick={()=>setTab('itin')} />
+                    <TabBtn id="movil" label="Móvil" icon={Smartphone} active={tab==='movil'} onClick={()=>setTab('movil')} />
+                 </div>
+                 
+                 <div style={{ minHeight:500 }}>
+                   {tab === 'calc' && (
+                     /* Existing Calc UI Content */
+                     <div>
+                       <h3 style={{ margin:'0 0 16px', color:T.txt, fontSize: 16 }}>Unidad de Transporte</h3>
+                       <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:24 }}>
+                         {dbVehiculos.map(v => (
+                           <div key={v.id} onClick={() => setVehiculoActivo(v.id)}
+                             style={{
+                               padding:'12px', border:`2px solid ${vehiculoActivo === v.id ? T.AMB : T.bdr}`, borderRadius:10,
+                               cursor:'pointer', background: vehiculoActivo === v.id ? T.ambDim : 'transparent', 
+                               width: 140, textAlign:'center', transition: 'all 0.2s'
+                              }}>
+                             <div style={{ fontSize:24, marginBottom:6 }}>{v.tipo === 'Bus' ? '🚌' : '🚐'}</div>
+                             <div style={{ fontSize:14, fontWeight:700, color:T.txt }}>{v.marca || 'N/A'} {v.modelo || ''}</div>
+                             <div style={{ fontSize:11, color:T.mute, marginTop:2 }}>{v.capacidad_pasajeros} pax · {v.placa}</div>
+                           </div>
+                         ))}
+                       </div>
+                       <div style={{ display:'flex', gap:6, marginBottom:20 }}>
+                         {[['s1','Base'], ['s2','Fijas'], ['s3','Noches']].map(([id, label]) => (
+                           <button key={id} onClick={() => setSubTab(id)}
+                             style={{
+                               padding:'6px 14px', borderRadius:20, border:`1px solid ${subTab === id ? T.AMB : T.bdr2}`,
+                               background: subTab === id ? T.AMB : 'transparent', color: subTab === id ? '#000' : T.sub,
+                               cursor:'pointer', fontSize:12, fontWeight:600
+                             }}>{label}</button>
+                         ))}
+                       </div>
+                       {subTab === 's1' && (
+                         <div style={{ display:'grid', gap:16 }}>
+                           <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:16 }}>
+                             <div className="field"><label>Kilómetros</label><input type="number" name="km" value={params.km} onChange={pChange}/></div>
+                             <div className="field"><label>Costo combustible/km</label><input type="number" name="combustible" step="0.01" value={params.combustible} onChange={pChange}/></div>
+                             <div className="field"><label>Tipo de cambio ₡/$</label><input type="number" name="tc" value={params.tc} onChange={pChange}/></div>
+                           </div>
+                           <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:16 }}>
+                             <div className="field"><label>Colaborador ($)</label><input type="number" name="colaborador" value={params.colaborador} onChange={pChange}/></div>
+                             <div className="field"><label>Peajes ($)</label><input type="number" name="peajes" value={params.peajes} onChange={pChange}/></div>
+                             <div className="field"><label>Utilidad ($)</label><input type="number" name="utilidad" value={params.utilidad} onChange={pChange}/></div>
+                           </div>
+                         </div>
+                       )}
+                       {subTab === 's2' && (
+                         <div style={{ display:'grid', gap:20 }}>
+                           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+                             <div className="field"><label>Tarifa GAM ($)</label><input type="number" name="tarifa_gam" value={params.tarifa_gam || 150} onChange={pChange}/></div>
+                             <div className="field"><label>Días GAM</label><input type="number" name="diasGAM" value={params.diasGAM} onChange={pChange}/></div>
+                           </div>
+                           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10 }}>
+                             <div className="chk-row"><input type="checkbox" name="ckTinSJ" checked={params.ckTinSJ} onChange={pChange}/><label>T. In SJ</label></div>
+                             <div className="chk-row"><input type="checkbox" name="ckToutSJ" checked={params.ckToutSJ} onChange={pChange}/><label>T. Out SJ</label></div>
+                             <div className="chk-row"><input type="checkbox" name="ckTinCTG" checked={params.ckTinCTG} onChange={pChange}/><label>T. In CTG</label></div>
+                             <div className="chk-row"><input type="checkbox" name="ckToutCTG" checked={params.ckToutCTG} onChange={pChange}/><label>T. Out CTG</label></div>
+                           </div>
+                         </div>
+                       )}
+                       {subTab === 's3' && (
+                         <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:16 }}>
+                           <div className="field"><label>Hospedaje/noche ($)</label><input type="number" name="hospedaje" value={params.hospedaje || 40} onChange={pChange}/></div>
+                           <div className="field"><label>Noches</label><input type="number" name="noches" value={params.noches} onChange={pChange}/></div>
+                           <div className="field"><label>Viático diario/pax ($)</label><input type="number" name="viatDiario" value={params.viatDiario} onChange={pChange}/></div>
+                           <div className="field"><label>Personas</label><input type="number" name="persViat" value={params.persViat} onChange={pChange}/></div>
+                         </div>
+                       )}
+                     </div>
+                   )}
+                   
+                   {tab === 'socio' && (
+                      <div style={{ display:'grid', gap:20 }}>
+                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+                           <div className="field"><label>Proforma No.</label><input type="text" name="cfNumero" value={socio.cfNumero} onChange={sChange}/></div>
+                           <div className="field"><label>Válida (días)</label><input type="number" name="cfValidez" value={socio.cfValidez} onChange={sChange}/></div>
+                         </div>
+                         <div className="field">
+                           <label style={{fontSize:10, color:T.mute}}>Buscar / Seleccionar Socio Guardado</label>
+                           <select 
+                             style={{width:'100%', padding:'12px', background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:10, color:T.txt, fontSize:14}}
+                             value={socio.socioId}
+                             onChange={(e) => {
+                               const s = socios.find(x => x.id === e.target.value);
+                               if (s) setSocio(prev => ({ ...prev, socioId: s.id, sNombre: s.nombre, sCedula: s.cedula || '' }));
+                               else setSocio(prev => ({ ...prev, socioId: '', sNombre: '', sCedula: '' }));
+                             }}
+                           >
+                             <option value="">-- Nuevo Cliente (No guardado) --</option>
+                             {socios.map(s => <option key={s.id} value={s.id}>{s.nombre} ({s.cedula || ''})</option>)}
+                           </select>
+                         </div>
+                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+                           <div className="field"><label>Nombre Cliente / Empresa</label><input type="text" name="sNombre" value={socio.sNombre} placeholder="Ej: John Doe" onChange={sChange}/></div>
+                           <div className="field"><label>Identificación</label><input type="text" name="sCedula" value={socio.sCedula} onChange={sChange}/></div>
+                         </div>
+                         <div className="field"><label>Descripción del servicio</label><textarea name="cfDescripcion" rows={3} value={socio.cfDescripcion} placeholder="Ej: Tour a Volcán Poás para 10 personas" onChange={sChange}/></div>
+                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 }}>
+                           <div className="field"><label>Fecha</label><input type="date" name="sFecha" value={socio.sFecha} onChange={sChange}/></div>
+                           <div className="field"><label>Hora recogida</label><input type="time" name="sHora" value={socio.sHora} onChange={sChange}/></div>
+                           <div className="field"><label>No. Pax</label><input type="number" name="sPax" value={socio.sPax} onChange={sChange}/></div>
+                         </div>
+                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+                           <div className="field"><label>Origen</label><input type="text" name="sOrigen" value={socio.sOrigen} onChange={sChange}/></div>
+                           <div className="field"><label>Destino</label><input type="text" name="sDestino" value={socio.sDestino} onChange={sChange}/></div>
+                         </div>
+                      </div>
+                   )}
+                   
+                   {tab === 'itin' && (
+                      <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                           <h3 style={{ margin:0, color:T.txt, fontSize: 16 }}>Cronograma del Servicio</h3>
+                           <button onClick={() => setFranjasDia([...franjasDia, { hora:'', actividad:'', detalle:'' }])} style={{ padding:'8px 16px', background:T.ambDim, color:T.AMB, border:`1px dashed ${T.AMB}44`, borderRadius:8, fontSize:12, fontWeight:600, cursor:'pointer' }}>+ Actividad</button>
+                         </div>
+                         {franjasDia.map((f, i) => (
+                           <div key={i} style={{ display:'grid', gridTemplateColumns:'150px 1fr 1fr auto', gap:12, alignItems:'flex-start', background:T.card2, padding:12, borderRadius:10, border:`1px solid ${T.bdr}` }}>
+                             <input type="text" value={f.hora} onChange={(e)=>{ const n=[...franjasDia]; n[i].hora=e.target.value; setFranjasDia(n); }} placeholder="Hora" style={{fontSize:12, padding:6}}/>
+                             <input type="text" value={f.actividad} onChange={(e)=>{ const n=[...franjasDia]; n[i].actividad=e.target.value; setFranjasDia(n); }} placeholder="Actividad" style={{fontSize:12, padding:6}}/>
+                             <input type="text" value={f.detalle} onChange={(e)=>{ const n=[...franjasDia]; n[i].detalle=e.target.value; setFranjasDia(n); }} placeholder="Detalle" style={{fontSize:12, padding:6}}/>
+                             <button onClick={() => setFranjasDia(franjasDia.filter((_, idx)=>idx!==i))} style={{ color:T.RED, background:'transparent', border:'none', cursor:'pointer' }}><Trash2 size={16}/></button>
+                           </div>
+                         ))}
+                      </div>
+                   )}
+                   
+                   {tab === 'movil' && <VistaMovil params={params} socio={socio} resData={resData} vehiculo={dbVehiculos.find(v=>v.id===vehiculoActivo)} franjasDia={franjasDia} empresaConfig={empresaConfig} logoData={logoData} />}
+                 </div>
+              </div>
+
+              {/* Sidebar de Totales en el Modal */}
+              <div style={{ width: 340, display:'flex', flexDirection:'column', gap:16 }}>
+                 <div style={{ background: T.card2, border: `1px solid ${T.AMB}44`, borderRadius: 14, padding: 24 }}>
+                   <h3 style={{ margin:'0 0 20px', color:T.txt, fontSize:16, fontWeight:700 }}>Resumen Ejecutivo</h3>
+                   <div style={{ display:'flex', flexDirection:'column', gap:12, fontSize:14 }}>
+                     <div style={{ display:'flex', justifyContent:'space-between', color:T.sub }}><span>Base</span><span>${resData.base?.toFixed(2)}</span></div>
+                     <div style={{ display:'flex', justifyContent:'space-between', color:T.sub }}><span>Tarifas</span><span>${resData.tarFijas?.toFixed(2)}</span></div>
+                     <div style={{ display:'flex', justifyContent:'space-between', color:T.sub }}><span>Extras</span><span>${resData.extras?.toFixed(2)}</span></div>
+                     <div style={{ height:1, background:T.bdr2, margin:'6px 0' }}></div>
+                     <div style={{ display:'flex', justifyContent:'space-between', color:T.AMB, fontSize:20, fontWeight:800 }}>
+                       <span>TOTAL USD</span><span>${resData.total?.toFixed(2)}</span>
+                     </div>
+                     <div style={{ fontSize:12, color:T.mute, textAlign:'right' }}>₡{Math.round(resData.totalCRC || 0).toLocaleString()}</div>
+                   </div>
+                   <button onClick={generarPDF} style={{ width:'100%', padding:'14px', background:T.AMB, color:'#000', border:'none', borderRadius:10, fontWeight:700, marginTop:24, cursor:'pointer', fontSize:14 }}>
+                     GUARDAR Y GENERAR PDF
+                   </button>
+                 </div>
+              </div>
            </div>
         </div>
-      </div>
-      
+      )}
+
+      {/* Modal Status (Aprobar/Rechazar) */}
+      {modalStatus && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
+          <div style={{ background:T.card, borderRadius:16, width:'100%', maxWidth:400, padding:28 }}>
+            <h3 style={{ margin:0, color:T.txt, marginBottom:20 }}>Finalizar Proforma {modalStatus.numero}</h3>
+            <div style={{ display:'grid', gap:12 }}>
+               <button onClick={() => patchStatus(modalStatus.id, 'aprobada')} style={{ padding:14, borderRadius:10, background:T.GRN, color:'#000', border:'none', fontWeight:700, cursor:'pointer' }}>✅ APROBADA</button>
+               <div style={{ height:1, background:T.bdr2, margin:'10px 0' }}></div>
+               <select value={motivoRechazo} onChange={e => setMotivo(e.target.value)} style={{ padding:10, background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:8, color:T.txt }}>
+                  <option>Presupuesto</option>
+                  <option>Tiempo / Disponibilidad</option>
+                  <option>Competencia</option>
+                  <option>Cancelación Cliente</option>
+                  <option>Otro</option>
+               </select>
+               <button onClick={() => patchStatus(modalStatus.id, 'rechazada', motivoRechazo)} style={{ padding:14, borderRadius:10, background:T.RED, color:'#fff', border:'none', fontWeight:700, cursor:'pointer' }}>❌ RECHAZADA</button>
+            </div>
+            <button onClick={() => setModalStatus(null)} style={{ width:'100%', marginTop:20, padding:10, background:'transparent', border:'none', color:T.mute, cursor:'pointer', fontSize:13 }}>Cerrar</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+function StatusBadge({ status }) {
+  const cfg = {
+    pendiente: { color: T.ORG, bg: T.orgDim, icon: Clock },
+    aprobada:  { color: T.GRN, bg: T.grnDim, icon: FileText },
+    rechazada: { color: T.RED, bg: T.redDim, icon: X }
+  }[status] || { color: T.sub, bg: T.card2, icon: Clock };
+  const Icon = cfg.icon;
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 10px', borderRadius:12, background:cfg.bg, color:cfg.color, fontSize:10, fontWeight:700 }}>
+      <Icon size={12} /> {status.toUpperCase()}
+    </div>
+  );
+}
+
+const CheckCircle = ({size, color}) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+);
+
+const Calculator = FileText;
+const XCircle = X;
+const HelpCircle = FileText;

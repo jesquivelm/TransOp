@@ -280,7 +280,7 @@ function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, onClo
 // ─────────────────────────────────────────────────────────────
 // VISTA: DASHBOARD
 // ─────────────────────────────────────────────────────────────
-function Dashboard({ tareas, conductores, vehiculos, eventos, onAsignar }) {
+function Dashboard({ tareas, conductores, vehiculos, eventos, kpis, onAsignar, setView }) {
   const total     = tareas.length;
   const enRuta    = tareas.filter(t => t.estado === 'en_ruta').length;
   const complet   = tareas.filter(t => t.estado === 'completada').length;
@@ -299,7 +299,7 @@ function Dashboard({ tareas, conductores, vehiculos, eventos, onAsignar }) {
         <StatCard label="Tareas hoy"     value={total}    sub={`${complet} completadas`}    icon={CheckSquare} color={T.txt} />
         <StatCard label="En ruta ahora"  value={enRuta}   sub="vehículos activos"           icon={Zap}         color={T.BLU} />
         <StatCard label="Pendientes"     value={pendient} sub={`${sinAsig} sin conductor`}  icon={Clock}       color={sinAsig > 0 ? T.AMB : T.GRN} />
-        <StatCard label="Conductores disponibles" value={dispCond} sub={`${dispVeh} vehículos libres`} icon={Users} color={T.GRN} />
+        <StatCard label="Proformas por concretar" value={kpis?.proformas_pendientes || 0} sub="requieren seguimiento" icon={Calculator} color={T.ORG} action="Ver todas" onAction={() => setView('cotizaciones')} />
       </div>
 
       {/* Tareas del día */}
@@ -716,6 +716,7 @@ function Sidebar({ active, setView, user, onLogout }) {
     { id:'tareas',      Icon:CheckSquare,     label:'Tareas del día' },
     { id:'conductores', Icon:Users,           label:'Conductores'    },
     { id:'vehiculos',   Icon:Bus,             label:'Vehículos'      },
+    { id:'socios',      Icon:Users,           label:'Socios / Clientes'},
     { id:'gastos',      Icon:Receipt,         label:'Gastos'         },
     { id:'reportes',    Icon:BarChart3,       label:'Reportes'       },
     { id:'usuarios',    Icon:Shield,          label:'Seguridad'      },
@@ -822,6 +823,7 @@ function AppContent() {
   const [conductores, setConductores] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
   const [eventos, setEventos] = useState([]);
+  const [socios,    setSocios]   = useState([]);
   const [kpis, setKpis] = useState(null);
   const [modalTarea, setModal]   = useState(null);
   const [theme,      setTheme]   = useState('dark');
@@ -847,13 +849,15 @@ function AppContent() {
     setLoading(true);
     try {
       const headers = { 'Authorization': `Bearer ${token}` };
-      const [resT, resC, resV, resE, resK, resG] = await Promise.all([
+      const [resT, resC, resV, resE, resK, resG, resS, resP] = await Promise.all([
         fetch('/api/tms/tareas', { headers }),
         fetch('/api/tms/conductores', { headers }),
         fetch('/api/tms/vehiculos', { headers }),
         fetch('/api/tms/eventos', { headers }),
         fetch('/api/tms/dashboard/kpis', { headers }),
-        fetch('/api/tms/config/global', { headers })
+        fetch('/api/tms/config/global', { headers }),
+        fetch('/api/tms/socios', { headers }),
+        fetch('/api/tms/proformas', { headers })
       ]);
 
       if (resT.ok) setTareas(await resT.json());
@@ -861,6 +865,12 @@ function AppContent() {
       if (resV.ok) setVehiculos(await resV.json());
       if (resE.ok) setEventos(await resE.json());
       if (resK.ok) setKpis(await resK.json());
+      if (resS.ok) setSocios(await resS.json());
+      if (resP.ok) {
+        const pList = await resP.json();
+        const pending = pList.filter(p => p.estado === 'pendiente').length;
+        setKpis(prev => ({ ...prev, proformas_pendientes: pending }));
+      }
       if (resG.ok) {
         const gData = await resG.json();
         if (gData && gData.empresa) setEmpresaConfig(prev => ({ ...prev, ...gData.empresa }));
@@ -957,12 +967,13 @@ function AppContent() {
 
         {/* Content */}
         <div style={{ flex:1, padding:28, overflowY:'auto' }}>
-          {view === 'dashboard'   && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} />}
-          {view === 'cotizaciones'&& <CotizadorView vehiculos={vehiculos} onSave={()=>{}} empresaConfig={empresaConfig} logoData={logoData} />}
+          {view === 'dashboard'   && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} kpis={kpis} onAsignar={handleAsignar} setView={setView} />}
+          {view === 'cotizaciones'&& <CotizadorView vehiculos={vehiculos} socios={socios} refreshSocios={fetchData} empresaConfig={empresaConfig} logoData={logoData} />}
           {view === 'eventos'     && <EventosView eventos={eventos} />}
           {view === 'tareas'      && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} />}
           {view === 'conductores' && <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} />}
           {view === 'vehiculos'   && <VehiculosView vehiculos={vehiculos} conductores={conductores} />}
+          {view === 'socios'      && <SociosView socios={socios} refresh={fetchData} />}
           {view === 'usuarios'    && <UsuarioMgmtView />}
           {view === 'config'      && <ConfiguracionesView empresaConfig={empresaConfig} setEmpresaConfig={setEmpresaConfig} logoData={logoData} setLogoData={setLogoData} />}
           {view === 'gastos'      && <PlaceholderView titulo="Módulo de Gastos" icono={Receipt}   />}
