@@ -988,7 +988,7 @@ function AppContent() {
           conductores={conductores}
           vehiculos={vehiculos}
           tareas={tareas}
-          eventos={EVENTOS}
+          eventos={eventos}
           onClose={() => setModal(null)}
           onConfirm={handleConfirm}
         />
