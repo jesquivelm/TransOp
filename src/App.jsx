@@ -3,7 +3,7 @@ import {
   LayoutDashboard, CalendarDays, CheckSquare, Users, Bus, Receipt,
   BarChart3, AlertTriangle, CheckCircle, XCircle, Clock, MapPin,
   Phone, Plus, Search, ChevronRight, Shield, Wrench, X, User,
-  MessageSquare, Zap, Eye, RefreshCcw, ChevronDown, Moon, Sun, Calculator
+  MessageSquare, Zap, Eye, RefreshCcw, ChevronDown, Moon, Sun, Calculator, Settings
 } from "lucide-react";
 
 import CotizadorView from './components/Cotizador/CotizadorView';
