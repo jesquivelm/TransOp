@@ -1,4 +1,10 @@
-import { useState, useMemo } from "react";
+} from "react";
+
+// Las constantes de inicialización se mantienen vacías ya que los datos se cargarán del servidor
+const CONDUCTORES_INIT = [];
+const VEHICULOS_INIT = [];
+const EVENTOS_INIT = [];
+const TAREAS_INIT = [];
 import {
   LayoutDashboard, CalendarDays, CheckSquare, Users, Bus, Receipt,
   BarChart3, AlertTriangle, CheckCircle, XCircle, Clock, MapPin,
@@ -36,41 +42,11 @@ export const T = {
 // ─────────────────────────────────────────────────────────────
 // DATOS DE MUESTRA
 // ─────────────────────────────────────────────────────────────
-const CONDUCTORES_INIT = [
-  { id:'c1', nombre:'Carlos Mora Jiménez',    cedula:'1-1234-5678', tel:'8888-1111', alias:'Carlitos', estado:'en_servicio', lic:['B','C'],    vehId:'v1' },
-  { id:'c2', nombre:'Luis Arias Rojas',        cedula:'2-0987-6543', tel:'8777-2222', alias:'Lucho',    estado:'disponible',  lic:['B','C','D'], vehId:null },
-  { id:'c3', nombre:'Andrés Campos Vega',      cedula:'3-5678-9012', tel:'8666-3333', alias:'Andy',     estado:'en_servicio', lic:['B','C'],    vehId:'v3' },
-  { id:'c4', nombre:'Miguel Vargas Brenes',    cedula:'4-4321-8765', tel:'8555-4444', alias:'Migue',    estado:'vacaciones',  lic:['B'],         vehId:null },
-  { id:'c5', nombre:'Roberto Solano Quesada',  cedula:'5-2345-6789', tel:'8444-5555', alias:'Beto',     estado:'en_servicio', lic:['B','C','D'], vehId:'v2' },
-  { id:'c6', nombre:'Esteban Mora Castro',     cedula:'1-9876-5432', tel:'8333-6666', alias:'Esteban',  estado:'enfermo',     lic:['B','C'],    vehId:null },
-  { id:'c7', nombre:'Diego Fallas Torres',     cedula:'2-1111-2222', tel:'8222-7777', alias:'Diego',    estado:'disponible',  lic:['B','C','D'], vehId:null },
-];
-
-const VEHICULOS_INIT = [
-  { id:'v1', placa:'SJB-1234', marca:'Mercedes-Benz', modelo:'Sprinter 519',    tipo:'Buseta', cap:20, estado:'en_servicio',   condId:'c1', revTec:'2026-08-15', march:'2026-12-31', km:145230 },
-  { id:'v2', placa:'SJC-5678', marca:'Hyundai',       modelo:'County H350',     tipo:'Buseta', cap:17, estado:'en_servicio',   condId:'c5', revTec:'2026-05-20', march:'2026-12-31', km:98420  },
-  { id:'v3', placa:'SJA-9012', marca:'Toyota',        modelo:'Coaster',         tipo:'Bus',    cap:30, estado:'en_servicio',   condId:'c3', revTec:'2026-11-10', march:'2026-12-31', km:210000 },
-  { id:'v4', placa:'GUA-3456', marca:'Toyota',        modelo:'Hiace Commuter',  tipo:'Van',    cap:12, estado:'mantenimiento', condId:null, revTec:'2025-12-01', march:'2026-12-31', km:178500 },
-  { id:'v5', placa:'ALJ-7890', marca:'Ford',          modelo:'Transit 350',     tipo:'Van',    cap:15, estado:'disponible',    condId:null, revTec:'2027-01-20', march:'2026-12-31', km:55800  },
-  { id:'v6', placa:'SJB-4444', marca:'Volkswagen',    modelo:'Crafter 35',      tipo:'Buseta', cap:18, estado:'disponible',    condId:null, revTec:'2026-07-08', march:'2026-12-31', km:88100  },
-];
-
-const EVENTOS = [
-  { id:'e1', nombre:'Turistas Canadá – Circuit CR',      cliente:'Maple Travel Group',          estado:'en_curso',   inicio:'08/04', fin:'22/04', pax:18,  tareas:14, ok:3,  prio:'alta'   },
-  { id:'e2', nombre:'Ruta Diaria Empleados Intel',        cliente:'Intel Costa Rica',            estado:'en_curso',   inicio:'01/04', fin:'30/04', pax:45,  tareas:22, ok:9,  prio:'normal' },
-  { id:'e3', nombre:'Gira Escolar – Saint Paul',          cliente:'Colegio Saint Paul',          estado:'confirmado', inicio:'18/04', fin:'18/04', pax:35,  tareas:3,  ok:0,  prio:'normal' },
-  { id:'e4', nombre:'Congreso Médico – Hotel Real',       cliente:'Hotel Real Intercontinental', estado:'confirmado', inicio:'12/04', fin:'14/04', pax:120, tareas:18, ok:0,  prio:'alta'   },
-  { id:'e5', nombre:'Tour Privado Familia Quesada',       cliente:'Juan Quesada',                estado:'planificado',inicio:'25/04', fin:'27/04', pax:8,   tareas:6,  ok:0,  prio:'baja'   },
-];
-
-const TAREAS_INIT = [
-  { id:'t1', hora:'06:00', fin:'07:30', nombre:'Recogida aeropuerto SJO',  eventoId:'e1', condId:'c1', vehId:'v1', pax:18, estado:'completada', origen:'Aeropuerto SJO',       destino:'Hotel Bougainvillea'    },
-  { id:'t2', hora:'07:15', fin:'08:00', nombre:'Ruta Intel – Mañana',       eventoId:'e2', condId:'c3', vehId:'v3', pax:32, estado:'completada', origen:'San José (paradas)',   destino:'Intel Belén'            },
-  { id:'t3', hora:'09:00', fin:'18:00', nombre:'Tour Volcán Poás',           eventoId:'e1', condId:'c5', vehId:'v2', pax:18, estado:'en_ruta',    origen:'Hotel Bougainvillea',  destino:'Parque Nac. Poás'       },
-  { id:'t4', hora:'14:00', fin:'16:00', nombre:'Traslado Museo Jade',        eventoId:'e1', condId:'c2', vehId:null, pax:18, estado:'asignada',   origen:'Hotel Bougainvillea',  destino:'Museo Jade'             },
-  { id:'t5', hora:'17:00', fin:'18:00', nombre:'Ruta Intel – Tarde',         eventoId:'e2', condId:null, vehId:null, pax:38, estado:'pendiente',  origen:'Intel Belén',          destino:'San José (paradas)'    },
-  { id:'t6', hora:'19:30', fin:'21:00', nombre:'Traslado cena El Fogón',     eventoId:'e1', condId:null, vehId:null, pax:18, estado:'pendiente',  origen:'Hotel Bougainvillea',  destino:'Rest. El Fogón de Lelo' },
-];
+// Las constantes de inicialización se mantienen vacías ya que los datos se cargarán del servidor
+const CONDUCTORES_INIT = [];
+const VEHICULOS_INIT = [];
+const EVENTOS_INIT = [];
+const TAREAS_INIT = [];
 
 const ALERTAS = [
   { tipo:'revision_tecnica', entidad:'GUA-3456', detalle:'Toyota Hiace Commuter', vence:'01/12/2025', dias:-129, sev:'critica' },
@@ -83,25 +59,29 @@ const ALERTAS = [
 // HELPERS
 // ─────────────────────────────────────────────────────────────
 const TODAY = '2026-04-09';
-const toDate = (t) => new Date(`${TODAY}T${t}:00`);
+const toDate = (d) => d ? new Date(d) : null;
 
-function checkConductorConflicts(condId, startT, endT, tareas, excludeId = null) {
-  if (!condId) return [];
-  const s = toDate(startT), e = toDate(endT);
+function checkConductorConflicts(condId, start, end, tareas, excludeId = null) {
+  if (!condId || !start) return [];
+  const s = new Date(start), e = end ? new Date(end) : new Date(s.getTime() + 2 * 3600000);
   return tareas.filter(t => {
-    if (t.id === excludeId || t.condId !== condId) return false;
+    if (t.id === excludeId || t.conductor_id !== condId) return false;
     if (['cancelada','completada'].includes(t.estado)) return false;
-    return toDate(t.hora) < e && toDate(t.fin) > s;
+    const ts = new Date(t.fecha_salida);
+    const te = t.hora_regreso ? new Date(t.hora_regreso) : new Date(ts.getTime() + 2 * 3600000);
+    return ts < e && te > s;
   });
 }
 
-function checkVehicleConflicts(vehId, startT, endT, tareas, excludeId = null) {
-  if (!vehId) return [];
-  const s = toDate(startT), e = toDate(endT);
+function checkVehicleConflicts(vehId, start, end, tareas, excludeId = null) {
+  if (!vehId || !start) return [];
+  const s = new Date(start), e = end ? new Date(end) : new Date(s.getTime() + 2 * 3600000);
   return tareas.filter(t => {
-    if (t.id === excludeId || t.vehId !== vehId) return false;
+    if (t.id === excludeId || t.vehiculo_id !== vehId) return false;
     if (['cancelada','completada'].includes(t.estado)) return false;
-    return toDate(t.hora) < e && toDate(t.fin) > s;
+    const ts = new Date(t.fecha_salida);
+    const te = t.hora_regreso ? new Date(t.hora_regreso) : new Date(ts.getTime() + 2 * 3600000);
+    return ts < e && te > s;
   });
 }
 
@@ -186,14 +166,14 @@ function SectionHeader({ title, action, onAction }) {
 // MODAL DE ASIGNACIÓN (con detección de conflictos)
 // ─────────────────────────────────────────────────────────────
 function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, onClose, onConfirm }) {
-  const evento = eventos.find(e => e.id === tarea.eventoId);
-  const [selCond, setSelCond] = useState(tarea.condId || '');
-  const [selVeh,  setSelVeh]  = useState(tarea.vehId  || '');
+  const evento = eventos.find(e => e.id === tarea.evento_id);
+  const [selCond, setSelCond] = useState(tarea.conductor_id || '');
+  const [selVeh,  setSelVeh]  = useState(tarea.vehiculo_id  || '');
 
-  const condConf = useMemo(() => checkConductorConflicts(selCond, tarea.hora, tarea.fin, tareas, tarea.id), [selCond]);
-  const vehConf  = useMemo(() => checkVehicleConflicts(selVeh, tarea.hora, tarea.fin, tareas, tarea.id),  [selVeh]);
+  const condConf = useMemo(() => checkConductorConflicts(selCond, tarea.fecha_salida, tarea.hora_regreso, tareas, tarea.id), [selCond]);
+  const vehConf  = useMemo(() => checkVehicleConflicts(selVeh, tarea.fecha_salida, tarea.hora_regreso, tareas, tarea.id),  [selVeh]);
   const selVehObj = vehiculos.find(v => v.id === selVeh);
-  const capOk = selVehObj ? selVehObj.cap >= tarea.pax : true;
+  const capOk = selVehObj ? selVehObj.capacidad_pasajeros >= (tarea.pasajeros || 0) : true;
   const canConfirm = selCond && selVeh && condConf.length === 0 && vehConf.length === 0 && capOk;
 
   const overlay = { position:'fixed', inset:0, background:'rgba(0,0,0,.7)', display:'flex', alignItems:'center',
@@ -229,7 +209,9 @@ function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, onClo
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
           <div>
             <div style={{ fontSize:17, fontWeight:700, color:T.txt }}>{tarea.nombre}</div>
-            <div style={{ fontSize:12, color:T.mute, marginTop:3 }}>{evento?.nombre} · {tarea.hora}–{tarea.fin} · {tarea.pax} pax</div>
+            <div style={{ fontSize:12, color:T.mute, marginTop:3 }}>
+              {evento?.nombre} · {new Date(tarea.fecha_salida).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} · {tarea.pasajeros} pax
+            </div>
           </div>
           <button onClick={onClose} style={{ background:'transparent', border:'none', cursor:'pointer', color:T.mute, padding:4 }}>
             <X size={20} />
@@ -238,7 +220,7 @@ function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, onClo
 
         <div style={{ display:'flex', gap:10, marginBottom:16, padding:'10px 12px', background:T.card2, borderRadius:8 }}>
           <MapPin size={14} color={T.mute} style={{ marginTop:2, flexShrink:0 }} />
-          <div style={{ fontSize:12, color:T.sub }}><strong style={{ color:T.txt }}>{tarea.origen}</strong> → {tarea.destino}</div>
+          <div style={{ fontSize:12, color:T.sub }}><strong style={{ color:T.txt }}>{tarea.punto_salida}</strong> → {tarea.destino}</div>
         </div>
 
         {/* Conductor */}
@@ -309,7 +291,7 @@ function Dashboard({ tareas, conductores, vehiculos, eventos, onAsignar }) {
   const enRuta    = tareas.filter(t => t.estado === 'en_ruta').length;
   const complet   = tareas.filter(t => t.estado === 'completada').length;
   const pendient  = tareas.filter(t => t.estado === 'pendiente').length;
-  const sinAsig   = tareas.filter(t => t.estado === 'pendiente' && !t.condId).length;
+  const sinAsig   = tareas.filter(t => t.estado === 'pendiente' && !t.conductor_id).length;
   const dispCond  = conductores.filter(c => c.estado === 'disponible').length;
   const dispVeh   = vehiculos.filter(v => v.estado === 'disponible').length;
 
@@ -340,31 +322,32 @@ function Dashboard({ tareas, conductores, vehiculos, eventos, onAsignar }) {
             </thead>
             <tbody>
               {tareas.map(t => {
-                const cond = CONDUCTORES_INIT.find(c => c.id === t.condId);
-                const veh  = VEHICULOS_INIT.find(v => v.id === t.vehId);
-                const ev   = eventos.find(e => e.id === t.eventoId);
+                const cond = conductores.find(c => c.id === t.conductor_id);
+                const veh  = vehiculos.find(v => v.id === t.vehiculo_id);
+                const ev   = eventos.find(e => e.id === t.evento_id);
+                const horaStr = t.fecha_salida ? new Date(t.fecha_salida).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
                 return (
                   <tr key={t.id} style={tableRow}>
                     <td style={tdSt(70)}>
-                      <span style={{ fontFamily:'monospace', fontSize:13, color:T.AMB, fontWeight:600 }}>{t.hora}</span>
+                      <span style={{ fontFamily:'monospace', fontSize:13, color:T.AMB, fontWeight:600 }}>{horaStr}</span>
                     </td>
                     <td style={{ ...tdSt(180) }}>
                       <div style={{ fontWeight:500, color:T.txt }}>{t.nombre}</div>
-                      <div style={{ fontSize:11, color:T.mute, marginTop:2 }}>{t.origen} → {t.destino}</div>
+                      <div style={{ fontSize:11, color:T.mute, marginTop:2 }}>{t.punto_salida} → {t.destino}</div>
                     </td>
-                    <td style={{ ...tdSt(150), fontSize:12, color:T.sub }}>{ev?.nombre}</td>
+                    <td style={{ ...tdSt(150), fontSize:12, color:T.sub }}>{ev?.nombre || t.evento}</td>
                     <td style={tdSt(140)}>
                       {cond
                         ? <span style={{ fontSize:13 }}>{cond.alias || cond.nombre}</span>
-                        : <span style={{ fontSize:12, color:T.RED }}>Sin asignar</span>}
+                        : <span style={{ fontSize:12, color:T.RED }}>{t.conductor || 'Sin asignar'}</span>}
                     </td>
                     <td style={tdSt(100)}>
                       {veh
                         ? <span style={{ fontFamily:'monospace', fontSize:12, color:T.sub }}>{veh.placa}</span>
-                        : <span style={{ fontSize:12, color:t.condId ? T.AMB : T.mute }}>—</span>}
+                        : <span style={{ fontSize:12, color:t.conductor_id ? T.AMB : T.mute }}>{t.placa || '—'}</span>}
                     </td>
                     <td style={{ ...tdSt(50), textAlign:'center' }}>
-                      <span style={{ fontSize:13, fontWeight:600, color:T.sub }}>{t.pax}</span>
+                      <span style={{ fontSize:13, fontWeight:600, color:T.sub }}>{t.pasajeros}</span>
                     </td>
                     <td style={tdSt(110)}><Badge estado={t.estado} /></td>
                     <td style={tdSt(80)}>
@@ -505,23 +488,17 @@ function ConductoresView({ conductores, tareas, vehiculos }) {
                   </div>
                   {/* Licencias */}
                   <div style={{ display:'flex', gap:4, flexShrink:0 }}>
-                    {c.lic.map(l => (
-                      <span key={l} style={{ fontSize:10, fontWeight:700, padding:'2px 6px',
-                        borderRadius:4, background:T.bluDim, color:T.BLU }}>{l}</span>
-                    ))}
+                    <span style={{ fontSize:10, fontWeight:700, padding:'2px 6px',
+                        borderRadius:4, background:T.bluDim, color:T.BLU }}>{c.cedula}</span>
                   </div>
-                  {/* Vehículo */}
+                  {/* Vehículo - Note: actual relation would need further fetch or join */}
                   <div style={{ width:100, textAlign:'center' }}>
-                    {veh ? (
-                      <span style={{ fontFamily:'monospace', fontSize:12, color:T.sub }}>{veh.placa}</span>
-                    ) : (
-                      <span style={{ fontSize:12, color:T.bdr2 }}>Sin asignar</span>
-                    )}
+                    <span style={{ fontSize:12, color:T.bdr2 }}>Disponible</span>
                   </div>
                   {/* Teléfono */}
                   <div style={{ display:'flex', alignItems:'center', gap:4, width:110 }}>
                     <Phone size={12} color={T.mute} />
-                    <span style={{ fontSize:12, color:T.sub }}>{c.tel}</span>
+                    <span style={{ fontSize:12, color:T.sub }}>{c.telefono}</span>
                   </div>
                   {/* Estado */}
                   <div style={{ width:110 }}><Badge estado={c.estado} /></div>
@@ -616,9 +593,8 @@ function VehiculosView({ vehiculos, conductores }) {
 
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:12 }}>
           {filtrados.map(v => {
-            const cond = conductores.find(c => c.id === v.condId);
-            const [rcol, rbg, rdias] = alertLevel(v.revTec);
-            const [mcol, mbg, mdias] = alertLevel(v.march);
+            const [rcol, rbg, rdias] = alertLevel(v.fecha_revision_tecnica || '01/01/2099');
+            const [mcol, mbg, mdias] = alertLevel(v.fecha_marchamo || '01/01/2099');
             return (
               <div key={v.id} style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:12, padding:'16px' }}>
                 {/* Header */}
@@ -633,16 +609,16 @@ function VehiculosView({ vehiculos, conductores }) {
                 {/* Info fila */}
                 <div style={{ display:'flex', gap:12, marginBottom:14, fontSize:12 }}>
                   <span style={{ background:T.card3, padding:'3px 8px', borderRadius:6, color:T.sub }}>{v.tipo}</span>
-                  <span style={{ background:T.card3, padding:'3px 8px', borderRadius:6, color:T.sub }}>{v.cap} plazas</span>
-                  <span style={{ background:T.card3, padding:'3px 8px', borderRadius:6, color:T.mute }}>{v.km.toLocaleString()} km</span>
+                  <span style={{ background:T.card3, padding:'3px 8px', borderRadius:6, color:T.sub }}>{v.capacidad_pasajeros} plazas</span>
+                  <span style={{ background:T.card3, padding:'3px 8px', borderRadius:6, color:T.mute }}>{(v.km_actual || 0).toLocaleString()} km</span>
                 </div>
 
                 {/* Conductor asignado */}
                 <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:12, padding:'8px 10px',
                   background:T.card3, borderRadius:8 }}>
                   <User size={13} color={T.mute} />
-                  <span style={{ fontSize:12, color: cond ? T.txt : T.mute }}>
-                    {cond ? cond.nombre : 'Sin conductor asignado'}
+                  <span style={{ fontSize:12, color: v.conductor_asignado_id ? T.txt : T.mute }}>
+                    {conductores.find(c => c.id === v.conductor_asignado_id)?.nombre || 'Sin conductor asignado'}
                   </span>
                 </div>
 
@@ -815,7 +791,7 @@ function Sidebar({ active, setView, user, onLogout }) {
 // ALERTAS TOP BAR
 // ─────────────────────────────────────────────────────────────
 function AlertBar({ tareas }) {
-  const sinAsig = tareas.filter(t => t.estado === 'pendiente' && !t.condId);
+  const sinAsig = tareas.filter(t => t.estado === 'pendiente' && !t.conductor_id);
   if (sinAsig.length === 0) return null;
   return (
     <div style={{ background:T.ambDim, borderBottom:`1px solid ${T.AMB}33`, padding:'10px 24px',
@@ -846,13 +822,49 @@ function PlaceholderView({ titulo, icono: Icon }) {
 // APP CONTENT (PROTECTED)
 // ─────────────────────────────────────────────────────────────
 function AppContent() {
-  const { isAuthenticated, user, logout } = useAuth();
+  const { isAuthenticated, user, token, logout } = useAuth();
   const [view,      setView]     = useState('dashboard');
-  const [tareas,    setTareas]   = useState(TAREAS_INIT);
-  const [conductores]            = useState(CONDUCTORES_INIT);
-  const [vehiculos]              = useState(VEHICULOS_INIT);
+  const [tareas,    setTareas]   = useState([]);
+  const [conductores, setConductores] = useState([]);
+  const [vehiculos, setVehiculos] = useState([]);
+  const [eventos, setEventos] = useState([]);
+  const [kpis, setKpis] = useState(null);
   const [modalTarea, setModal]   = useState(null);
   const [theme,      setTheme]   = useState('dark');
+  const [loading, setLoading] = useState(false);
+
+  async function fetchData() {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const headers = { 'Authorization': `Bearer ${token}` };
+      const [resT, resC, resV, resE, resK] = await Promise.all([
+        fetch('/api/tms/tareas', { headers }),
+        fetch('/api/tms/conductores', { headers }),
+        fetch('/api/tms/vehiculos', { headers }),
+        fetch('/api/tms/eventos', { headers }),
+        fetch('/api/tms/dashboard/kpis', { headers })
+      ]);
+
+      if (resT.ok) setTareas(await resT.json());
+      if (resC.ok) setConductores(await resC.json());
+      if (resV.ok) setVehiculos(await resV.json());
+      if (resE.ok) setEventos(await resE.json());
+      if (resK.ok) setKpis(await resK.json());
+    } catch (err) {
+      console.error("Error fetching dashboard data:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useState(() => {
+    if (isAuthenticated) fetchData();
+  }, [isAuthenticated, token]);
+
+  useMemo(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
   useMemo(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -864,11 +876,27 @@ function AppContent() {
 
   function handleAsignar(tarea) { setModal(tarea); }
 
-  function handleConfirm(tareaId, condId, vehId) {
-    setTareas(prev => prev.map(t =>
-      t.id === tareaId ? { ...t, condId, vehId, estado:'asignada' } : t
-    ));
-    setModal(null);
+  async function handleConfirm(tareaId, condId, vehId) {
+    try {
+      const res = await fetch('/api/tms/tareas/asignar', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ tarea_id: tareaId, conductor_id: condId, vehiculo_id: vehId })
+      });
+      if (res.ok) {
+        fetchData(); // Recargar datos
+        setModal(null);
+      }
+    } catch (err) {
+      console.error("Error asignando tarea:", err);
+    }
+  }
+
+  function handleNuevo() {
+    alert("Función 'Nuevo' se habilitará en la próxima actualización de cada módulo.");
   }
 
   const pageTitle = {
@@ -905,11 +933,12 @@ function AppContent() {
                 borderRadius:8, color:T.sub, cursor:'pointer', display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
               {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />} {theme === 'dark' ? 'Modo Día' : 'Modo Noche'}
             </button>
-            <button style={{ padding:'7px 12px', background:'transparent', border:`1px solid ${T.bdr2}`,
-              borderRadius:8, color:T.sub, cursor:'pointer', display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
-              <RefreshCcw size={13} /> Actualizar
+            <button onClick={fetchData} disabled={loading}
+              style={{ padding:'7px 12px', background:'transparent', border:`1px solid ${T.bdr2}`,
+                borderRadius:8, color:T.sub, cursor:'pointer', display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
+              <RefreshCcw size={13} className={loading ? "animate-spin" : ""} /> {loading ? "Cargando..." : "Actualizar"}
             </button>
-            <button style={{ padding:'7px 14px', background:T.AMB, border:'none',
+            <button onClick={handleNuevo} style={{ padding:'7px 14px', background:T.AMB, border:'none',
               borderRadius:8, color:'#000', cursor:'pointer', fontWeight:600, fontSize:13 }}>
               + Nuevo
             </button>
@@ -918,10 +947,10 @@ function AppContent() {
 
         {/* Content */}
         <div style={{ flex:1, padding:28, overflowY:'auto' }}>
-          {view === 'dashboard'   && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={EVENTOS} onAsignar={handleAsignar} />}
+          {view === 'dashboard'   && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} />}
           {view === 'cotizaciones'&& <CotizadorView vehiculos={vehiculos} onSave={()=>{}} historial={[]} />}
-          {view === 'eventos'     && <EventosView eventos={EVENTOS} />}
-          {view === 'tareas'      && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={EVENTOS} onAsignar={handleAsignar} />}
+          {view === 'eventos'     && <EventosView eventos={eventos} />}
+          {view === 'tareas'      && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} />}
           {view === 'conductores' && <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} />}
           {view === 'vehiculos'   && <VehiculosView vehiculos={vehiculos} conductores={conductores} />}
           {view === 'usuarios'    && <UsuarioMgmtView />}

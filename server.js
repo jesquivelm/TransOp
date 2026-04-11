@@ -225,6 +225,105 @@ app.post('/api/tms/config/:clave', authenticateToken, async (req, res) => {
     }
 });
 
+// Conductores
+app.get('/api/tms/conductores', authenticateToken, async (req, res) => {
+    try {
+        const result = await pgQuery('SELECT * FROM conductores WHERE activo = TRUE ORDER BY nombre ASC');
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/tms/conductores', authenticateToken, async (req, res) => {
+    const { nombre, cedula, telefono, alias, estado } = req.body;
+    try {
+        await pgQuery(
+            `INSERT INTO conductores (nombre, cedula, telefono, alias, estado) 
+             VALUES ($1, $2, $3, $4, $5)`,
+            [nombre, cedula, telefono, alias, estado || 'disponible']
+        );
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/api/tms/conductores/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pgQuery('UPDATE conductores SET activo = FALSE WHERE id = $1', [id]);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Eventos
+app.get('/api/tms/eventos', authenticateToken, async (req, res) => {
+    try {
+        const result = await pgQuery(`
+            SELECT e.*, c.nombre as cliente_nombre,
+            (SELECT COUNT(*) FROM tareas WHERE evento_id = e.id) as tareas,
+            (SELECT COUNT(*) FROM tareas WHERE evento_id = e.id AND estado = 'completada') as ok
+            FROM eventos e
+            JOIN clientes c ON c.id = e.cliente_id
+            ORDER BY e.fecha_inicio DESC
+        `);
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/tms/eventos', authenticateToken, async (req, res) => {
+    const { cliente_id, nombre, descripcion, estado, prioridad, fecha_inicio, fecha_fin, pax_estimados } = req.body;
+    try {
+        await pgQuery(
+            `INSERT INTO eventos (cliente_id, nombre, descripcion, estado, prioridad, fecha_inicio, fecha_fin, pax_estimados)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [cliente_id, nombre, descripcion, estado || 'planificado', prioridad || 'normal', fecha_inicio, fecha_fin, pax_estimados]
+        );
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Tareas
+app.get('/api/tms/tareas', authenticateToken, async (req, res) => {
+    try {
+        const result = await pgQuery('SELECT * FROM v_tareas_hoy');
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/tms/tareas/asignar', authenticateToken, async (req, res) => {
+    const { tarea_id, conductor_id, vehiculo_id } = req.body;
+    try {
+        await pgQuery(
+            `UPDATE tareas SET conductor_id = $1, vehiculo_id = $2, estado = 'asignada', updated_at = NOW()
+             WHERE id = $3`,
+            [conductor_id, vehiculo_id, tarea_id]
+        );
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Dashboard KPIs
+app.get('/api/tms/dashboard/kpis', authenticateToken, async (req, res) => {
+    try {
+        const result = await pgQuery('SELECT * FROM v_kpis_hoy');
+        res.json(result.rows[0]);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Servir el frontend de React generado por Vite (dist)
 const DIST_DIR = path.join(__dirname, 'dist');
 if (fs.existsSync(DIST_DIR)) {
