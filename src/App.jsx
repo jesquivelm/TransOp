@@ -1,4 +1,4 @@
-} from "react";
+import { useState, useMemo, useEffect } from "react";
 
 // Las constantes de inicialización se mantienen vacías ya que los datos se cargarán del servidor
 const CONDUCTORES_INIT = [];
@@ -858,15 +858,11 @@ function AppContent() {
     }
   }
 
-  useState(() => {
+  useEffect(() => {
     if (isAuthenticated) fetchData();
   }, [isAuthenticated, token]);
 
-  useMemo(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
-
-  useMemo(() => {
+  useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
