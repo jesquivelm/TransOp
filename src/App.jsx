@@ -738,7 +738,7 @@ function EventosView({ eventos }) {
 // ─────────────────────────────────────────────────────────────
 // SIDEBAR
 // ─────────────────────────────────────────────────────────────
-function Sidebar({ active, setView }) {
+function Sidebar({ active, setView, user, onLogout }) {
   const items = [
     { id:'dashboard',   Icon:LayoutDashboard, label:'Dashboard'      },
     { id:'cotizaciones',Icon:Calculator,      label:'Proformas'      },
