@@ -7811,6 +7811,21 @@ app.post('/api/tms/config/:clave', authenticateToken, async (req, res) => {
     }
 });
 
+// Servir el frontend de React generado por Vite (dist)
+const DIST_DIR = path.join(__dirname, 'dist');
+if (fs.existsSync(DIST_DIR)) {
+    app.use(express.static(DIST_DIR));
+    
+    // Todas las demás peticiones (que no sean /api) van a index.html (React Router)
+    app.get('*', (req, res) => {
+        if (!req.path.startsWith('/api/')) {
+            res.sendFile(path.join(DIST_DIR, 'index.html'));
+        } else {
+            res.status(404).json({ error: 'Endpoint no encontrado' });
+        }
+    });
+}
+
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
