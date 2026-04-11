@@ -19,7 +19,6 @@ export default function CotizadorView({ vehiculos, socios, refreshSocios, empres
   const [vehiculoActivo, setVehiculoActivo] = useState(null);
   const [dbVehiculos, setDbVehiculos] = useState([]);
   const [dbHistorial, setDbHistorial] = useState([]);
-  const [logoData, setLogoData] = useState(localStorage.getItem('transop_logo') || null);
 
   // Parámetros de cálculo
   const [params, setParams] = useState({
