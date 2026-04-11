@@ -1,9 +1,27 @@
--- =============================================================
--- TMS — Sistema de Gestión de Transporte Terrestre
--- Base de datos PostgreSQL — Esquema completo v1.0
--- =============================================================
-
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- LIMPIEZA INICIAL (Instalación limpia)
+DROP VIEW IF EXISTS v_kpis_hoy CASCADE;
+DROP VIEW IF EXISTS v_alertas_vencimiento CASCADE;
+DROP VIEW IF EXISTS v_tareas_hoy CASCADE;
+DROP TABLE IF EXISTS auditoria CASCADE;
+DROP TABLE IF EXISTS mensajes CASCADE;
+DROP TABLE IF EXISTS ubicaciones_gps CASCADE;
+DROP TABLE IF EXISTS incidencias CASCADE;
+DROP TABLE IF EXISTS gastos CASCADE;
+DROP TABLE IF EXISTS tareas CASCADE;
+DROP TABLE IF EXISTS eventos CASCADE;
+DROP TABLE IF EXISTS mantenimientos CASCADE;
+DROP TABLE IF EXISTS vehiculos CASCADE;
+DROP TABLE IF EXISTS evaluadores CASCADE;
+DROP TABLE IF EXISTS licencias CASCADE;
+DROP TABLE IF EXISTS evaluaciones_conductor CASCADE;
+DROP TABLE IF EXISTS conductores CASCADE;
+DROP TABLE IF EXISTS contactos CASCADE;
+DROP TABLE IF EXISTS clientes CASCADE;
+DROP TABLE IF EXISTS usuarios CASCADE;
+DROP TABLE IF EXISTS tms_cotizaciones CASCADE;
+DROP TABLE IF EXISTS tms_config CASCADE;
 
 -- =============================================================
 -- USUARIOS DEL SISTEMA
@@ -11,15 +29,22 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE usuarios (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     nombre          VARCHAR(200) NOT NULL,
+    username        VARCHAR(50) UNIQUE NOT NULL,
     email           VARCHAR(150) UNIQUE NOT NULL,
     password_hash   VARCHAR(255) NOT NULL,
     rol             VARCHAR(20) NOT NULL CHECK (rol IN ('admin','operador','supervisor','conductor')),
-    conductor_id    UUID,  -- FK agregada luego (referencia circular)
+    conductor_id    UUID,
+    foto_url        TEXT,
+    es_root         BOOLEAN DEFAULT FALSE,
     activo          BOOLEAN DEFAULT TRUE,
     ultimo_acceso   TIMESTAMPTZ,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Indices para usuarios
+CREATE INDEX idx_usuarios_username ON usuarios(username);
+CREATE INDEX idx_usuarios_email ON usuarios(email);
 
 -- =============================================================
 -- CLIENTES / SOCIOS
@@ -111,6 +136,23 @@ CREATE TABLE vehiculos (
                             CHECK (estado IN ('disponible','en_servicio','mantenimiento','fuera_de_servicio')),
     foto_url                TEXT,
     notas                   TEXT,
+    -- Campos para el Cotizador (Tarifas y Costos)
+    colaborador             DECIMAL(12,2) DEFAULT 0,
+    combustible_costo       DECIMAL(12,2) DEFAULT 0,
+    combustible_tipo        VARCHAR(20) DEFAULT 'Diésel',
+    peajes                  DECIMAL(12,2) DEFAULT 0,
+    viaticos                DECIMAL(12,2) DEFAULT 0,
+    utilidad                DECIMAL(12,2) DEFAULT 0,
+    adic_col                DECIMAL(12,2) DEFAULT 0,
+    adic_viat               DECIMAL(12,2) DEFAULT 0,
+    tarifa_gam              DECIMAL(12,2) DEFAULT 0,
+    media_tarifa            DECIMAL(12,2) DEFAULT 0,
+    t_in_sj                 DECIMAL(12,2) DEFAULT 0,
+    t_out_sj                DECIMAL(12,2) DEFAULT 0,
+    t_in_ctg                DECIMAL(12,2) DEFAULT 0,
+    t_out_ctg               DECIMAL(12,2) DEFAULT 0,
+    hospedaje               DECIMAL(12,2) DEFAULT 0,
+    viatico_diario          DECIMAL(12,2) DEFAULT 0,
     activo                  BOOLEAN DEFAULT TRUE,
     created_at              TIMESTAMPTZ DEFAULT NOW(),
     updated_at              TIMESTAMPTZ DEFAULT NOW()
@@ -240,7 +282,7 @@ CREATE TABLE incidencias (
 -- GPS — UBICACIONES EN TIEMPO REAL
 -- =============================================================
 CREATE TABLE ubicaciones_gps (
-    id              BIGSERIAL PRIMARY KEY,
+    id              BIGSERIAL,
     conductor_id    UUID NOT NULL REFERENCES conductores(id),
     tarea_id        UUID REFERENCES tareas(id),
     lat             DECIMAL(10,8) NOT NULL,
@@ -248,7 +290,8 @@ CREATE TABLE ubicaciones_gps (
     velocidad_kmh   DECIMAL(6,2),
     precision_m     DECIMAL(8,2),
     bateria_pct     SMALLINT,
-    ts              TIMESTAMPTZ DEFAULT NOW()
+    ts              TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (id, ts)
 )
 PARTITION BY RANGE (ts);
 
@@ -534,3 +577,49 @@ SELECT
     COUNT(*) FILTER (WHERE fecha_salida::DATE = CURRENT_DATE AND estado = 'pendiente')    AS pendientes,
     COUNT(*) FILTER (WHERE fecha_salida::DATE = CURRENT_DATE AND conductor_id IS NULL AND estado NOT IN ('cancelada','completada')) AS sin_asignar
 FROM tareas;
+
+-- =============================================================
+-- TMS — COTIZACIONES / PROFORMAS
+-- =============================================================
+CREATE TABLE tms_cotizaciones (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    numero          VARCHAR(50) UNIQUE NOT NULL,
+    cliente_nombre  VARCHAR(200),
+    cliente_empresa VARCHAR(200),
+    fecha_emision   TIMESTAMPTZ DEFAULT NOW(),
+    total_usd       DECIMAL(12,2),
+    data_json       JSONB NOT NULL, -- Almacena todos los inputs/parámetros como snapshot
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+DROP TABLE IF EXISTS tms_config;
+CREATE TABLE tms_config (
+    id              SERIAL PRIMARY KEY,
+    clave           VARCHAR(50) UNIQUE NOT NULL,
+    valor           JSONB,
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TRIGGER trg_cotizaciones_upd BEFORE UPDATE ON tms_cotizaciones FOR EACH ROW EXECUTE FUNCTION fn_updated_at();
+CREATE TRIGGER trg_tms_config_upd    BEFORE UPDATE ON tms_config       FOR EACH ROW EXECUTE FUNCTION fn_updated_at();
+
+-- =============================================================
+-- DATOS INICIALES (SEED DATA)
+-- =============================================================
+
+-- 1. Insertar Vehículos con Tarifas Base para el Cotizador
+INSERT INTO vehiculos (placa, marca, modelo, tipo, capacidad_pasajeros, colaborador, combustible_costo, combustible_tipo, peajes, viaticos, utilidad, adic_col, adic_viat, tarifa_gam, media_tarifa, t_in_sj, t_out_sj, t_in_ctg, t_out_ctg, hospedaje, viatico_diario)
+VALUES 
+('TPS-001', 'Toyota', 'Hiace', 'van', 14, 25.00, 0.18, 'Diésel', 15.00, 10.00, 50.00, 15.00, 15.00, 150.00, 75.00, 50.00, 45.00, 65.00, 60.00, 40.00, 25.00),
+('TPS-002', 'Toyota', 'Coaster', 'buseta', 22, 35.00, 0.25, 'Diésel', 20.00, 15.00, 70.00, 20.00, 20.00, 190.00, 100.00, 70.00, 65.00, 85.00, 80.00, 50.00, 30.00),
+('TPS-003', 'Fuso', 'Rosa', 'buseta', 28, 40.00, 0.30, 'Gasolina', 25.00, 15.00, 80.00, 25.00, 25.00, 220.00, 110.00, 80.00, 75.00, 95.00, 90.00, 50.00, 35.00);
+
+-- 2. Insertar un Conductor de prueba
+INSERT INTO conductores (nombre, cedula, telefono, alias, estado)
+VALUES ('Conductor de Pruebas', '1-1111-1111', '8888-8888', 'Profe', 'disponible');
+
+-- 3. Insertar Usuario Administrador Root (Password: admin1234)
+INSERT INTO usuarios (nombre, username, email, password_hash, rol, es_root, foto_url)
+VALUES 
+('Super Administrador', 'superadmin', 'admin@transop.cr', '$2b$10$WjKjT3WgFf2PrGjS1xzmxufsDbheRALSPW8ZvA04hDDewWnKPDZf2', 'admin', true, 'https://cdn-icons-png.flaticon.com/512/6024/6024190.png');

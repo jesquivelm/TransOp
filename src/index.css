@@ -1,111 +1,124 @@
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  font-family: inherit;
+  
+  /* LIGTH MODE (default in many places, but TransOP was strictly dark)
+     We will define the TransOP original as dark, and create a light variant.
+  */
+  --bg: #f8fafc;
+  --card: #ffffff;
+  --card2: #f1f5f9;
+  --card3: #e2e8f0;
+  --bdr: rgba(0,0,0,0.06);
+  --bdr2: rgba(0,0,0,0.12);
+  --txt: #0f172a;
+  --mute: #64748b;
+  --sub: #475569;
+  
+  --AMB: #d97706; --ambDim: rgba(217, 119, 6, 0.12);
+  --BLU: #2563eb; --bluDim: rgba(37, 99, 235, 0.12);
+  --GRN: #16a34a; --grnDim: rgba(22, 163, 74, 0.12);
+  --RED: #dc2626; --redDim: rgba(220, 38, 38, 0.12);
+  --PUR: #9333ea; --purDim: rgba(147, 51, 234, 0.12);
+  --ORG: #ea580c; --orgDim: rgba(234, 88, 12, 0.12);
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
-
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
+  /* Fallback color-scheme */
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
+[data-theme='dark'] {
+  --bg: #0b0f1c;
+  --card: #111827;
+  --card2: #182030;
+  --card3: #1e2a3c;
+  --bdr: rgba(255,255,255,0.07);
+  --bdr2: rgba(255,255,255,0.13);
+  --txt: #e2e8f0;
+  --mute: #64748b;
+  --sub: #94a3b8;
+  
+  --AMB: #f59e0b; --ambDim: rgba(245, 158, 11, 0.14);
+  --BLU: #3b82f6; --bluDim: rgba(59, 130, 246, 0.14);
+  --GRN: #22c55e; --grnDim: rgba(34, 197, 94, 0.14);
+  --RED: #ef4444; --redDim: rgba(239, 68, 68, 0.14);
+  --PUR: #a78bfa; --purDim: rgba(167, 139, 250, 0.14);
+  --ORG: #f97316; --orgDim: rgba(249, 115, 22, 0.14);
 
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
+  color-scheme: dark;
 }
 
 body {
   margin: 0;
+  background-color: var(--bg);
+  color: var(--txt);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
   display: flex;
-  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+}
+
+* {
   box-sizing: border-box;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+/* Cotizador styles adapted for TransOP */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
+.field label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sub);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+.field input[type="text"],
+.field input[type="number"],
+.field input[type="date"],
+.field input[type="time"],
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--card2);
+  border: 1px solid var(--bdr2);
+  border-radius: 8px;
+  color: var(--txt);
+  font-size: 14px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  outline: none;
 }
 
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--AMB);
+  box-shadow: 0 0 0 3px var(--ambDim);
+}
+
+.chk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.chk-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--AMB);
+  cursor: pointer;
+}
+
+.chk-row label {
+  font-size: 13px;
+  color: var(--txt);
+  cursor: pointer;
+  user-select: none;
 }

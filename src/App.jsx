@@ -3,28 +3,34 @@ import {
   LayoutDashboard, CalendarDays, CheckSquare, Users, Bus, Receipt,
   BarChart3, AlertTriangle, CheckCircle, XCircle, Clock, MapPin,
   Phone, Plus, Search, ChevronRight, Shield, Wrench, X, User,
-  MessageSquare, Zap, Eye, RefreshCcw, ChevronDown
+  MessageSquare, Zap, Eye, RefreshCcw, ChevronDown, Moon, Sun, Calculator
 } from "lucide-react";
+
+import CotizadorView from './components/Cotizador/CotizadorView';
+import LoginView from './components/Auth/LoginView';
+import UsuarioMgmtView from './components/Admin/UsuarioMgmtView';
+import ConfiguracionesView from './components/Admin/ConfiguracionesView';
+import { AuthProvider, useAuth } from './context/AuthContext';
 
 // ─────────────────────────────────────────────────────────────
 // TOKENS DE COLOR
 // ─────────────────────────────────────────────────────────────
-const T = {
-  bg:     '#0b0f1c',
-  card:   '#111827',
-  card2:  '#182030',
-  card3:  '#1e2a3c',
-  bdr:    'rgba(255,255,255,0.07)',
-  bdr2:   'rgba(255,255,255,0.13)',
-  txt:    '#e2e8f0',
-  mute:   '#64748b',
-  sub:    '#94a3b8',
-  AMB:    '#f59e0b', ambDim: 'rgba(245,158,11,0.14)',
-  BLU:    '#3b82f6', bluDim: 'rgba(59,130,246,0.14)',
-  GRN:    '#22c55e', grnDim: 'rgba(34,197,94,0.14)',
-  RED:    '#ef4444', redDim: 'rgba(239,68,68,0.14)',
-  PUR:    '#a78bfa', purDim: 'rgba(167,139,250,0.14)',
-  ORG:    '#f97316', orgDim: 'rgba(249,115,22,0.14)',
+export const T = {
+  bg:     'var(--bg)',
+  card:   'var(--card)',
+  card2:  'var(--card2)',
+  card3:  'var(--card3)',
+  bdr:    'var(--bdr)',
+  bdr2:   'var(--bdr2)',
+  txt:    'var(--txt)',
+  mute:   'var(--mute)',
+  sub:    'var(--sub)',
+  AMB:    'var(--AMB)', ambDim: 'var(--ambDim)',
+  BLU:    'var(--BLU)', bluDim: 'var(--bluDim)',
+  GRN:    'var(--GRN)', grnDim: 'var(--grnDim)',
+  RED:    'var(--RED)', redDim: 'var(--redDim)',
+  PUR:    'var(--PUR)', purDim: 'var(--purDim)',
+  ORG:    'var(--ORG)', orgDim: 'var(--orgDim)',
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -735,12 +741,15 @@ function EventosView({ eventos }) {
 function Sidebar({ active, setView }) {
   const items = [
     { id:'dashboard',   Icon:LayoutDashboard, label:'Dashboard'      },
+    { id:'cotizaciones',Icon:Calculator,      label:'Proformas'      },
     { id:'eventos',     Icon:CalendarDays,    label:'Eventos'        },
     { id:'tareas',      Icon:CheckSquare,     label:'Tareas del día' },
     { id:'conductores', Icon:Users,           label:'Conductores'    },
     { id:'vehiculos',   Icon:Bus,             label:'Vehículos'      },
     { id:'gastos',      Icon:Receipt,         label:'Gastos'         },
     { id:'reportes',    Icon:BarChart3,       label:'Reportes'       },
+    { id:'usuarios',    Icon:Shield,          label:'Seguridad'      },
+    { id:'config',      Icon:Settings,        label:'Configuración'  },
   ];
 
   return (
@@ -777,10 +786,26 @@ function Sidebar({ active, setView }) {
         })}
       </nav>
 
-      {/* Footer */}
-      <div style={{ padding:'12px 16px', borderTop:`1px solid ${T.bdr}` }}>
-        <div style={{ fontSize:11, color:T.mute }}>Operador activo</div>
-        <div style={{ fontSize:12, color:T.sub, marginTop:2, fontWeight:500 }}>María González</div>
+      {/* Footer / User Profile */}
+      <div style={{ padding:'16px', borderTop:`1px solid ${T.bdr}`, background:T.card2 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
+          <img 
+            src={user?.foto_url || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png'} 
+            style={{ width:32, height:32, borderRadius:8, objectFit:'cover', border:`1px solid ${T.bdr2}` }}
+            alt="User"
+          />
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:12, color:T.txt, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+              {user?.nombre || 'Operador'}
+            </div>
+            <div style={{ fontSize:10, color:T.mute }}>{user?.rol === 'admin' ? 'Administrador' : 'Operador'}</div>
+          </div>
+        </div>
+        <button onClick={onLogout}
+          style={{ width:'100%', padding:'6px', background:'rgba(239,68,68,0.1)', color:T.RED, 
+            border:'none', borderRadius:6, fontSize:11, fontWeight:600, cursor:'pointer' }}>
+          Cerrar sesión
+        </button>
       </div>
     </div>
   );
@@ -818,14 +843,24 @@ function PlaceholderView({ titulo, icono: Icon }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// APP ROOT
+// APP CONTENT (PROTECTED)
 // ─────────────────────────────────────────────────────────────
-export default function App() {
+function AppContent() {
+  const { isAuthenticated, user, logout } = useAuth();
   const [view,      setView]     = useState('dashboard');
   const [tareas,    setTareas]   = useState(TAREAS_INIT);
   const [conductores]            = useState(CONDUCTORES_INIT);
   const [vehiculos]              = useState(VEHICULOS_INIT);
   const [modalTarea, setModal]   = useState(null);
+  const [theme,      setTheme]   = useState('dark');
+
+  useMemo(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  if (!isAuthenticated) {
+    return <LoginView />;
+  }
 
   function handleAsignar(tarea) { setModal(tarea); }
 
@@ -838,18 +873,21 @@ export default function App() {
 
   const pageTitle = {
     dashboard:   'Dashboard operativo',
+    cotizaciones:'Cotizador de Transporte',
     eventos:     'Eventos',
     tareas:      'Tareas del día',
     conductores: 'Conductores',
     vehiculos:   'Vehículos',
     gastos:      'Gastos',
     reportes:    'Reportes',
+    usuarios:    'Seguridad y Usuarios',
+    config:      'Configuración del Sistema',
   }[view];
 
   return (
     <div style={{ display:'flex', minHeight:'100vh', background:T.bg, fontFamily:"system-ui,-apple-system,sans-serif",
       color:T.txt, fontSize:14, lineHeight:1.5 }}>
-      <Sidebar active={view} setView={setView} />
+      <Sidebar active={view} setView={setView} user={user} onLogout={logout} />
 
       <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
         <AlertBar tareas={tareas} />
@@ -862,13 +900,18 @@ export default function App() {
             <div style={{ fontSize:12, color:T.mute, marginTop:2 }}>Miércoles, 9 de abril de 2026</div>
           </div>
           <div style={{ display:'flex', gap:8 }}>
+            <button onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+              style={{ padding:'7px 12px', background:'transparent', border:`1px solid ${T.bdr2}`,
+                borderRadius:8, color:T.sub, cursor:'pointer', display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
+              {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />} {theme === 'dark' ? 'Modo Día' : 'Modo Noche'}
+            </button>
             <button style={{ padding:'7px 12px', background:'transparent', border:`1px solid ${T.bdr2}`,
               borderRadius:8, color:T.sub, cursor:'pointer', display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
               <RefreshCcw size={13} /> Actualizar
             </button>
             <button style={{ padding:'7px 14px', background:T.AMB, border:'none',
               borderRadius:8, color:'#000', cursor:'pointer', fontWeight:600, fontSize:13 }}>
-              + Nueva tarea
+              + Nuevo
             </button>
           </div>
         </div>
@@ -876,10 +919,13 @@ export default function App() {
         {/* Content */}
         <div style={{ flex:1, padding:28, overflowY:'auto' }}>
           {view === 'dashboard'   && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={EVENTOS} onAsignar={handleAsignar} />}
+          {view === 'cotizaciones'&& <CotizadorView vehiculos={vehiculos} onSave={()=>{}} historial={[]} />}
           {view === 'eventos'     && <EventosView eventos={EVENTOS} />}
           {view === 'tareas'      && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={EVENTOS} onAsignar={handleAsignar} />}
           {view === 'conductores' && <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} />}
           {view === 'vehiculos'   && <VehiculosView vehiculos={vehiculos} conductores={conductores} />}
+          {view === 'usuarios'    && <UsuarioMgmtView />}
+          {view === 'config'      && <ConfiguracionesView />}
           {view === 'gastos'      && <PlaceholderView titulo="Módulo de Gastos" icono={Receipt}   />}
           {view === 'reportes'    && <PlaceholderView titulo="Módulo de Reportes" icono={BarChart3} />}
         </div>
@@ -898,5 +944,16 @@ export default function App() {
         />
       )}
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// APP ROOT
+// ─────────────────────────────────────────────────────────────
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
