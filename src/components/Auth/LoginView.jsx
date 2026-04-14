@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Bus, Lock, User, AlertCircle, Loader2 } from 'lucide-react';
-import { T } from '../../App';
+import { T } from '../../theme';
 
 export default function LoginView() {
   const [username, setUsername] = useState('');

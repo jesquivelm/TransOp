@@ -1,0 +1,28 @@
+
+Terminal 1 — ya la tienes:
+
+node server.js
+Terminal 2 — abre una nueva terminal en E:\Proyecto TransOP y corre:
+
+npm run dev
+
+Eso levanta Vite que es el que compila el React. La app que ves en el navegador tiene que ser la de Vite (normalmente http://localhost:5173), no la del servidor.
+
+Si abres http://localhost:3020 estás viendo el build viejo de /dist, que no refleja tus cambios. Los cambios en .jsx solo se ven a través de Vite.
+
+
+
+
+
+npm.cmd install   (solo la primera vez)
+
+
+Para Abrir el Backend:
+
+node server.js
+
+Para Abrir el Frontend:
+npm run dev    o    npm.cmd run dev   (esto porque a veces powershell tiene prohibido correr estas herramientas de forma directa)
+
+
+

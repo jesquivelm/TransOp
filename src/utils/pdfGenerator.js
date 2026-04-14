@@ -1,153 +1,363 @@
-import { jsPDF } from "jspdf";
+/**
+ * pdfGenerator.js
+ * Genera una proforma profesional en HTML y lanza el diálogo de impresión/PDF.
+ * No requiere librerías externas — funciona en cualquier navegador moderno.
+ */
 
-export function pdfGen({ params, socio, resData, vehiculo, logoData = null, franjasDia = [], empresaConfig = {} }) {
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const W = 210, M = 18, cW = W - M * 2;
-  const fmt = (v) => v != null ? `$${v.toFixed(2)}` : '$0.00';
-  
-  const empresa = empresaConfig.nombre || 'TransOP';
-  const tel = empresaConfig.tel || '+506 8000-0000';
-  const email = empresaConfig.email || 'info@transop.com';
-  const web = empresaConfig.web || 'www.transop.com';
-  const dir = empresaConfig.pais || 'Costa Rica';
-  const cedJur = empresaConfig.cedJur || '3-101-000000';
-  const tituloPDF = empresaConfig.tituloPDF || 'PROFORMA DE SERVICIO DE TRANSPORTE';
-  const terminos = empresaConfig.terminos || '';
-  
-  const numero = socio.cfNumero || 'PRO-001';
-  const validez = socio.cfValidez || 15;
-  const hoy = new Date();
-  const fmtDate = d => d.toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' });
-  const venc = new Date(hoy); venc.setDate(venc.getDate() + validez);
+export function pdfGen({ params, socio, resData, vehiculo, config = {} }) {
+  const fmt    = (v) => v != null ? `$${Number(v).toFixed(2)}` : '$0.00';
+  const fmtCRC = (v) => v != null ? `₡${Math.round(v).toLocaleString('es-CR')}` : '₡0';
 
-  let y = 0;
+  // ── Datos de empresa (de config global) ──────────────────────────────────
+  const nombre   = config.nombre    || 'TransOP S.A.';
+  const telefono = config.telefono  || '+506 0000-0000';
+  const email    = config.email     || 'info@transop.cr';
+  const logoUrl  = config.logo_url  || '';
+  const color    = config.color     || '#f59e0b';
+  const colorDark= config.colorDark || '#0f172a';
 
-  // Header PDF - Design Premium (Blue/Gold Accent)
-  doc.setFillColor(30, 58, 138); // Navy Blue
-  doc.rect(0, 0, W, 10, 'F');
-  doc.setFillColor(212, 175, 55); // Gold Accent
-  doc.rect(0, 10, W, 1.5, 'F');
-  
-  if (logoData) {
-    try { doc.addImage(logoData, 'PNG', M, 18, 45, 20, '', 'FAST'); } catch (e) { }
-  } else {
-    doc.setTextColor(30, 58, 138); doc.setFontSize(24); doc.setFont('helvetica', 'bold'); doc.text(empresa, M, 30);
+  // ── Fechas ────────────────────────────────────────────────────────────────
+  const hoy    = new Date();
+  const fechaEmision = hoy.toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' });
+  const fechaVence   = new Date(hoy.getTime() + (Number(socio.cfValidez) || 15) * 86400000)
+    .toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  // ── Filas del desglose ────────────────────────────────────────────────────
+  const rows = [
+    { label: `Combustible (${params.km} km × $${params.combustible}/km)`, val: resData.costoKm },
+    { label: 'Colaborador',                   val: params.colaborador },
+    { label: 'Peajes',                        val: params.peajes      },
+    { label: 'Viáticos',                      val: params.viaticos    },
+    params.ferry > 0   ? { label: 'Ferry',    val: params.ferry }     : null,
+    params.utilidad > 0? { label: 'Utilidad', val: params.utilidad }  : null,
+    params.chkDia      ? { label: 'Adicional colaborador (día)',        val: params.adicCol } : null,
+    params.chkDia      ? { label: 'Adicional viáticos (día)',           val: params.adicViat }: null,
+    params.diasGAM > 0 ? { label: `Tarifa GAM (${params.diasGAM} días × $${params.tarifaGAM})`, val: params.diasGAM * params.tarifaGAM } : null,
+    params.diasSM  > 0 ? { label: `Media tarifa sin mov. (${params.diasSM} días)`, val: params.diasSM * params.mediaTarifa } : null,
+    params.ckTinSJ     ? { label: 'Transfer IN Aeropuerto SJO',         val: params.tInSJ  } : null,
+    params.ckToutSJ    ? { label: 'Transfer OUT Aeropuerto SJO',        val: params.tOutSJ } : null,
+    params.ckTinCTG    ? { label: 'Transfer IN Aeropuerto Cartago',     val: params.tInCTG } : null,
+    params.ckToutCTG   ? { label: 'Transfer OUT Aeropuerto Cartago',    val: params.tOutCTG} : null,
+    params.noches > 0  ? { label: `Hospedaje (${params.noches} noches × $${params.hospedaje})`, val: params.noches * params.hospedaje } : null,
+    params.persViat > 0 && params.viatDiario > 0 ? { label: `Viáticos diarios (${params.persViat} persona/s)`, val: params.viatDiario * params.persViat } : null,
+  ].filter(Boolean);
+
+  const vehiculoTipo = vehiculo?.tipo === 'Bus' ? '🚌' : '🚐';
+
+  // ── HTML del documento ────────────────────────────────────────────────────
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Proforma ${socio.cfNumero}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+      color: #1e293b;
+      background: #fff;
+      padding: 36px 44px;
+      max-width: 820px;
+      margin: 0 auto;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* ── Header ─────────────────────────────────────── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 24px;
+      margin-bottom: 28px;
+      border-bottom: 3px solid ${color};
+    }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .brand-logo {
+      width: 54px; height: 54px; background: ${color};
+      border-radius: 12px; display: flex; align-items: center; justify-content: center;
+      font-size: 26px; flex-shrink: 0;
+    }
+    .brand-logo img { width: 100%; height: 100%; object-fit: contain; border-radius: 12px; }
+    .brand-name { font-size: 22px; font-weight: 800; color: ${colorDark}; line-height: 1; }
+    .brand-contact { font-size: 11px; color: #64748b; margin-top: 4px; }
+
+    .proforma-id { text-align: right; }
+    .proforma-num { font-size: 24px; font-weight: 800; color: ${color}; letter-spacing: -.5px; }
+    .meta-row { margin-top: 8px; }
+    .meta-lbl { font-size: 9px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .6px; }
+    .meta-val { font-size: 12px; color: #334155; font-weight: 600; }
+
+    /* ── Section ─────────────────────────────────────── */
+    .section { margin-bottom: 24px; }
+    .section-title {
+      font-size: 10px; font-weight: 700; color: ${color};
+      text-transform: uppercase; letter-spacing: .8px;
+      padding-bottom: 7px; margin-bottom: 12px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+    .field-lbl { font-size: 9px; color: #94a3b8; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 2px; }
+    .field-val { font-size: 12px; color: #1e293b; font-weight: 500; }
+
+    /* ── Vehicle ─────────────────────────────────────── */
+    .vehicle-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .vehicle-ico { font-size: 32px; flex-shrink: 0; }
+    .vehicle-img { width: 80px; height: 56px; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
+    .vehicle-name { font-size: 15px; font-weight: 700; color: #0f172a; }
+    .vehicle-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
+
+    /* ── Table ───────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th {
+      background: ${colorDark}; color: #fff;
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; padding: 9px 14px; text-align: left;
+    }
+    th.right, td.right { text-align: right; }
+    td { padding: 8px 14px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    td.amount { font-weight: 600; color: #1e293b; }
+
+    .sub-row td { border-top: 2px solid #e2e8f0; font-weight: 700; color: #0f172a; background: #f1f5f9; }
+    .iva-row td { color: #64748b; }
+    .total-row td {
+      background: ${colorDark}; color: #fff;
+      font-size: 14px; font-weight: 800;
+      padding: 12px 14px; border: none;
+    }
+    .total-amt { color: ${color}; }
+
+    /* ── Terms ───────────────────────────────────────── */
+    .terms {
+      background: #f8fafc; border-radius: 10px;
+      padding: 14px 18px; font-size: 11px; color: #64748b; line-height: 1.7;
+    }
+    .terms strong { color: #334155; }
+
+    /* ── Signature area ──────────────────────────────── */
+    .sig-area {
+      display: flex; justify-content: space-between; gap: 40px;
+      margin-top: 40px; padding-top: 20px;
+    }
+    .sig-box { flex: 1; text-align: center; }
+    .sig-line { border-top: 1px solid #94a3b8; margin-bottom: 8px; padding-top: 8px; }
+    .sig-lbl { font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: .5px; }
+
+    /* ── Footer ──────────────────────────────────────── */
+    .footer {
+      margin-top: 28px; padding-top: 14px;
+      border-top: 1px solid #e2e8f0;
+      display: flex; justify-content: space-between;
+      font-size: 10px; color: #94a3b8;
+    }
+
+    /* ── Print ───────────────────────────────────────── */
+    @media print {
+      body { padding: 0; max-width: 100%; }
+      @page { margin: 1.2cm 1.5cm; size: A4 portrait; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══ HEADER ═══════════════════════════════════════════════════ -->
+  <div class="header">
+    <div class="brand">
+      <div class="brand-logo">
+        ${logoUrl
+          ? `<img src="${logoUrl}" alt="${nombre}">`
+          : vehiculoTipo
+        }
+      </div>
+      <div>
+        <div class="brand-name">${nombre}</div>
+        <div class="brand-contact">${telefono} &nbsp;·&nbsp; ${email}</div>
+      </div>
+    </div>
+    <div class="proforma-id">
+      <div class="proforma-num">${socio.cfNumero}</div>
+      <div class="meta-row">
+        <div class="meta-lbl">Fecha de emisión</div>
+        <div class="meta-val">${fechaEmision}</div>
+      </div>
+      <div class="meta-row" style="margin-top:6px">
+        <div class="meta-lbl">Válida hasta</div>
+        <div class="meta-val">${fechaVence}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ VEHÍCULO ══════════════════════════════════════════════════ -->
+  ${vehiculo ? `
+  <div class="section">
+    <div class="section-title">Unidad de Transporte</div>
+    <div class="vehicle-box">
+      ${vehiculo.img_url
+        ? `<img class="vehicle-img" src="${vehiculo.img_url}" alt="${vehiculo.marca} ${vehiculo.modelo}">`
+        : `<div class="vehicle-ico">${vehiculoTipo}</div>`
+      }
+      <div>
+        <div class="vehicle-name">${vehiculo.marca} ${vehiculo.modelo}</div>
+        <div class="vehicle-sub">
+          Capacidad: ${vehiculo.cap || vehiculo.capacidad_pasajeros || '—'} pasajeros
+          &nbsp;·&nbsp; Placa: ${vehiculo.placa}
+          &nbsp;·&nbsp; Combustible: ${vehiculo.combustible_tipo || 'Diésel'}
+        </div>
+      </div>
+    </div>
+  </div>` : ''}
+
+  <!-- ═══ CLIENTE ═══════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">Datos del Cliente</div>
+    <div class="grid2">
+      <div>
+        <div class="field-lbl">Nombre completo</div>
+        <div class="field-val">${socio.sNombre || '—'}</div>
+      </div>
+      <div>
+        <div class="field-lbl">Empresa</div>
+        <div class="field-val">${socio.sEmpresa || '—'}</div>
+      </div>
+      <div>
+        <div class="field-lbl">Email</div>
+        <div class="field-val">${socio.sEmail || '—'}</div>
+      </div>
+      <div>
+        <div class="field-lbl">Teléfono</div>
+        <div class="field-val">${socio.sTel || '—'}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SERVICIO ══════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">Detalle del Servicio</div>
+    <div class="grid3">
+      <div>
+        <div class="field-lbl">Pasajeros</div>
+        <div class="field-val">${socio.sPax || '1'}</div>
+      </div>
+      <div>
+        <div class="field-lbl">Fecha del servicio</div>
+        <div class="field-val">${socio.sFecha ? new Date(socio.sFecha + 'T12:00:00').toLocaleDateString('es-CR', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' }) : '—'}</div>
+      </div>
+      <div>
+        <div class="field-lbl">Hora</div>
+        <div class="field-val">${socio.sHora || '—'}</div>
+      </div>
+      <div>
+        <div class="field-lbl">Origen</div>
+        <div class="field-val">${socio.sOrigen || '—'}</div>
+      </div>
+      <div>
+        <div class="field-lbl">Destino</div>
+        <div class="field-val">${socio.sDestino || '—'}</div>
+      </div>
+    </div>
+    ${socio.cfDescripcion ? `
+    <div style="margin-top:14px">
+      <div class="field-lbl">Descripción del servicio</div>
+      <div class="field-val" style="margin-top:4px;line-height:1.6">${socio.cfDescripcion}</div>
+    </div>` : ''}
+  </div>
+
+  <!-- ═══ DESGLOSE ══════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">Desglose de Costos</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Concepto</th>
+          <th class="right">Monto (USD)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => `
+        <tr>
+          <td>${r.label}</td>
+          <td class="right amount">${fmt(r.val)}</td>
+        </tr>`).join('')}
+        <tr class="sub-row">
+          <td>Subtotal</td>
+          <td class="right">${fmt(resData.subtotal)}</td>
+        </tr>
+        <tr class="iva-row">
+          <td>IVA (${params.iva}%)</td>
+          <td class="right">${fmt(resData.ivaAmt)}</td>
+        </tr>
+        <tr class="total-row">
+          <td>TOTAL</td>
+          <td class="right total-amt">
+            ${fmt(resData.total)}<br>
+            <span style="font-size:10px;opacity:.75;font-weight:400">${fmtCRC(resData.totalCRC)}</span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ═══ CONDICIONES ═══════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">Condiciones</div>
+    <div class="terms">
+      <strong>Forma de pago:</strong> ${socio.cfPago || '50% adelanto, 50% al cierre'}<br>
+      <strong>Validez:</strong> ${socio.cfValidez || 15} días calendario a partir de la fecha de emisión (hasta ${fechaVence}).<br>
+      <strong>Tipo de cambio referencial:</strong> ₡${params.tc || 520} por dólar americano (USD).<br>
+      Esta proforma no constituye un contrato vinculante hasta ser formalmente aceptada por el cliente mediante firma o confirmación escrita.
+      Los precios pueden variar si las condiciones del servicio cambian.
+    </div>
+  </div>
+
+  <!-- ═══ FIRMAS ════════════════════════════════════════════════════ -->
+  <div class="sig-area">
+    <div class="sig-box">
+      <div style="height:50px"></div>
+      <div class="sig-line"></div>
+      <div class="sig-lbl">Firma del cliente</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px">${socio.sNombre || '____________________'}</div>
+    </div>
+    <div class="sig-box">
+      <div style="height:50px"></div>
+      <div class="sig-line"></div>
+      <div class="sig-lbl">Representante ${nombre}</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:4px">____________________</div>
+    </div>
+  </div>
+
+  <!-- ═══ FOOTER ════════════════════════════════════════════════════ -->
+  <div class="footer">
+    <span>${nombre} &nbsp;·&nbsp; ${email} &nbsp;·&nbsp; ${telefono}</span>
+    <span>${socio.cfNumero} &nbsp;·&nbsp; ${fechaEmision}</span>
+  </div>
+
+  <script>
+    window.onload = function() {
+      window.print();
+      window.onafterprint = function() { window.close(); };
+    };
+  </script>
+</body>
+</html>`;
+
+  // Abrir en ventana nueva y disparar impresión
+  const win = window.open('', '_blank', 'width=960,height=740,scrollbars=yes');
+  if (!win) {
+    alert('El navegador bloqueó la ventana emergente. Por favor, permite pop-ups para este sitio y vuelve a intentarlo.');
+    return;
   }
-  
-  doc.setTextColor(20, 20, 20); doc.setFontSize(16); doc.setFont('helvetica', 'bold');
-  doc.text(tituloPDF, W - M, 24, { align: 'right' });
-  doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 100, 100);
-  doc.text(`Proforma No. ${numero}`, W - M, 30, { align: 'right' });
-  doc.text(`Fecha emisión: ${fmtDate(hoy)}`, W - M, 35, { align: 'right' });
-  doc.text(`Válida hasta: ${fmtDate(venc)}`, W - M, 40, { align: 'right' });
-  y = 48;
-
-  // Info Box (Emisor/Cliente)
-  const bH = 34;
-  doc.setFillColor(248, 250, 252); doc.rect(M, y, cW, bH, 'F');
-  doc.setDrawColor(226, 232, 240); doc.rect(M, y, cW, bH);
-  doc.line(M + cW / 2, y, M + cW / 2, y + bH);
-  
-  doc.setTextColor(30, 58, 138); doc.setFontSize(8); doc.setFont('helvetica', 'bold');
-  doc.text('INFORMACIÓN DEL EMISOR', M + 5, y + 7);
-  doc.setTextColor(40, 40, 40); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-  doc.text(empresa, M + 5, y + 13);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
-  doc.text(`C.J.: ${cedJur}`, M + 5, y + 18);
-  doc.text(`Tel: ${tel} | ${web}`, M + 5, y + 23);
-  doc.text(email, M + 5, y + 28);
-  
-  const sx = M + cW / 2 + 5;
-  doc.setTextColor(30, 58, 138); doc.setFontSize(8); doc.setFont('helvetica', 'bold');
-  doc.text('PREPARADO PARA:', sx, y + 7);
-  doc.setTextColor(40, 40, 40); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-  doc.text(socio.sNombre || 'Cliente Estimado', sx, y + 13);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
-  if (socio.sEmpresa) doc.text(socio.sEmpresa, sx, y + 18);
-  if (socio.sEmail) doc.text(socio.sEmail, sx, y + 23);
-  if (socio.sTel) doc.text(`Tel: ${socio.sTel}`, sx, y + 28);
-  
-  y += bH + 8;
-
-  // DETALLE DEL SERVICIO
-  doc.setFillColor(30, 58, 138); doc.rect(M, y, cW, 8, 'F');
-  doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
-  doc.text('DESCRIPCIÓN DEL REQUERIMIENTO', M + 4, y + 5.5); y += 8;
-  
-  doc.setDrawColor(226, 232, 240); doc.rect(M, y, cW, 25);
-  doc.setTextColor(40, 40, 40); doc.setFontSize(8.5); doc.setFont('helvetica', 'normal');
-  doc.text(`• UNIDAD: ${vehiculo?.marca || 'Unidad'} ${vehiculo?.modelo || ''} (Placa: ${vehiculo?.placa || 'N/A'})`, M + 4, y + 6);
-  doc.text(`• PASAJEROS: ${socio.sPax || '—'} pax`, M + 4, y + 11);
-  doc.text(`• ITINERARIO: ${socio.sFecha || '—'} a las ${socio.sHora || '—'}`, M + 4, y + 16);
-  doc.text(`• RUTA: ${socio.sOrigen || '—'} ➔ ${socio.sDestino || '—'}`, M + 4, y + 21);
-  y += 30;
-
-  // ITINERARIO DETALLADO
-  if (franjasDia && franjasDia.length > 0) {
-    doc.setFillColor(30, 58, 138); doc.rect(M, y, cW, 8, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
-    doc.text('ITINERARIO PROPUESTO (CRONOGRAMA)', M + 4, y + 5.5); y += 8;
-
-    doc.setFontSize(8); doc.setTextColor(40, 40, 40);
-    franjasDia.forEach((f, i) => {
-        doc.setFillColor(i % 2 === 0 ? 255 : 248, i % 2 === 0 ? 255 : 250, i % 2 === 0 ? 255 : 252);
-        doc.rect(M, y, cW, 7, 'F');
-        doc.setFont('helvetica', 'bold'); doc.text(f.hora, M + 4, y + 4.5);
-        doc.setFont('helvetica', 'normal'); doc.text(f.actividad, M + 35, y + 4.5);
-        doc.setFontSize(7); doc.setTextColor(100, 100, 100);
-        doc.text(f.detalle, M + 90, y + 4.5);
-        doc.setFontSize(8); doc.setTextColor(40, 40, 40);
-        y += 7;
-    });
-    y += 8;
-  }
-
-  // COSTOS
-  doc.setFillColor(30, 58, 138); doc.rect(M, y, cW, 8, 'F');
-  doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
-  doc.text('VALORIZACIÓN DEL SERVICIO', M + 4, y + 5.5);
-  doc.text('COSTO USD', M + cW - 4, y + 5.5, { align: 'right' }); y += 8;
-  
-  const drawRow = (l, v, b = false) => {
-    doc.setFont('helvetica', b ? 'bold' : 'normal');
-    doc.text(l, M + 4, y + 5);
-    doc.text(fmt(v), M + cW - 4, y + 5, { align: 'right' }); y += 7;
-    doc.setDrawColor(241, 245, 249); doc.line(M, y, M + cW, y);
-  };
-
-  drawRow('Servicio de transporte y costos operativos base', resData.base);
-  if (resData.tarFijas > 0) drawRow('Cargos por tarifas fijas / transfers adicionales', resData.tarFijas);
-  if (resData.extras > 0) drawRow('Gastos de hospedaje / viáticos diarios', resData.extras);
-  
-  y += 4;
-  doc.setFontSize(10);
-  doc.setTextColor(30, 58, 138);
-  doc.text('SUBTOTAL:', M + cW - 45, y + 5, { align: 'right' });
-  doc.text(fmt(resData.subtotal), M + cW - 4, y + 5, { align: 'right' }); y += 6;
-  
-  doc.setFontSize(9); doc.setTextColor(100, 100, 100); doc.setFont('helvetica', 'normal');
-  doc.text(`Impuesto de Ventas (IVA ${params.iva}%):`, M + cW - 45, y + 5, { align: 'right' });
-  doc.text(fmt(resData.ivaAmt), M + cW - 4, y + 5, { align: 'right' }); y += 8;
-
-  doc.setFillColor(30, 58, 138); doc.rect(M + cW - 80, y, 80, 10, 'F');
-  doc.setTextColor(255, 255, 255); doc.setFontSize(12); doc.setFont('helvetica', 'bold');
-  doc.text('TOTAL A PAGAR:', M + cW - 75, y + 6.5);
-  doc.text(fmt(resData.total), M + cW - 4, y + 6.5, { align: 'right' });
-  y += 18;
-
-  // Términos
-  if (terminos) {
-    doc.setTextColor(30, 58, 138); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
-    doc.text('TÉRMINOS Y CONDICIONES:', M, y); y += 5;
-    doc.setTextColor(80, 80, 80); doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
-    const tl = doc.splitTextToSize(terminos, cW);
-    doc.text(tl, M, y);
-  }
-
-  // Firma / Footer
-  const footerY = 280;
-  doc.setFontSize(7); doc.setTextColor(150, 150, 150);
-  doc.text(empresaConfig.nota || `Esta proforma es un presupuesto y no garantiza reserva hasta su confirmación.`, W/2, footerY, { align: 'center' });
-
-  doc.save(`Proforma_${numero}.pdf`);
+  win.document.write(html);
+  win.document.close();
 }
