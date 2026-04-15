@@ -1211,7 +1211,7 @@ app.post('/api/system/db-config/test', authenticateToken, requireAdmin, async (r
     }
 });
 
-app.post('/api/system/db-config', authenticateToken, async (req, res) => {
+app.post('/api/system/db-config', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const result = await testConnection(req.body);
         const config = await saveDatabaseConfig(req.body);
@@ -1582,15 +1582,7 @@ app.get('/api/tms/eventos', authenticateToken, async (req, res) => {
     try {
         const result = await pgQuery(
             `SELECT
-                e.id,
-                e.nombre,
-                COALESCE(NULLIF(TRIM(c.empresa), ''), c.nombre) AS cliente,
-                c.nombre AS "clienteNombre",
-                NULLIF(TRIM(c.empresa), '') AS "clienteEmpresa",
-                c.telefono AS "clienteTelefono",
-                cp.nombre AS "contactoNombre",
-                cp.telefono AS "contactoTelefono",
-                e.estado, e.prioridad AS prio,
+                e.id, e.nombre, c.nombre AS cliente, e.estado, e.prioridad AS prio,
                 TO_CHAR(e.fecha_inicio, 'DD/MM') AS inicio,
                 TO_CHAR(e.fecha_fin,   'DD/MM') AS fin,
                 e.pax_estimados AS pax,
@@ -1598,16 +1590,9 @@ app.get('/api/tms/eventos', authenticateToken, async (req, res) => {
                 COUNT(t.id) FILTER (WHERE t.estado = 'completada') AS ok
              FROM eventos e
              JOIN clientes c ON c.id = e.cliente_id
-             LEFT JOIN LATERAL (
-                SELECT nombre, telefono
-                FROM contactos
-                WHERE cliente_id = c.id
-                ORDER BY es_principal DESC, created_at ASC
-                LIMIT 1
-             ) cp ON TRUE
              LEFT JOIN tareas t ON t.evento_id = e.id
              WHERE e.estado != 'cancelado'
-             GROUP BY e.id, c.id, cp.nombre, cp.telefono
+             GROUP BY e.id, c.nombre
              ORDER BY e.fecha_inicio ASC`
         );
         res.json(result.rows);
@@ -1668,38 +1653,12 @@ app.put('/api/tms/eventos/:id', authenticateToken, async (req, res) => {
     }
 });
 
-app.post('/api/tms/eventos/:id/tareas', authenticateToken, async (req, res) => {
-    const { id } = req.params;
-    const taskIds = Array.isArray(req.body?.taskIds) ? req.body.taskIds.filter(Boolean) : [];
-    if (!taskIds.length) {
-        return res.status(400).json({ error: 'Debes enviar al menos una tarea.' });
-    }
-
-    try {
-        await pgQuery(
-            `UPDATE tareas
-             SET evento_id = $1,
-                 updated_at = NOW()
-             WHERE id = ANY($2::uuid[])`,
-            [id, taskIds]
-        );
-        await pgQuery(
-            `UPDATE eventos SET updated_at = NOW() WHERE id = $1`,
-            [id]
-        );
-        res.json({ success: true, updated: taskIds.length });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
 // ─────────────────────────────────────────────────────────────
 // TAREAS  ← NUEVO
 // ─────────────────────────────────────────────────────────────
 app.get('/api/tms/tareas', authenticateToken, async (req, res) => {
+    // Acepta ?fecha=YYYY-MM-DD para filtrar por día (si no, devuelve las de hoy)
     const fecha = req.query.fecha || new Date().toISOString().slice(0, 10);
-    const desde = req.query.desde || fecha;
-    const hasta = req.query.hasta || fecha;
     try {
         const result = await pgQuery(
             `SELECT
@@ -1711,13 +1670,12 @@ app.get('/api/tms/tareas', authenticateToken, async (req, res) => {
                 conductor_id AS "condId",
                 vehiculo_id AS "vehId",
                 pasajeros AS pax, punto_salida AS origen, destino,
-                TO_CHAR(fecha_salida, 'YYYY-MM-DD') AS fecha,
-                notas_operativas AS notas
+                TO_CHAR(fecha_salida, 'YYYY-MM-DD') AS fecha
              FROM tareas
-             WHERE fecha_salida::date BETWEEN $1::date AND $2::date
+             WHERE fecha_salida::date = $1::date
                AND estado != 'cancelada'
              ORDER BY fecha_salida ASC`,
-            [desde, hasta]
+            [fecha]
         );
         res.json(result.rows);
     } catch (error) {
@@ -1772,15 +1730,11 @@ app.patch('/api/tms/tareas/:id/asignar', authenticateToken, async (req, res) => 
 // Actualizar estado de una tarea
 app.patch('/api/tms/tareas/:id/estado', authenticateToken, async (req, res) => {
     const { id } = req.params;
-    const { estado, notas } = req.body;
+    const { estado } = req.body;
     try {
         await pgQuery(
-            `UPDATE tareas
-             SET estado = $1,
-                 notas_operativas = COALESCE($2, notas_operativas),
-                 updated_at = NOW()
-             WHERE id = $3`,
-            [estado, notas ?? null, id]
+            `UPDATE tareas SET estado = $1, updated_at = NOW() WHERE id = $2`,
+            [estado, id]
         );
         res.json({ success: true });
     } catch (error) {
