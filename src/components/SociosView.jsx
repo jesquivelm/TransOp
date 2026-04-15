@@ -382,14 +382,6 @@ function SociosView({ voiceDraft = null, onVoiceDraftApplied }) {
             <option value="todos">Todos los tipos</option>
             {TIPOS.map(tipo => <option key={tipo.id} value={tipo.id}>{tipo.label}</option>)}
           </select>
-
-          <button onClick={cargar} style={{ padding: "8px 12px", background: "transparent", border: `1px solid ${T.bdr2}`, borderRadius: 8, color: T.sub, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-            <RefreshCcw size={13} />
-          </button>
-
-          <button onClick={abrirNuevo} style={{ padding: "8px 14px", background: T.ambDim, border: `1px solid ${T.AMB}44`, borderRadius: 8, color: T.AMB, cursor: "pointer", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
-            <Plus size={14} /> Nuevo socio
-          </button>
         </div>
 
         {error && !showForm && (

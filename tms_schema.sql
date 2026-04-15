@@ -102,6 +102,7 @@ CREATE TABLE vehiculos (
     fecha_revision_tecnica  DATE,
     fecha_marchamo          DATE,
     fecha_seguro            DATE,
+    licencia_requerida      VARCHAR(10),
     estado                  VARCHAR(25) NOT NULL DEFAULT 'disponible'
                             CHECK (estado IN ('disponible','en_servicio','mantenimiento','fuera_de_servicio')),
     foto_url                TEXT,
@@ -189,6 +190,26 @@ CREATE TABLE tms_config (
     clave           VARCHAR(50) UNIQUE NOT NULL,
     valor           JSONB,
     updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE tms_gastos (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    vehiculo_id     UUID REFERENCES vehiculos(id) ON DELETE SET NULL,
+    tipo            VARCHAR(20) NOT NULL DEFAULT 'otro',
+    detalle         TEXT NOT NULL,
+    monto           DECIMAL(12,2) NOT NULL DEFAULT 0,
+    fecha           DATE NOT NULL DEFAULT CURRENT_DATE,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE tms_gasto_adjuntos (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    gasto_id        UUID NOT NULL REFERENCES tms_gastos(id) ON DELETE CASCADE,
+    nombre_original VARCHAR(255),
+    archivo_path    TEXT NOT NULL,
+    mime_type       VARCHAR(120),
+    created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- =============================================================

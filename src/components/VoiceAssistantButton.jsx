@@ -112,7 +112,7 @@ export default function VoiceAssistantButton({ token, onInterpretation }) {
           return;
         }
         if (audioBlob.size > 24 * 1024 * 1024) {
-          setError('La grabaciÃ³n es demasiado grande. Intenta enviarla en tramos mÃ¡s cortos.');
+          setError('La grabacion es demasiado grande. Intenta enviarla en tramos mas cortos.');
           return;
         }
 

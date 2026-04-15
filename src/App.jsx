@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   LayoutDashboard, CalendarDays, CheckSquare, Users, Bus, Receipt,
   BarChart3, AlertTriangle, CheckCircle, XCircle, Clock, MapPin,
@@ -15,7 +15,7 @@ import FlotaGanttView from './components/FlotaGanttView';
 import VoiceAssistantButton from './components/VoiceAssistantButton';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { T } from './theme';
-import { normalizeVoiceInterpretation } from './utils/voiceDrafts';
+import { normalizeTimeInput, normalizeVoiceInterpretation } from './utils/voiceDrafts';
 
 // ─────────────────────────────────────────────────────────────
 // TOKENS DE COLOR
@@ -29,6 +29,15 @@ const API = '/api/tms';
 
 // Fecha de hoy en YYYY-MM-DD (dinámica)
 const todayISO = () => new Date().toISOString().slice(0, 10);
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen seleccionada.'));
+    reader.readAsDataURL(file);
+  });
+}
 
 function daysUntil(dateStr) {
   if (!dateStr) return 9999;
@@ -151,8 +160,17 @@ function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, onClo
   const condConf = useMemo(() => checkConductorConflicts(selCond, tarea.hora, tarea.fin, tareas, tarea.id), [selCond]);
   const vehConf  = useMemo(() => checkVehicleConflicts(selVeh, tarea.hora, tarea.fin, tareas, tarea.id),  [selVeh]);
   const selVehObj = vehiculos.find(v => v.id === selVeh);
+  const licenciaRequerida = selVehObj?.licenciaRequerida || '';
+  const conductoresCompatibles = conductores.filter(c => {
+    if (['vacaciones','suspendido','inactivo','enfermo'].includes(c.estado)) return false;
+    if (!licenciaRequerida) return true;
+    return Array.isArray(c.lic) && c.lic.includes(licenciaRequerida);
+  });
   const capOk = selVehObj ? selVehObj.cap >= tarea.pax : true;
-  const canConfirm = selCond && selVeh && condConf.length === 0 && vehConf.length === 0 && capOk;
+  const hasAssignment = Boolean(tarea.condId || tarea.vehId);
+  const wantsAssignment = Boolean(selCond || selVeh);
+  const canConfirm = wantsAssignment && selCond && selVeh && condConf.length === 0 && vehConf.length === 0 && capOk;
+  const canClear = hasAssignment;
 
   const overlay = { position:'fixed', inset:0, background:'rgba(0,0,0,.7)', display:'flex', alignItems:'center',
     justifyContent:'center', zIndex:999, padding:20 };
@@ -182,7 +200,7 @@ function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, onClo
   }
 
   return (
-    <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+    <div style={overlay}>
       <div style={panel}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
           <div>
@@ -205,10 +223,15 @@ function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, onClo
             style={{ width:'100%', padding:'10px 12px', background:T.card2, border:`1px solid ${T.bdr2}`,
               borderRadius:8, color:T.txt, fontSize:14, cursor:'pointer' }}>
             <option value="">— Seleccionar conductor —</option>
-            {conductores.filter(c => !['vacaciones','suspendido','inactivo','enfermo'].includes(c.estado)).map(c => (
+            {conductoresCompatibles.map(c => (
               <option key={c.id} value={c.id}>{c.nombre} ({LC[c.estado]?.[0]})</option>
             ))}
           </select>
+          {licenciaRequerida && (
+            <div style={{ marginTop: 8, fontSize: 12, color: T.mute }}>
+              Se muestran solo conductores con licencia <strong style={{ color: T.AMB }}>{licenciaRequerida}</strong>.
+            </div>
+          )}
           {selCond && <ConflictBlock conflicts={condConf} label="Conductor" />}
         </div>
 
@@ -249,7 +272,14 @@ function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, onClo
             style={{ padding:'10px 20px', background: canConfirm ? T.AMB : 'rgba(245,158,11,0.2)',
               border:'none', borderRadius:8, color: canConfirm ? '#000' : T.mute,
               cursor: canConfirm ? 'pointer' : 'not-allowed', fontSize:14, fontWeight:600 }}>
-            Confirmar asignación
+            {hasAssignment ? 'Guardar cambios' : 'Confirmar asignacion'}
+          </button>
+          <button onClick={() => onConfirm(tarea.id, null, null)} disabled={!canClear}
+            style={{ padding:'10px 20px', background: canClear ? T.redDim : 'rgba(239,68,68,0.12)',
+              border:`1px solid ${canClear ? `${T.RED}33` : T.bdr2}`, borderRadius:8,
+              color: canClear ? T.RED : T.mute, cursor: canClear ? 'pointer' : 'not-allowed',
+              fontSize:14, fontWeight:600 }}>
+            Desasignar
           </button>
         </div>
       </div>
@@ -324,11 +354,11 @@ function Dashboard({ tareas, conductores, vehiculos, eventos, onAsignar }) {
                     </td>
                     <td style={tdSt(110)}><Badge estado={t.estado} /></td>
                     <td style={tdSt(80)}>
-                      {t.estado === 'pendiente' && (
+                      {['pendiente', 'asignada'].includes(t.estado) && (
                         <button onClick={() => onAsignar(t)}
                           style={{ fontSize:12, padding:'4px 10px', background:T.ambDim, border:`1px solid ${T.AMB}33`,
                             borderRadius:6, color:T.AMB, cursor:'pointer', fontWeight:500 }}>
-                          Asignar
+                          {t.condId || t.vehId ? 'Gestionar' : 'Asignar'}
                         </button>
                       )}
                     </td>
@@ -401,7 +431,7 @@ function NuevoConductorModal({ onClose, onConfirm }) {
   const lbl = { fontSize:12, fontWeight:600, color:T.sub, display:'block', marginBottom:6 };
 
   return (
-    <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+    <div style={overlay}>
       <div style={panel}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:22 }}>
           <div style={{ fontSize:17, fontWeight:700, color:T.txt }}>Nuevo conductor</div>
@@ -464,6 +494,119 @@ function NuevoConductorModal({ onClose, onConfirm }) {
   );
 }
 
+function EditarConductorModal({ conductor, onClose, onConfirm }) {
+  const EMPTY = {
+    nombre: conductor?.nombre || '',
+    cedula: conductor?.cedula || '',
+    tel: conductor?.tel || '',
+    alias: conductor?.alias || '',
+    lic: Array.isArray(conductor?.lic) ? conductor.lic : [],
+    estado: conductor?.estado || 'disponible',
+  };
+  const [form, setForm] = useState(EMPTY);
+  const [error, setError] = useState('');
+
+  const LICS = ['B','C','D','E'];
+  const ESTADOS = ['disponible', 'en_servicio', 'vacaciones', 'enfermo', 'suspendido', 'inactivo'];
+  const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+  const toggleLic = (l) => setForm(prev => ({
+    ...prev, lic: prev.lic.includes(l) ? prev.lic.filter(x => x !== l) : [...prev.lic, l]
+  }));
+
+  function submit() {
+    if (!form.cedula.trim()) return setError('La cédula es requerida.');
+    if (!form.tel.trim()) return setError('El teléfono es requerido.');
+    if (form.lic.length === 0) return setError('Seleccione al menos una licencia.');
+    setError('');
+    onConfirm(conductor.id, {
+      cedula: form.cedula.trim(),
+      tel: form.tel.trim(),
+      alias: form.alias.trim() || conductor.nombre.split(' ')[0],
+      lic: form.lic,
+      estado: form.estado,
+    });
+  }
+
+  const overlay = { position:'fixed', inset:0, background:'rgba(0,0,0,.7)', display:'flex',
+    alignItems:'center', justifyContent:'center', zIndex:999, padding:20 };
+  const panel = { background:T.card, border:`1px solid ${T.bdr2}`, borderRadius:16,
+    width:'100%', maxWidth:480, padding:28 };
+  const inp = { width:'100%', padding:'9px 12px', background:T.card2, border:`1px solid ${T.bdr2}`,
+    borderRadius:8, color:T.txt, fontSize:13, outline:'none', boxSizing:'border-box' };
+  const lbl = { fontSize:12, fontWeight:600, color:T.sub, display:'block', marginBottom:6 };
+
+  return (
+    <div style={overlay}>
+      <div style={panel}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:22 }}>
+          <div style={{ fontSize:17, fontWeight:700, color:T.txt }}>Editar conductor</div>
+          <button onClick={onClose} style={{ background:'transparent', border:'none', cursor:'pointer', color:T.mute }}><X size={20}/></button>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+          <div>
+            <label style={lbl}>NOMBRE COMPLETO</label>
+            <input style={{ ...inp, color:T.mute, background:T.card3, cursor:'default' }} value={form.nombre} readOnly />
+          </div>
+          <div style={{ display:'flex', gap:12 }}>
+            <div style={{ flex:1 }}>
+              <label style={lbl}>CÉDULA *</label>
+              <input style={inp} value={form.cedula} onChange={e => set('cedula', e.target.value)} />
+            </div>
+            <div style={{ flex:1 }}>
+              <label style={lbl}>TELÉFONO *</label>
+              <input style={inp} value={form.tel} onChange={e => set('tel', e.target.value)} />
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:12 }}>
+            <div style={{ flex:1 }}>
+              <label style={lbl}>ALIAS / APODO</label>
+              <input style={inp} value={form.alias} onChange={e => set('alias', e.target.value)} />
+            </div>
+            <div style={{ flex:1 }}>
+              <label style={lbl}>ESTADO</label>
+              <select style={{ ...inp, cursor:'pointer' }} value={form.estado} onChange={e => set('estado', e.target.value)}>
+                {ESTADOS.map(item => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style={lbl}>TIPOS DE LICENCIA *</label>
+            <div style={{ display:'flex', gap:8 }}>
+              {LICS.map(l => (
+                <button key={l} onClick={() => toggleLic(l)}
+                  style={{ padding:'7px 16px', borderRadius:8, border:`1px solid ${form.lic.includes(l) ? T.BLU : T.bdr2}`,
+                    background: form.lic.includes(l) ? T.bluDim : 'transparent',
+                    color: form.lic.includes(l) ? T.BLU : T.mute,
+                    fontWeight:700, fontSize:13, cursor:'pointer' }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        {error && (
+          <div style={{ marginTop:14, padding:'8px 12px', background:T.redDim, borderRadius:8,
+            fontSize:12, color:T.RED, border:`1px solid ${T.RED}33` }}>
+            {error}
+          </div>
+        )}
+        <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:22 }}>
+          <button onClick={onClose}
+            style={{ padding:'10px 20px', background:'transparent', border:`1px solid ${T.bdr2}`,
+              borderRadius:8, color:T.sub, cursor:'pointer', fontSize:13 }}>
+            Cancelar
+          </button>
+          <button onClick={submit}
+            style={{ padding:'10px 20px', background:T.AMB, border:'none',
+              borderRadius:8, color:'#000', cursor:'pointer', fontWeight:600, fontSize:13 }}>
+            Guardar cambios
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // MODAL CONFIRMAR BAJA
 // ─────────────────────────────────────────────────────────────
@@ -501,14 +644,81 @@ function ConfirmBajaModal({ nombre, tipo, onClose, onConfirm }) {
   );
 }
 
+function VehicleImageInput({ imageUrl, onFileSelect, loading = false }) {
+  const inputRef = useRef(null);
+
+  return (
+    <div>
+      <div
+        onClick={() => !loading && inputRef.current?.click()}
+        style={{
+          width: '100%',
+          height: 180,
+          borderRadius: 14,
+          border: `1px dashed ${T.bdr2}`,
+          background: T.card2,
+          overflow: 'hidden',
+          cursor: loading ? 'wait' : 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {imageUrl ? (
+          <img src={imageUrl} alt="Unidad" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        ) : (
+          <div style={{ textAlign: 'center', color: T.mute, fontSize: 13, padding: 16 }}>
+            <div style={{ fontWeight: 700, color: T.sub }}>{loading ? 'Subiendo imagen...' : 'Agregar imagen de la unidad'}</div>
+            <div style={{ marginTop: 6 }}>Toca aqui para elegir una foto local</div>
+          </div>
+        )}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={e => {
+          const file = e.target.files?.[0];
+          if (file) onFileSelect?.(file);
+          e.target.value = '';
+        }}
+        style={{ display: 'none' }}
+      />
+    </div>
+  );
+}
+
+function AdjuntosList({ adjuntos = [] }) {
+  if (!adjuntos.length) {
+    return <div style={{ fontSize: 13, color: T.mute }}>Sin adjuntos registrados.</div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {adjuntos.map(adjunto => (
+        <a
+          key={adjunto.id || adjunto.archivoPath}
+          href={adjunto.archivoPath}
+          target="_blank"
+          rel="noreferrer"
+          style={{ padding: '10px 12px', borderRadius: 10, background: T.card2, border: `1px solid ${T.bdr}`, color: T.txt, textDecoration: 'none', fontSize: 13 }}
+        >
+          {adjunto.nombreOriginal || 'Adjunto'}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // VISTA: CONDUCTORES
 // ─────────────────────────────────────────────────────────────
-function ConductoresView({ conductores, tareas, vehiculos, onAdd, onBaja }) {
+function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBaja }) {
   const [search, setSearch]     = useState('');
   const [filtroEst, setFiltro]  = useState('todos');
   const [expandido, setExpand]  = useState(null);
   const [modalNuevo, setModalNuevo] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
   const [bajaTarget, setBajaTarget] = useState(null);
 
   const filtrados = useMemo(() => conductores.filter(c => {
@@ -615,6 +825,15 @@ function ConductoresView({ conductores, tareas, vehiculos, onAdd, onBaja }) {
                   <div style={{ width:110 }}><Badge estado={c.estado} /></div>
                   <button
                     disabled={inactivo}
+                    onClick={e => { e.stopPropagation(); setEditTarget(c); }}
+                    style={{ padding:'5px 10px', background: inactivo ? 'transparent' : T.ambDim,
+                      border:`1px solid ${inactivo ? T.bdr : T.AMB+'44'}`,
+                      borderRadius:6, color: inactivo ? T.mute : T.AMB,
+                      cursor: inactivo ? 'default' : 'pointer', fontSize:11, fontWeight:600, whiteSpace:'nowrap' }}>
+                    {inactivo ? 'Sin edicion' : 'Editar'}
+                  </button>
+                  <button
+                    disabled={inactivo}
                     onClick={e => { e.stopPropagation(); setBajaTarget({ id: c.id, nombre: c.nombre }); }}
                     style={{ padding:'5px 10px', background: inactivo ? 'transparent' : T.redDim,
                       border:`1px solid ${inactivo ? T.bdr : T.RED+'44'}`,
@@ -657,6 +876,16 @@ function ConductoresView({ conductores, tareas, vehiculos, onAdd, onBaja }) {
           onConfirm={datos => { onAdd(datos); setModalNuevo(false); }}
         />
       )}
+      {editTarget && (
+        <EditarConductorModal
+          conductor={editTarget}
+          onClose={() => setEditTarget(null)}
+          onConfirm={async (id, datos) => {
+            await onUpdate(id, datos);
+            setEditTarget(null);
+          }}
+        />
+      )}
       {bajaTarget && (
         <ConfirmBajaModal
           nombre={bajaTarget.nombre}
@@ -672,15 +901,28 @@ function ConductoresView({ conductores, tareas, vehiculos, onAdd, onBaja }) {
 // ─────────────────────────────────────────────────────────────
 // MODAL NUEVO VEHÍCULO
 // ─────────────────────────────────────────────────────────────
-function NuevoVehiculoModal({ onClose, onConfirm }) {
-  const EMPTY = { placa:'', marca:'', modelo:'', tipo:'Buseta', cap:'', km:'', revTec:'', march:'' };
+function NuevoVehiculoModal({ onClose, onConfirm, onUploadImage }) {
+  const EMPTY = { placa:'', marca:'', modelo:'', tipo:'Buseta', cap:'', km:'', revTec:'', march:'', foto_url:'', licenciaRequerida:'', combustibleTipo: 'Diésel', rendimiento: 10 };
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState('');
+  const [uploading, setUploading] = useState(false);
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
   const inp = { width:'100%', padding:'9px 12px', background:T.card2, border:`1px solid ${T.bdr2}`,
     borderRadius:8, color:T.txt, fontSize:13, outline:'none', boxSizing:'border-box' };
   const lbl = { fontSize:12, fontWeight:600, color:T.sub, display:'block', marginBottom:6 };
+
+  async function handleImageSelect(file) {
+    try {
+      setUploading(true);
+      const uploadedPath = await onUploadImage(file);
+      set('foto_url', uploadedPath);
+    } catch (err) {
+      setError(err.message || 'No se pudo subir la imagen.');
+    } finally {
+      setUploading(false);
+    }
+  }
 
   function submit() {
     if (!form.placa.trim())  return setError('La placa es requerida.');
@@ -699,6 +941,10 @@ function NuevoVehiculoModal({ onClose, onConfirm }) {
       km:     +form.km || 0,
       revTec: form.revTec,
       march:  form.march,
+      licenciaRequerida: form.licenciaRequerida || null,
+      foto_url: form.foto_url.trim() || null,
+      combustibleTipo: form.combustibleTipo,
+      rendimiento: Number(form.rendimiento) || 0,
     });
   }
 
@@ -715,6 +961,10 @@ function NuevoVehiculoModal({ onClose, onConfirm }) {
           <button onClick={onClose} style={{ background:'transparent', border:'none', cursor:'pointer', color:T.mute }}><X size={20}/></button>
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+          <div>
+            <label style={lbl}>IMAGEN DE LA UNIDAD</label>
+            <VehicleImageInput imageUrl={form.foto_url} onFileSelect={handleImageSelect} loading={uploading} />
+          </div>
           <div style={{ display:'flex', gap:12 }}>
             <div style={{ flex:1 }}>
               <label style={lbl}>PLACA *</label>
@@ -727,6 +977,20 @@ function NuevoVehiculoModal({ onClose, onConfirm }) {
                 <option>Buseta</option>
                 <option>Bus</option>
               </select>
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:12 }}>
+            <div style={{ flex:1 }}>
+              <label style={lbl}>TIPO DE COMBUSTIBLE *</label>
+              <select value={form.combustibleTipo} onChange={e => set('combustibleTipo', e.target.value)} style={{ ...inp, cursor:'pointer' }}>
+                <option value="Súper">Súper</option>
+                <option value="Regular">Regular (Plus 91)</option>
+                <option value="Diésel">Diésel</option>
+              </select>
+            </div>
+            <div style={{ flex:1 }}>
+              <label style={lbl}>RENDIMIENTO (KM/L) *</label>
+              <input type="number" step="0.1" style={inp} value={form.rendimiento} onChange={e => set('rendimiento', e.target.value)} placeholder="Ej: 10" />
             </div>
           </div>
           <div style={{ display:'flex', gap:12 }}>
@@ -745,9 +1009,19 @@ function NuevoVehiculoModal({ onClose, onConfirm }) {
               <input style={inp} type="number" min="1" max="60" value={form.cap} onChange={e => set('cap', e.target.value)} placeholder="Ej: 20" />
             </div>
             <div style={{ flex:1 }}>
-              <label style={lbl}>KILOMETRAJE</label>
+              <label style={lbl}>KILOMETRAJE ACTUAL</label>
               <input style={inp} type="number" min="0" value={form.km} onChange={e => set('km', e.target.value)} placeholder="Ej: 75000" />
             </div>
+          </div>
+          <div>
+            <label style={lbl}>LICENCIA REQUERIDA</label>
+            <select value={form.licenciaRequerida} onChange={e => set('licenciaRequerida', e.target.value)} style={{ ...inp, cursor:'pointer' }}>
+              <option value="">Sin filtro de licencia</option>
+              <option value="B">B</option>
+              <option value="C">C</option>
+              <option value="D">D</option>
+              <option value="E">E</option>
+            </select>
           </div>
           <div style={{ display:'flex', gap:12 }}>
             <div style={{ flex:1 }}>
@@ -786,85 +1060,237 @@ function NuevoVehiculoModal({ onClose, onConfirm }) {
 // ─────────────────────────────────────────────────────────────
 // VISTA: VEHÍCULOS
 // ─────────────────────────────────────────────────────────────
-function EditarVehiculoModal({ vehiculo, onClose, onConfirm }) {
+function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gastos = [], onAddGasto, onUploadGastoAdjunto }) {
+  const [tab, setTab] = useState('general');
   const [form, setForm] = useState({
     km: vehiculo?.km ?? 0,
-    revTec: vehiculo?.revTec || '',
-    march: vehiculo?.march || '',
+    revTec: (vehiculo?.revTec || '').split('T')[0],
+    march: (vehiculo?.march || '').split('T')[0],
+    foto_url: vehiculo?.foto_url || '',
+    licenciaRequerida: vehiculo?.licenciaRequerida || '',
+    estado: vehiculo?.estado || 'disponible',
+    combustibleTipo: vehiculo?.combustibleTipo || 'Diésel',
+    rendimiento: vehiculo?.rendimiento || 10
   });
+  const [gastoForm, setGastoForm] = useState({ tipo: 'reparacion', detalle: '', monto: '', fecha: todayISO(), files: [] });
   const [error, setError] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [savingGasto, setSavingGasto] = useState(false);
+
+  const gastosVehiculo = gastos.filter(item => item.vehiculoId === vehiculo.id);
+  const adjuntosVehiculo = gastosVehiculo.flatMap(item => item.adjuntos || []);
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
-  const inp = { width:'100%', padding:'9px 12px', background:T.card2, border:`1px solid ${T.bdr2}`,
-    borderRadius:8, color:T.txt, fontSize:13, outline:'none', boxSizing:'border-box' };
+  const setGasto = (k, v) => setGastoForm(prev => ({ ...prev, [k]: v }));
+  const inp = { width:'100%', padding:'9px 12px', background:T.card2, border:`1px solid ${T.bdr2}`, borderRadius:8, color:T.txt, fontSize:13, outline:'none', boxSizing:'border-box' };
   const lbl = { fontSize:12, fontWeight:600, color:T.sub, display:'block', marginBottom:6 };
-  const overlay = { position:'fixed', inset:0, background:'rgba(0,0,0,.7)', display:'flex',
-    alignItems:'center', justifyContent:'center', zIndex:999, padding:20 };
-  const panel = { background:T.card, border:`1px solid ${T.bdr2}`, borderRadius:16,
-    width:'100%', maxWidth:420, padding:28, maxHeight:'90vh', overflowY:'auto' };
+  const overlay = { position:'fixed', inset:0, background:'rgba(0,0,0,.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999, padding:20 };
+  const panel = { background:T.card, border:`1px solid ${T.bdr2}`, borderRadius:16, width:'100%', maxWidth:760, padding:28, maxHeight:'90vh', overflowY:'auto' };
+
+  async function handleImageSelect(file) {
+    try {
+      setUploading(true);
+      const uploadedPath = await onUploadImage(file);
+      set('foto_url', uploadedPath);
+    } catch (err) {
+      setError(err.message || 'No se pudo subir la imagen.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function submitGasto() {
+    if (!gastoForm.detalle.trim()) return setError('El detalle del gasto es requerido.');
+    if (!gastoForm.monto || isNaN(Number(gastoForm.monto))) return setError('El monto del gasto es invalido.');
+    try {
+      setSavingGasto(true);
+      const adjuntos = [];
+      for (const file of gastoForm.files) {
+        const path = await onUploadGastoAdjunto(file);
+        adjuntos.push({ nombreOriginal: file.name, archivoPath: path, mimeType: file.type || null });
+      }
+      await onAddGasto({
+        vehiculoId: vehiculo.id,
+        tipo: gastoForm.tipo,
+        detalle: gastoForm.detalle.trim(),
+        monto: Number(gastoForm.monto),
+        fecha: gastoForm.fecha,
+        adjuntos,
+      });
+      setGastoForm({ tipo: 'reparacion', detalle: '', monto: '', fecha: todayISO(), files: [] });
+      setError('');
+      setTab('gastos');
+    } catch (err) {
+      setError(err.message || 'No se pudo guardar el gasto.');
+    } finally {
+      setSavingGasto(false);
+    }
+  }
 
   function submit() {
     if (form.km === '' || isNaN(Number(form.km)) || Number(form.km) < 0) {
-      return setError('El kilometraje debe ser un número válido mayor o igual a 0.');
+      return setError('El kilometraje actual debe ser un número válido mayor o igual a 0.');
     }
     setError('');
     onConfirm(vehiculo.id, {
       km: Number(form.km),
       revTec: form.revTec || null,
       march: form.march || null,
+      licenciaRequerida: form.licenciaRequerida || null,
+      estado: form.estado,
+      foto_url: form.foto_url.trim() || null,
+      combustibleTipo: form.combustibleTipo,
+      rendimiento: Number(form.rendimiento) || 0,
     });
   }
 
   return (
-    <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+    <div style={overlay}>
       <div style={panel}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:22 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}>
           <div>
-            <div style={{ fontSize:17, fontWeight:700, color:T.txt }}>Actualizar vehículo</div>
+            <div style={{ fontSize:17, fontWeight:700, color:T.txt }}>Gestionar vehiculo</div>
             <div style={{ fontSize:12, color:T.mute, marginTop:4 }}>{vehiculo.placa} · {vehiculo.marca} {vehiculo.modelo}</div>
           </div>
           <button onClick={onClose} style={{ background:'transparent', border:'none', cursor:'pointer', color:T.mute }}><X size={20}/></button>
         </div>
-        <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-          <div>
-            <label style={lbl}>KILOMETRAJE</label>
-            <input style={inp} type="number" min="0" value={form.km} onChange={e => set('km', e.target.value)} placeholder="Ej: 75000" />
-          </div>
-          <div style={{ display:'flex', gap:12 }}>
-            <div style={{ flex:1 }}>
-              <label style={lbl}>REVISIÓN TÉCNICA</label>
-              <input style={inp} type="date" value={form.revTec} onChange={e => set('revTec', e.target.value)} />
-            </div>
-            <div style={{ flex:1 }}>
-              <label style={lbl}>MARCHAMO</label>
-              <input style={inp} type="date" value={form.march} onChange={e => set('march', e.target.value)} />
-            </div>
-          </div>
+
+        <div style={{ display:'flex', gap:8, marginBottom:18, flexWrap:'wrap' }}>
+          {[
+            ['general', 'General'],
+            ['gastos', 'Gastos y reparaciones'],
+            ['adjuntos', 'Adjuntos'],
+          ].map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)} style={{ padding:'8px 12px', borderRadius:10, border:`1px solid ${tab === id ? T.AMB : T.bdr2}`, background:tab === id ? T.ambDim : T.card2, color:tab === id ? T.AMB : T.sub, cursor:'pointer', fontSize:12, fontWeight:700 }}>
+              {label}
+            </button>
+          ))}
         </div>
-        {error && (
-          <div style={{ marginTop:14, padding:'8px 12px', background:T.redDim, borderRadius:8,
-            fontSize:12, color:T.RED, border:`1px solid ${T.RED}33` }}>
-            {error}
+
+        {tab === 'general' && (
+          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            <div>
+              <label style={lbl}>IMAGEN DE LA UNIDAD</label>
+              <VehicleImageInput imageUrl={form.foto_url} onFileSelect={handleImageSelect} loading={uploading} />
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(12, minmax(0,1fr))', gap:12 }}>
+              <div style={{ gridColumn:'span 4' }}>
+                <label style={lbl}>ESTADO</label>
+                <select value={form.estado} onChange={e => set('estado', e.target.value)} style={{ ...inp, cursor:'pointer' }}>
+                  <option value="disponible">disponible</option>
+                  <option value="en_servicio">en_servicio</option>
+                  <option value="mantenimiento">mantenimiento</option>
+                  <option value="fuera_de_servicio">fuera_de_servicio</option>
+                </select>
+              </div>
+              <div style={{ gridColumn:'span 4' }}>
+                <label style={lbl}>KILOMETRAJE ACTUAL</label>
+                <input style={inp} type="number" min="0" value={form.km} onChange={e => set('km', e.target.value)} />
+              </div>
+              <div style={{ gridColumn:'span 4' }}>
+                <label style={lbl}>LICENCIA REQUERIDA</label>
+                <select value={form.licenciaRequerida} onChange={e => set('licenciaRequerida', e.target.value)} style={{ ...inp, cursor:'pointer' }}>
+                  <option value="">Sin filtro de licencia</option>
+                  <option value="B">B</option>
+                  <option value="C">C</option>
+                  <option value="D">D</option>
+                  <option value="E">E</option>
+                </select>
+              </div>
+              <div style={{ gridColumn:'span 4' }}>
+                <label style={lbl}>TIPO DE COMBUSTIBLE</label>
+                <select value={form.combustibleTipo} onChange={e => set('combustibleTipo', e.target.value)} style={{ ...inp, cursor:'pointer' }}>
+                  <option value="Súper">Súper</option>
+                  <option value="Regular">Regular (Plus 91)</option>
+                  <option value="Diésel">Diésel</option>
+                </select>
+              </div>
+              <div style={{ gridColumn:'span 4' }}>
+                <label style={lbl}>RENDIMIENTO (KM/L)</label>
+                <input style={inp} type="number" step="0.1" value={form.rendimiento} onChange={e => set('rendimiento', e.target.value)} />
+              </div>
+              <div style={{ gridColumn:'span 4' }}>
+                <label style={lbl}>REVISIÓN TÉCNICA</label>
+                <input style={inp} type="date" value={form.revTec} onChange={e => set('revTec', e.target.value)} />
+              </div>
+              <div style={{ gridColumn:'span 4' }}>
+                <label style={lbl}>MARCHAMO</label>
+                <input style={inp} type="date" value={form.march} onChange={e => set('march', e.target.value)} />
+              </div>
+            </div>
           </div>
         )}
+
+        {tab === 'gastos' && (
+          <div style={{ display:'grid', gridTemplateColumns:'minmax(0,1fr) 320px', gap:18 }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+              {gastosVehiculo.length === 0 && <div style={{ fontSize:13, color:T.mute }}>No hay gastos registrados para esta unidad.</div>}
+              {gastosVehiculo.map(gasto => (
+                <div key={gasto.id} style={{ padding:'12px 14px', borderRadius:12, background:T.card2, border:`1px solid ${T.bdr}` }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', gap:12 }}>
+                    <div>
+                      <div style={{ fontSize:13, fontWeight:700, color:T.txt }}>{gasto.detalle}</div>
+                      <div style={{ fontSize:11, color:T.mute, marginTop:4 }}>{gasto.fecha} · {gasto.tipo}</div>
+                    </div>
+                    <div style={{ fontSize:14, fontWeight:800, color:T.AMB }}>${Number(gasto.monto || 0).toFixed(2)}</div>
+                  </div>
+                  {!!gasto.adjuntos?.length && <div style={{ marginTop:10 }}><AdjuntosList adjuntos={gasto.adjuntos} /></div>}
+                </div>
+              ))}
+            </div>
+            <div style={{ padding:'14px', borderRadius:12, background:T.card2, border:`1px solid ${T.bdr}`, height:'fit-content' }}>
+              <div style={{ fontSize:13, fontWeight:700, color:T.txt, marginBottom:12 }}>Agregar gasto</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                <div>
+                  <label style={lbl}>TIPO</label>
+                  <select value={gastoForm.tipo} onChange={e => setGasto('tipo', e.target.value)} style={{ ...inp, cursor:'pointer' }}>
+                    <option value="reparacion">reparacion</option>
+                    <option value="repuesto">repuesto</option>
+                    <option value="mantenimiento">mantenimiento</option>
+                    <option value="otro">otro</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={lbl}>DETALLE</label>
+                  <textarea value={gastoForm.detalle} onChange={e => setGasto('detalle', e.target.value)} style={{ ...inp, minHeight:90, resize:'vertical' }} />
+                </div>
+                <div style={{ display:'flex', gap:12 }}>
+                  <div style={{ flex:1 }}>
+                    <label style={lbl}>MONTO</label>
+                    <input type="number" value={gastoForm.monto} onChange={e => setGasto('monto', e.target.value)} style={inp} />
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <label style={lbl}>FECHA</label>
+                    <input type="date" value={gastoForm.fecha} onChange={e => setGasto('fecha', e.target.value)} style={inp} />
+                  </div>
+                </div>
+                <div>
+                  <label style={lbl}>ADJUNTOS</label>
+                  <input type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf" onChange={e => setGasto('files', Array.from(e.target.files || []))} style={inp} />
+                  {gastoForm.files.length > 0 && <div style={{ marginTop:8, fontSize:12, color:T.mute }}>{gastoForm.files.length} archivo(s) seleccionado(s)</div>}
+                </div>
+                <button onClick={submitGasto} disabled={savingGasto} style={{ padding:'10px 16px', background:T.AMB, border:'none', borderRadius:10, color:'#000', cursor:savingGasto ? 'wait' : 'pointer', fontWeight:700 }}>
+                  {savingGasto ? 'Guardando...' : 'Guardar gasto'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'adjuntos' && <AdjuntosList adjuntos={adjuntosVehiculo} />}
+
+        {error && <div style={{ marginTop:14, padding:'8px 12px', background:T.redDim, borderRadius:8, fontSize:12, color:T.RED, border:`1px solid ${T.RED}33` }}>{error}</div>}
+
         <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:22 }}>
-          <button onClick={onClose}
-            style={{ padding:'10px 20px', background:'transparent', border:`1px solid ${T.bdr2}`,
-              borderRadius:8, color:T.sub, cursor:'pointer', fontSize:13 }}>
-            Cancelar
-          </button>
-          <button onClick={submit}
-            style={{ padding:'10px 20px', background:T.AMB, border:'none',
-              borderRadius:8, color:'#000', cursor:'pointer', fontWeight:600, fontSize:13 }}>
-            Guardar cambios
-          </button>
+          <button onClick={onClose} style={{ padding:'10px 20px', background:'transparent', border:`1px solid ${T.bdr2}`, borderRadius:8, color:T.sub, cursor:'pointer', fontSize:13 }}>Cancelar</button>
+          {tab === 'general' && <button onClick={submit} style={{ padding:'10px 20px', background:T.AMB, border:'none', borderRadius:8, color:'#000', cursor:'pointer', fontWeight:600, fontSize:13 }}>{form.estado === 'disponible' && vehiculo.estado === 'fuera_de_servicio' ? 'Reactivar unidad' : 'Guardar cambios'}</button>}
         </div>
       </div>
     </div>
   );
 }
 
-function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate }) {
+function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUploadImage, gastos, onAddGasto, onUploadGastoAdjunto }) {
   const [filtroEst, setFiltro] = useState('todos');
   const [modalNuevo, setModalNuevo] = useState(false);
   const [bajaTarget, setBajaTarget] = useState(null);
@@ -938,6 +1364,11 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate }) {
             const fuera = v.estado === 'fuera_de_servicio';
             return (
               <div key={v.id} style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:12, padding:'16px', opacity: fuera ? 0.55 : 1 }}>
+                {v.foto_url && (
+                  <div style={{ marginBottom:14, borderRadius:10, overflow:'hidden', border:`1px solid ${T.bdr}` }}>
+                    <img src={v.foto_url} alt={`${v.marca} ${v.modelo}`} style={{ width:'100%', height:140, objectFit:'cover', display:'block' }} />
+                  </div>
+                )}
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:14 }}>
                   <div>
                     <div style={{ fontFamily:'monospace', fontSize:16, fontWeight:700, color: fuera ? T.mute : T.AMB, letterSpacing:.5 }}>{v.placa}</div>
@@ -950,6 +1381,11 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate }) {
                   <span style={{ background:T.card3, padding:'3px 8px', borderRadius:6, color:T.sub }}>{v.cap} plazas</span>
                   <span style={{ background:T.card3, padding:'3px 8px', borderRadius:6, color:T.mute }}>{(v.km||0).toLocaleString()} km</span>
                 </div>
+                {v.licenciaRequerida && (
+                  <div style={{ marginBottom:12, fontSize:12, color:T.sub }}>
+                    Licencia requerida: <strong style={{ color:T.AMB }}>{v.licenciaRequerida}</strong>
+                  </div>
+                )}
                 <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:12, padding:'8px 10px',
                   background:T.card3, borderRadius:8 }}>
                   <User size={13} color={T.mute} />
@@ -977,13 +1413,13 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate }) {
                 </div>
                 <div style={{ display:'flex', gap:8 }}>
                   <button
-                    disabled={fuera}
+                    disabled={false}
                     onClick={() => setEditTarget(v)}
-                    style={{ flex:1, padding:'7px 0', background: fuera ? 'transparent' : T.ambDim,
-                      border:`1px solid ${fuera ? T.bdr : T.AMB+'44'}`,
-                      borderRadius:7, color: fuera ? T.mute : T.AMB,
-                      cursor: fuera ? 'default' : 'pointer', fontSize:12, fontWeight:600 }}>
-                    {fuera ? 'Sin edición' : 'Editar'}
+                    style={{ flex:1, padding:'7px 0', background: fuera ? T.bluDim : T.ambDim,
+                      border:`1px solid ${fuera ? T.BLU+'44' : T.AMB+'44'}`,
+                      borderRadius:7, color: fuera ? T.BLU : T.AMB,
+                      cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                    {fuera ? 'Reactivar' : 'Editar'}
                   </button>
                   <button
                     disabled={fuera}
@@ -1004,6 +1440,7 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate }) {
       {modalNuevo && (
         <NuevoVehiculoModal
           onClose={() => setModalNuevo(false)}
+          onUploadImage={onUploadImage}
           onConfirm={datos => { onAdd(datos); setModalNuevo(false); }}
         />
       )}
@@ -1011,6 +1448,10 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate }) {
         <EditarVehiculoModal
           vehiculo={editTarget}
           onClose={() => setEditTarget(null)}
+          onUploadImage={onUploadImage}
+          gastos={gastos}
+          onAddGasto={onAddGasto}
+          onUploadGastoAdjunto={onUploadGastoAdjunto}
           onConfirm={async (id, datos) => {
             await onUpdate(id, datos);
             setEditTarget(null);
@@ -1149,14 +1590,16 @@ function NuevaTareaModal({ onClose, onConfirm, eventos, conductores, vehiculos }
 
   function submit() {
     if (!form.nombre.trim()) return setError('El nombre de la tarea es requerido.');
-    if (!form.hora || !form.fin) return setError('Las horas de inicio y fin son requeridas.');
-    if (form.hora >= form.fin)   return setError('La hora de fin debe ser mayor que la de inicio.');
+    const hora = normalizeTimeInput(form.hora);
+    const fin = normalizeTimeInput(form.fin);
+    if (!hora || !fin) return setError('Las horas de inicio y fin deben tener un formato valido.');
+    if (hora >= fin) return setError('La hora de fin debe ser mayor que la de inicio.');
     if (!form.pax || isNaN(+form.pax) || +form.pax < 1) return setError('El número de pasajeros es inválido.');
     setError('');
     onConfirm({
       nombre:   form.nombre.trim(),
-      hora:     form.hora,
-      fin:      form.fin,
+      hora,
+      fin,
       eventoId: form.eventoId || null,
       condId:   form.condId   || null,
       vehId:    form.vehId    || null,
@@ -1184,11 +1627,11 @@ function NuevaTareaModal({ onClose, onConfirm, eventos, conductores, vehiculos }
           <div style={{ display:'flex', gap:12 }}>
             <div style={{ flex:1 }}>
               <label style={lbl}>HORA INICIO *</label>
-              <input style={inp} type="time" value={form.hora} onChange={e => set('hora', e.target.value)} />
+              <input style={inp} type="time" value={normalizeTimeInput(form.hora)} onChange={e => set('hora', normalizeTimeInput(e.target.value))} />
             </div>
             <div style={{ flex:1 }}>
               <label style={lbl}>HORA FIN *</label>
-              <input style={inp} type="time" value={form.fin} onChange={e => set('fin', e.target.value)} />
+              <input style={inp} type="time" value={normalizeTimeInput(form.fin)} onChange={e => set('fin', normalizeTimeInput(e.target.value))} />
             </div>
             <div style={{ flex:1 }}>
               <label style={lbl}>PASAJEROS *</label>
@@ -1468,12 +1911,12 @@ function TareasView({ tareas, conductores, vehiculos, eventos, onAsignar, onAddT
                     </td>
                     <td style={tdSt(110)}><Badge estado={t.estado} /></td>
                     <td style={tdSt(90)}>
-                      {t.estado === 'pendiente' && (
+                      {['pendiente', 'asignada'].includes(t.estado) && (
                         <button onClick={() => onAsignar(t)}
                           style={{ fontSize:12, padding:'5px 11px', background:T.ambDim,
                             border:`1px solid ${T.AMB}44`, borderRadius:6, color:T.AMB,
                             cursor:'pointer', fontWeight:600 }}>
-                          Asignar
+                          {t.condId || t.vehId ? 'Gestionar' : 'Asignar'}
                         </button>
                       )}
                     </td>
@@ -1676,6 +2119,34 @@ function GanttTooltip({ tooltip }) {
   );
 }
 
+function GastosView({ gastos, vehiculos }) {
+  return (
+    <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'20px 24px' }}>
+      <SectionHeader title="Gastos de unidades" />
+      {gastos.length === 0 ? (
+        <div style={{ padding:30, textAlign:'center', color:T.mute, fontSize:13 }}>Aun no hay gastos registrados.</div>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {gastos.map(gasto => {
+            const vehiculo = vehiculos.find(item => item.id === gasto.vehiculoId);
+            return (
+              <div key={gasto.id} style={{ padding:'12px 14px', background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:12 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', gap:12 }}>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:700, color:T.txt }}>{gasto.detalle}</div>
+                    <div style={{ fontSize:11, color:T.mute, marginTop:4 }}>{vehiculo?.placa || 'Sin unidad'} · {gasto.fecha} · {gasto.tipo}</div>
+                  </div>
+                  <div style={{ fontSize:14, fontWeight:800, color:T.AMB }}>${Number(gasto.monto || 0).toFixed(2)}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PlaceholderView({ titulo, icono: Icon }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
@@ -1697,11 +2168,13 @@ function AppContent() {
   const [conductores, setConductores] = useState([]);
   const [vehiculos,   setVehiculos] = useState([]);
   const [eventos,     setEventos]   = useState([]);
+  const [gastos,      setGastos]    = useState([]);
   const [loading,     setLoading]   = useState(true);
   const [modalTarea,  setModal]     = useState(null);
   const [theme,       setTheme]     = useState('dark');
   const [ganttTooltip, setGanttTooltip] = useState(null);
   const [voiceDraft,  setVoiceDraft] = useState(null);
+  const [cotizadorHeaderMeta, setCotizadorHeaderMeta] = useState({ tc: null });
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -1717,25 +2190,90 @@ function AppContent() {
         ...(opts.headers || {}),
       },
     });
-    if (!res.ok) throw new Error(`API error ${res.status}: ${path}`);
-    return res.json();
+    const payload = await res.json().catch(() => null);
+    if (!res.ok) {
+      const detail = payload?.error || payload?.message || `API error ${res.status}: ${path}`;
+      throw new Error(detail);
+    }
+    return payload;
   }, [token]);
+
+  const resolveClienteIdForEvento = useCallback(async (clienteNombre) => {
+    const normalized = String(clienteNombre || '').trim().toLowerCase();
+    if (!normalized) return null;
+
+    const socios = await apiFetch(`${API}/socios`);
+    const existing = Array.isArray(socios)
+      ? socios.find(item =>
+        [item?.nombre, item?.empresa]
+          .filter(Boolean)
+          .some(value => String(value).trim().toLowerCase() === normalized)
+      )
+      : null;
+
+    if (existing?.id) return existing.id;
+
+    const created = await apiFetch(`${API}/socios`, {
+      method: 'POST',
+      body: JSON.stringify({
+        nombre: String(clienteNombre || '').trim(),
+        empresa: '',
+        identificacion: '',
+        tipo: 'cliente',
+        clasificacion: 'prospecto',
+        telefono: '',
+        email: '',
+        direccion: '',
+        notas: 'Creado automaticamente desde eventos.',
+      }),
+    });
+
+    return created?.id || null;
+  }, [apiFetch]);
+
+  const uploadVehiculoImage = useCallback(async (file) => {
+    if (!file) throw new Error('No se selecciono ninguna imagen.');
+    const dataUrl = await fileToDataUrl(file);
+    const payload = await apiFetch(`${API}/uploads/vehiculos`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filename: file.name,
+        dataUrl,
+      }),
+    });
+    return payload?.path || '';
+  }, [apiFetch]);
+
+  const uploadGastoAdjunto = useCallback(async (file) => {
+    if (!file) throw new Error('No se selecciono ningun adjunto.');
+    const dataUrl = await fileToDataUrl(file);
+    const payload = await apiFetch(`${API}/uploads/gastos`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filename: file.name,
+        dataUrl,
+      }),
+    });
+    return payload?.path || '';
+  }, [apiFetch]);
 
   // ── Carga inicial de todos los datos ──────────────────────
   const cargarTodo = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
-      const [conds, vehs, evts, tareas] = await Promise.all([
+      const [conds, vehs, evts, tareas, gastosData] = await Promise.all([
         apiFetch(`${API}/conductores`),
         apiFetch(`${API}/vehiculos`),
         apiFetch(`${API}/eventos`),
         apiFetch(`${API}/tareas?fecha=${todayISO()}`),
+        apiFetch(`${API}/gastos`),
       ]);
       setConductores(conds);
       setVehiculos(vehs);
       setEventos(evts);
       setTareas(tareas);
+      setGastos(gastosData);
     } catch (err) {
       console.error('Error cargando datos:', err);
     } finally {
@@ -1778,12 +2316,12 @@ function AppContent() {
 
   async function handleConfirm(tareaId, condId, vehId) {
     try {
-      await apiFetch(`${API}/tareas/${tareaId}/asignar`, {
+      const result = await apiFetch(`${API}/tareas/${tareaId}/asignar`, {
         method: 'PATCH',
         body: JSON.stringify({ condId, vehId }),
       });
       setTareas(prev => prev.map(t =>
-        t.id === tareaId ? { ...t, condId, vehId, estado:'asignada' } : t
+        t.id === tareaId ? { ...t, condId: condId || null, vehId: vehId || null, estado: result?.estado || (condId && vehId ? 'asignada' : 'pendiente') } : t
       ));
       setModal(null);
     } catch (err) {
@@ -1793,13 +2331,21 @@ function AppContent() {
 
   async function handleAddEvento(datos) {
     try {
+      const clienteId = await resolveClienteIdForEvento(datos.cliente);
+      if (!clienteId) {
+        throw new Error('No fue posible resolver el cliente del evento.');
+      }
+
       const { id } = await apiFetch(`${API}/eventos`, {
         method: 'POST',
-        body: JSON.stringify(datos),
+        body: JSON.stringify({ ...datos, clienteId }),
       });
-      setEventos(prev => [...prev, { id, tareas: 0, ok: 0, ...datos }]);
+      const nuevoEvento = { id, tareas: 0, ok: 0, ...datos, clienteId };
+      setEventos(prev => [...prev, nuevoEvento]);
+      return nuevoEvento;
     } catch (err) {
       console.error('Error creando evento:', err);
+      throw err;
     }
   }
 
@@ -1816,8 +2362,10 @@ function AppContent() {
           e.id === datos.eventoId ? { ...e, tareas: Number(e.tareas) + 1 } : e
         ));
       }
+      return nueva;
     } catch (err) {
       console.error('Error creando tarea:', err);
+      throw err;
     }
   }
 
@@ -1830,6 +2378,19 @@ function AppContent() {
       setConductores(prev => [...prev, { id, estado:'disponible', vehId: null, ...datos }]);
     } catch (err) {
       console.error('Error creando conductor:', err);
+    }
+  }
+
+  async function handleUpdateConductor(id, datos) {
+    try {
+      await apiFetch(`${API}/conductores/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(datos),
+      });
+      setConductores(prev => prev.map(c => c.id === id ? { ...c, ...datos } : c));
+    } catch (err) {
+      console.error('Error actualizando conductor:', err);
+      throw err;
     }
   }
 
@@ -1862,7 +2423,7 @@ function AppContent() {
       });
       setVehiculos(prev => prev.map(v => v.id === id ? { ...v, ...datos } : v));
     } catch (err) {
-      console.error('Error actualizando vehÃ­culo:', err);
+      console.error('Error actualizando vehiculo:', err);
       throw err;
     }
   }
@@ -1873,6 +2434,19 @@ function AppContent() {
       setVehiculos(prev => prev.map(v => v.id === id ? { ...v, estado:'fuera_de_servicio', condId: null } : v));
     } catch (err) {
       console.error('Error dando de baja vehículo:', err);
+    }
+  }
+
+  async function handleAddGasto(datos) {
+    try {
+      const { id } = await apiFetch(`${API}/gastos`, {
+        method: 'POST',
+        body: JSON.stringify(datos),
+      });
+      setGastos(prev => [{ id, ...datos }, ...prev]);
+    } catch (err) {
+      console.error('Error guardando gasto:', err);
+      throw err;
     }
   }
 
@@ -1892,6 +2466,9 @@ function AppContent() {
   }[view];
 
   const fechaHoy = new Date().toLocaleDateString('es-CR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+  const headerSubline = view === 'cotizaciones' && cotizadorHeaderMeta?.tc
+    ? `${fechaHoy} | TC ₡${Number(cotizadorHeaderMeta.tc).toLocaleString('es-CR')}`
+    : fechaHoy;
 
   return (
     <div style={{ display:'flex', minHeight:'100vh', background:T.bg, fontFamily:"system-ui,-apple-system,sans-serif",
@@ -1905,23 +2482,25 @@ function AppContent() {
           display:'flex', justifyContent:'space-between', alignItems:'center' }}>
           <div>
             <h1 style={{ margin:0, fontSize:20, fontWeight:700, color:T.txt }}>{pageTitle}</h1>
-            <div style={{ fontSize:12, color:T.mute, marginTop:2, textTransform:'capitalize' }}>{fechaHoy}</div>
+            <div style={{ fontSize:12, color:T.mute, marginTop:2, textTransform:'capitalize' }}>{headerSubline}</div>
           </div>
           <div style={{ display:'flex', gap:8, alignItems:'center' }}>
             <VoiceAssistantButton token={token} onInterpretation={handleVoiceInterpretation} />
             <button onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
-              style={{ padding:'7px 12px', background:'transparent', border:`1px solid ${T.bdr2}`,
-                borderRadius:8, color:T.sub, cursor:'pointer', display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
-              {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />} {theme === 'dark' ? 'Modo Día' : 'Modo Noche'}
-            </button>
-            <button onClick={cargarTodo}
-              style={{ padding:'7px 12px', background:'transparent', border:`1px solid ${T.bdr2}`,
-                borderRadius:8, color:T.sub, cursor:'pointer', display:'flex', alignItems:'center', gap:6, fontSize:13 }}>
-              <RefreshCcw size={13} /> Actualizar
-            </button>
-            <button style={{ padding:'7px 14px', background:T.AMB, border:'none',
-              borderRadius:8, color:'#000', cursor:'pointer', fontWeight:600, fontSize:13 }}>
-              + Nuevo
+              style={{ 
+                width: 42,
+                height: 42,
+                borderRadius: 12,
+                border: `1px solid ${T.AMB}44`,
+                background: `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
+                color: T.AMB, 
+                cursor:'pointer', 
+                display:'flex', 
+                alignItems:'center', 
+                justifyContent:'center',
+                boxShadow: '0 10px 30px rgba(15,23,42,0.12)',
+              }}>
+              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
           </div>
         </div>
@@ -1938,16 +2517,19 @@ function AppContent() {
             <CotizadorView
               voiceDraft={voiceDraft?.intent === 'cotizacion' ? voiceDraft : null}
               onVoiceDraftApplied={handleVoiceDraftApplied}
+              onHeaderMetaChange={setCotizadorHeaderMeta}
+              onCreateEvento={handleAddEvento}
+              onCreateTarea={handleAddTarea}
             />
           )}
           {view === 'eventos'     && <EventosView eventos={eventos} onAdd={handleAddEvento} />}
           {view === 'tareas'      && <TareasView tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} onAddTarea={handleAddTarea} />}
           {view === 'gantt'       && <FlotaGanttView tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onTooltipChange={setGanttTooltip} />}
-          {view === 'conductores' && <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} onAdd={handleAddConductor} onBaja={handleBajaConductor} />}
-          {view === 'vehiculos'   && <VehiculosView vehiculos={vehiculos} conductores={conductores} onAdd={handleAddVehiculo} onBaja={handleBajaVehiculo} onUpdate={handleUpdateVehiculo} />}
+    {view === 'conductores' && <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} onAdd={handleAddConductor} onUpdate={handleUpdateConductor} onBaja={handleBajaConductor} />}
+    {view === 'vehiculos'   && <VehiculosView vehiculos={vehiculos} conductores={conductores} onAdd={handleAddVehiculo} onBaja={handleBajaVehiculo} onUpdate={handleUpdateVehiculo} onUploadImage={uploadVehiculoImage} gastos={gastos} onAddGasto={handleAddGasto} onUploadGastoAdjunto={uploadGastoAdjunto} />}
           {view === 'usuarios'    && <UsuarioMgmtView />}
           {view === 'config'      && <ConfiguracionesView />}
-          {view === 'gastos'      && <PlaceholderView titulo="Módulo de Gastos" icono={Receipt}   />}
+          {view === 'gastos'      && <GastosView gastos={gastos} vehiculos={vehiculos} />}
           {view === 'reportes'    && <PlaceholderView titulo="Módulo de Reportes" icono={BarChart3} />}
         </div>
       </div>

@@ -1,0 +1,261 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); color: var(--color-text-primary); }
+.header { padding: 1.5rem 0 1rem; border-bottom: 0.5px solid var(--color-border-tertiary); margin-bottom: 1.5rem; }
+.tabs { display: flex; gap: 0; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); overflow: hidden; width: fit-content; margin-bottom: 1.5rem; }
+.tab { padding: 8px 18px; font-size: 13px; cursor: pointer; background: transparent; border: none; color: var(--color-text-secondary); transition: all 0.15s; }
+.tab.active { background: var(--color-background-secondary); color: var(--color-text-primary); font-weight: 500; }
+.section { display: none; }
+.section.visible { display: block; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 1.5rem; }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 1.5rem; }
+.card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; }
+.card-accent { border-left: 3px solid; }
+.card-super { border-left-color: #185FA5; }
+.card-regular { border-left-color: #0F6E56; }
+.card-diesel { border-left-color: #854F0B; }
+.card-kerosene { border-left-color: #993C1D; }
+.price-label { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 4px; }
+.price-main { font-size: 26px; font-weight: 500; }
+.price-sub { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
+.badge-up { background: #FCEBEB; color: #A32D2D; font-size: 11px; padding: 2px 8px; border-radius: 4px; }
+.badge-down { background: #EAF3DE; color: #3B6D11; font-size: 11px; padding: 2px 8px; border-radius: 4px; }
+.badge-neutral { background: var(--color-background-secondary); color: var(--color-text-secondary); font-size: 11px; padding: 2px 8px; border-radius: 4px; }
+.info-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 0.5px solid var(--color-border-tertiary); font-size: 14px; }
+.info-row:last-child { border-bottom: none; }
+.history-item { padding: 12px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.history-item:last-child { border-bottom: none; }
+.hist-date { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 6px; }
+.hist-prices { display: flex; gap: 8px; flex-wrap: wrap; }
+.hist-pill { font-size: 12px; padding: 3px 10px; border-radius: 20px; background: var(--color-background-secondary); border: 0.5px solid var(--color-border-tertiary); }
+.calc-label { font-size: 13px; color: var(--color-text-secondary); margin-bottom: 6px; }
+.calc-input-row { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; }
+.calc-input-row input[type=range] { flex: 1; }
+.calc-val { font-size: 14px; font-weight: 500; min-width: 50px; text-align: right; }
+.result-box { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 1rem 1.25rem; margin-top: 1rem; }
+.result-main { font-size: 28px; font-weight: 500; margin: 4px 0; }
+.result-detail { font-size: 13px; color: var(--color-text-secondary); }
+.update-btn { background: transparent; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); padding: 8px 16px; font-size: 13px; cursor: pointer; color: var(--color-text-primary); display: inline-flex; align-items: center; gap: 6px; margin-bottom: 1rem; }
+.update-btn:hover { background: var(--color-background-secondary); }
+.source-note { font-size: 11px; color: var(--color-text-tertiary); margin-top: 12px; }
+.fuel-select { width: 100%; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); padding: 8px 12px; font-size: 14px; background: var(--color-background-primary); color: var(--color-text-primary); margin-bottom: 1rem; }
+.chart-wrap { position: relative; width: 100%; height: 220px; margin-top: 1rem; }
+</style>
+
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);">Consulta de precios de combustibles en Costa Rica con historial y calculadora</h2>
+
+<div class="header">
+  <div style="font-size: 11px; color: var(--color-text-tertiary); margin-bottom: 4px;">RECOPE / ARESEP · Costa Rica</div>
+  <div style="font-size: 20px; font-weight: 500;">Precios de combustibles</div>
+  <div style="font-size: 12px; color: var(--color-text-secondary); margin-top: 4px;">Vigentes desde el 14 de marzo, 2026 · Gaceta N.° 50</div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="showTab('precios')">Precios actuales</button>
+  <button class="tab" onclick="showTab('historial')">Historial</button>
+  <button class="tab" onclick="showTab('grafico')">Gráfico</button>
+  <button class="tab" onclick="showTab('calc')">Calculadora</button>
+</div>
+
+<div id="precios" class="section visible">
+  <button class="update-btn" onclick="consultarActualizacion()">Consultar precios actualizados ↗</button>
+  <div class="grid4">
+    <div class="card card-accent card-super">
+      <div class="price-label">Gasolina súper</div>
+      <div class="price-main">₡633</div>
+      <div class="price-sub">por litro</div>
+      <div style="margin-top: 8px;"><span class="badge-down">▼ ₡6 vs. feb</span></div>
+    </div>
+    <div class="card card-accent card-regular">
+      <div class="price-label">Gasolina regular (Plus 91)</div>
+      <div class="price-main">₡607</div>
+      <div class="price-sub">por litro</div>
+      <div style="margin-top: 8px;"><span class="badge-down">▼ ₡5 vs. feb</span></div>
+    </div>
+    <div class="card card-accent card-diesel">
+      <div class="price-label">Diésel 50</div>
+      <div class="price-main">₡530</div>
+      <div class="price-sub">por litro</div>
+      <div style="margin-top: 8px;"><span class="badge-down">▼ ₡18 vs. feb</span></div>
+    </div>
+    <div class="card card-accent card-kerosene">
+      <div class="price-label">Kerosene</div>
+      <div class="price-main">₡478</div>
+      <div class="price-sub">por litro</div>
+      <div style="margin-top: 8px;"><span class="badge-neutral">sin cambio</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="font-size: 13px; font-weight: 500; margin-bottom: 12px;">Desglose del precio — Gasolina súper (₡633/L)</div>
+    <div class="info-row"><span style="color: var(--color-text-secondary);">Costo internacional del producto</span><span>₡290,41</span></div>
+    <div class="info-row"><span style="color: var(--color-text-secondary);">Impuesto único</span><span>₡271,75</span></div>
+    <div class="info-row"><span style="color: var(--color-text-secondary);">Margen estaciones + transporte</span><span>₡71,11</span></div>
+    <div class="info-row" style="font-weight:500;"><span>Total al consumidor</span><span>₡633,00</span></div>
+  </div>
+  <div class="source-note">Fuente: RECOPE · recope.go.cr/productos/precios-nacionales/tabla-precios · Los precios al consumidor son fijados por ARESEP.</div>
+</div>
+
+<div id="historial" class="section">
+  <div class="card">
+    <div style="font-size: 13px; font-weight: 500; margin-bottom: 12px;">Historial de precios en estaciones de servicio (₡/litro)</div>
+    <div class="history-item">
+      <div class="hist-date">14 mar 2026 · Gaceta N.° 50</div>
+      <div class="hist-prices">
+        <span class="hist-pill">Súper ₡633</span>
+        <span class="hist-pill">Regular ₡607</span>
+        <span class="hist-pill">Diésel ₡530</span>
+        <span class="hist-pill">Kerosene ₡478</span>
+      </div>
+    </div>
+    <div class="history-item">
+      <div class="hist-date">05 feb 2026 · Bol. 02-2026 (rebaja)</div>
+      <div class="hist-prices">
+        <span class="hist-pill">Súper ₡639 → ₡629 <span style="color:#3B6D11">▼₡10</span></span>
+        <span class="hist-pill">Regular ₡609 → ₡591 <span style="color:#3B6D11">▼₡18</span></span>
+        <span class="hist-pill">Diésel ₡541 → ₡512 <span style="color:#3B6D11">▼₡29</span></span>
+      </div>
+    </div>
+    <div class="history-item">
+      <div class="hist-date">ene 2026 · Rebaja ARESEP (margen transporte)</div>
+      <div class="hist-prices">
+        <span class="hist-pill">Súper ₡639 → ₡636 <span style="color:#3B6D11">▼₡3</span></span>
+        <span class="hist-pill">Regular ₡632 → ₡609 <span style="color:#3B6D11">▼₡23</span></span>
+        <span class="hist-pill">Diésel ₡549 → ₡541 <span style="color:#3B6D11">▼₡8</span></span>
+      </div>
+    </div>
+    <div class="history-item">
+      <div class="hist-date">01 ene 2026 · Ajuste margen Recope</div>
+      <div class="hist-prices">
+        <span class="hist-pill">Súper ₡643 → ₡639 <span style="color:#3B6D11">▼₡4</span></span>
+        <span class="hist-pill">Regular ₡635 → ₡632 <span style="color:#3B6D11">▼₡3</span></span>
+        <span class="hist-pill">Diésel ₡557 → ₡549 <span style="color:#3B6D11">▼₡8</span></span>
+      </div>
+    </div>
+    <div class="history-item">
+      <div class="hist-date">feb 2026 · Aumento impuesto único (+0,74%)</div>
+      <div class="hist-prices">
+        <span class="hist-pill" style="color: var(--color-text-secondary); font-size: 11px;">Incremento parcial que neutralizó parte de la rebaja de feb.</span>
+      </div>
+    </div>
+    <div class="history-item">
+      <div class="hist-date">Próximo ajuste previsto (post Semana Santa)</div>
+      <div class="hist-prices">
+        <span class="hist-pill">Diésel +₡35 → ₡565 <span style="color:#A32D2D">▲ estimado</span></span>
+        <span class="hist-pill">Regular +₡21 → ₡628 <span style="color:#A32D2D">▲ estimado</span></span>
+        <span class="hist-pill">Súper ₡632 <span style="color:#3B6D11">▼₡1 estimado</span></span>
+      </div>
+    </div>
+  </div>
+  <div class="source-note">Fuentes: RECOPE, ARESEP, Teletica, Telediario, Monumental · Actualizado al 14 de abril, 2026.</div>
+</div>
+
+<div id="grafico" class="section">
+  <div class="card" style="margin-bottom:1rem;">
+    <div style="font-size: 13px; font-weight: 500; margin-bottom: 4px;">Evolución de precios 2026</div>
+    <div style="font-size: 12px; color: var(--color-text-secondary);">Precios en colones por litro · estaciones de servicio</div>
+    <div class="chart-wrap">
+      <canvas id="histChart" role="img" aria-label="Gráfico de líneas con evolución de precios de gasolina super, regular y diesel en Costa Rica durante 2026">Datos de precios: Super de 643 a 633, Regular de 635 a 607, Diesel de 557 a 530 colones por litro.</canvas>
+    </div>
+    <div style="display:flex; gap:16px; margin-top:12px; font-size:12px; color: var(--color-text-secondary); flex-wrap:wrap;">
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#185FA5;"></span>Súper</span>
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#0F6E56;"></span>Regular</span>
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#854F0B;"></span>Diésel</span>
+    </div>
+  </div>
+</div>
+
+<div id="calc" class="section">
+  <div class="card">
+    <div style="font-size: 13px; font-weight: 500; margin-bottom: 1rem;">Calculadora de costo de tanque</div>
+    <div class="calc-label">Tipo de combustible</div>
+    <select class="fuel-select" id="fuelType" onchange="calcular()">
+      <option value="633">Gasolina súper — ₡633/L</option>
+      <option value="607">Gasolina regular — ₡607/L</option>
+      <option value="530">Diésel — ₡530/L</option>
+      <option value="478">Kerosene — ₡478/L</option>
+    </select>
+    <div class="calc-label">Capacidad del tanque</div>
+    <div class="calc-input-row">
+      <input type="range" id="tankSize" min="20" max="120" value="45" step="1" oninput="calcular()">
+      <span class="calc-val" id="tankOut">45 L</span>
+    </div>
+    <div class="calc-label">¿Cuánto está lleno actualmente?</div>
+    <div class="calc-input-row">
+      <input type="range" id="currentLevel" min="0" max="100" value="10" step="5" oninput="calcular()">
+      <span class="calc-val" id="levelOut">10%</span>
+    </div>
+    <div class="result-box" id="calcResult">
+      <div style="font-size:12px; color:var(--color-text-secondary);">Costo para llenar el tanque</div>
+      <div class="result-main" id="resMain">₡25,618</div>
+      <div class="result-detail" id="resDetail">40.5 litros a ₡633 c/u</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px;">
+    <div style="font-size: 13px; font-weight: 500; margin-bottom: 12px;">Equivalencias útiles</div>
+    <div class="info-row"><span style="color:var(--color-text-secondary);">1 galón de súper</span><span id="eqGalon">₡2,395</span></div>
+    <div class="info-row"><span style="color:var(--color-text-secondary);">1 galón de regular</span><span>₡2,297</span></div>
+    <div class="info-row"><span style="color:var(--color-text-secondary);">1 galón de diésel</span><span>₡2,006</span></div>
+    <div class="info-row"><span style="color:var(--color-text-secondary);">100 km a 12 km/L (súper)</span><span>₡5,275</span></div>
+    <div class="info-row"><span style="color:var(--color-text-secondary);">100 km a 15 km/L (diésel)</span><span>₡3,533</span></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+function showTab(name) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('visible'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(name).classList.add('visible');
+  event.target.classList.add('active');
+  if (name === 'grafico') initChart();
+}
+
+let chartInit = false;
+function initChart() {
+  if (chartInit) return;
+  chartInit = true;
+  const labels = ['1 ene', '16 ene', '5 feb', '14 mar', 'Próximo*'];
+  const super_ = [639, 636, 629, 633, 632];
+  const regular = [632, 609, 591, 607, 628];
+  const diesel = [549, 541, 512, 530, 565];
+  new Chart(document.getElementById('histChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Súper', data: super_, borderColor: '#185FA5', backgroundColor: 'rgba(24,95,165,0.08)', tension: 0.3, pointRadius: 4, fill: false },
+        { label: 'Regular', data: regular, borderColor: '#0F6E56', backgroundColor: 'rgba(15,110,86,0.08)', tension: 0.3, pointRadius: 4, fill: false },
+        { label: 'Diésel', data: diesel, borderColor: '#854F0B', backgroundColor: 'rgba(133,79,11,0.08)', tension: 0.3, pointRadius: 4, fill: false }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ₡${ctx.parsed.y}` } } },
+      scales: {
+        y: { min: 450, max: 700, ticks: { callback: v => '₡'+v, font: { size: 11 } }, grid: { color: 'rgba(128,128,128,0.1)' } },
+        x: { ticks: { font: { size: 11 }, autoSkip: false }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+function calcular() {
+  const price = parseInt(document.getElementById('fuelType').value);
+  const tank = parseInt(document.getElementById('tankSize').value);
+  const level = parseInt(document.getElementById('currentLevel').value);
+  const litros = tank * (1 - level / 100);
+  const total = Math.round(price * litros);
+  document.getElementById('tankOut').textContent = tank + ' L';
+  document.getElementById('levelOut').textContent = level + '%';
+  document.getElementById('resMain').textContent = '₡' + total.toLocaleString('es-CR');
+  document.getElementById('resDetail').textContent = litros.toFixed(1) + ' litros a ₡' + price + ' c/u';
+}
+calcular();
+
+function consultarActualizacion() {
+  sendPrompt('¿Cuáles son los precios más recientes de los combustibles en Costa Rica según RECOPE y ARESEP? Busca si hay algún cambio nuevo.');
+}
+</script>

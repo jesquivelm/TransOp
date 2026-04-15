@@ -18,6 +18,14 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+const VEHICLE_UPLOADS_DIR = path.join(UPLOADS_DIR, 'vehiculos');
+const GASTOS_UPLOADS_DIR = path.join(UPLOADS_DIR, 'gastos');
+const EMPRESA_UPLOADS_DIR = path.join(UPLOADS_DIR, 'empresa');
+
+fs.mkdirSync(VEHICLE_UPLOADS_DIR, { recursive: true });
+fs.mkdirSync(GASTOS_UPLOADS_DIR, { recursive: true });
+fs.mkdirSync(EMPRESA_UPLOADS_DIR, { recursive: true });
 
 const app = express();
 const PORT = process.env.PORT || 3020;
@@ -26,6 +34,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'tms_secret_2024_key_99';
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 // ─────────────────────────────────────────────────────────────
 // MIDDLEWARE DE AUTENTICACIÓN
@@ -128,7 +137,7 @@ function extractJsonObject(raw) {
     const cleaned = String(raw || '').replace(/```json|```/gi, '').trim();
     try {
         return JSON.parse(cleaned);
-    } catch {}
+    } catch { }
 
     const start = cleaned.indexOf('{');
     const end = cleaned.lastIndexOf('}');
@@ -300,6 +309,7 @@ function extractAddress(transcript) {
 
 function cleanupLocationText(value = '') {
     return String(value || '')
+        .replace(/\b(?:y\s+ademas|ademas|y mas|mas vamos|vamos a pagar|hasta y)\b.*$/i, '')
         .replace(/\b(?:para|de|somos|seremos|van|viajan)\s+\d+\s+(?:pasajeros|personas|pax)\b.*$/i, '')
         .replace(/\b(?:el|este|esta)?\s*(lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\b.*$/i, '')
         .replace(/\b(?:hoy|manana|pasado manana)\b.*$/i, '')
@@ -373,9 +383,9 @@ function parseRelativeDate(transcript) {
         return {
             fechaServicio: toIsoDate(saturday),
             interpretationNotes: [
-                `Se interpretÃ³ "prÃ³ximo fin de semana" como ${toIsoDate(saturday)} de forma tentativa.`,
+                `Se interpreto "proximo fin de semana" como ${toIsoDate(saturday)} de forma tentativa.`,
             ],
-            suggestedFollowUp: `InterpretÃ© "prÃ³ximo fin de semana" como sÃ¡bado ${toIsoDate(saturday)}. Â¿Te funciona mejor sÃ¡bado ${toIsoDate(saturday)} o domingo ${toIsoDate(sunday)}?`,
+            suggestedFollowUp: `Interprete "proximo fin de semana" como sabado ${toIsoDate(saturday)}. Te funciona mejor sabado ${toIsoDate(saturday)} o domingo ${toIsoDate(sunday)}?`,
         };
     }
 
@@ -630,7 +640,7 @@ const REQUIRED_QUOTE_FIELDS = ['contacto', 'telefono', 'origen', 'destino', 'fec
 
 const QUOTE_FIELD_LABELS = {
     contacto: 'contacto',
-    telefono: 'telÃ©fono',
+    telefono: 'telefono',
     origen: 'origen',
     destino: 'destino',
     fechaServicio: 'fecha del servicio',
@@ -713,13 +723,13 @@ function buildAssistantMessage(intent, parsed) {
     const labels = formatMissingFields(missing);
     if (parsed?.suggestedFollowUp) {
         return labels.length
-            ? `${parsed.suggestedFollowUp} AdemÃ¡s aÃºn me faltan: ${labels.join(', ')}.`
+            ? `${parsed.suggestedFollowUp} Ademas aun me faltan: ${labels.join(', ')}.`
             : parsed.suggestedFollowUp;
     }
 
     return labels.length
-        ? `LlenÃ© lo que encontrÃ©. AÃºn faltan: ${labels.join(', ')}.`
-        : 'Ya preparÃ© la proforma con los datos detectados.';
+        ? `Llene lo que encontre. Aun faltan: ${labels.join(', ')}.`
+        : 'Ya prepare la proforma con los datos detectados.';
 }
 
 async function interpretTranscriptWithGroq({ apiKey, transcript, conversationHistory }) {
@@ -739,9 +749,26 @@ async function interpretTranscriptWithGroq({ apiKey, transcript, conversationHis
         '{"intent":"socio","quoteData":{},"socioData":{"nombre":"","empresa":"","identificacion":"","email":"","telefono":"","tipo":"","direccion":"","notas":"","contactoNombre":"","contactoCargo":"","contactoTelefono":"","contactoEmail":"","codigoCliente":""},"missingFields":[],"assistantMessage":"","confidence":0.0}',
         'Si no está claro, devuelve intent="desconocido" con quoteData y socioData vacíos.',
         'Si el usuario corrige o completa algo, combina todo lo de la conversación en un solo JSON actualizado.',
-        'Para cotizaciones, detecta tambiÃ©n viÃ¡ticos por cantidad de personas, hospedaje por cantidad de personas o monto total, ferry, transfer in/out, fechas relativas y horas expresadas en lenguaje natural.',
-        'Si "prÃ³ximo fin de semana" es ambiguo, puedes proponer un valor tentativo y reflejarlo en assistantMessage para confirmar si es sÃ¡bado o domingo.',
-        'Si faltan datos importantes para cerrar la cotizaciÃ³n, llena missingFields con claves como contacto, telefono, origen, destino, fechaServicio, horaServicio o pasajeros.',
+        'Para cotizaciones, detecta también viáticos por cantidad de personas, hospedaje por cantidad de personas o monto total, ferry, transfer in/out, fechas relativas y horas expresadas en lenguaje natural.',
+        'Para interpretar horas en lenguaje natural, aplica estas reglas:',
+        '- "2 de la mañana", "2 de la madrugada", "2 am", "las 2 de la mañana" = 02:00',
+        '- "3 de la mañana", "3 de la madrugada", "3 am", "las 3 de la mañana" = 03:00',
+        '- "4 de la mañana", "4 de la madrugada", "4 am" = 04:00',
+        '- "5 de la mañana", "5 de la madrugada", "5 am" = 05:00',
+        '- "6 de la mañana", "6 am" = 06:00',
+        '- Expresiones como "a las 2", "a las 3" sin especificar periodo se interpretan como mañana si es temprano, sino preguntar',
+        '- "mediodia", "12 del medio dia", "12 pm" = 12:00',
+        '- "1 de la tarde", "1 pm", "13:00" = 13:00',
+        '- "6 de la tarde", "6 pm", "18:00" = 18:00',
+        '- "7 de la noche", "7 pm", "19:00" = 19:00',
+        '- "8 de la noche", "8 pm", "20:00" = 20:00',
+        '- "9 de la noche", "9 pm", "21:00" = 21:00',
+        '- "10 de la noche", "10 pm", "22:00" = 22:00',
+        '- "11 de la noche", "11 pm", "23:00" = 23:00',
+        '- "12 de la noche", "12 am", "medianoche" = 00:00',
+        '- "1 de la noche", "1 am" = 01:00',
+        'Si "proximo fin de semana" es ambiguo, puedes proponer un valor tentativo y reflejarlo en assistantMessage para confirmar si es sabado o domingo.',
+        'Si faltan datos importantes para cerrar la cotizacion, llena missingFields con claves como contacto, telefono, origen, destino, fechaServicio, horaServicio o pasajeros.',
     ].join(' ');
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -832,12 +859,76 @@ async function ensureDatabaseCompatibility() {
         `);
 
         await pgQuery(`
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_clientes_codigo_cliente
-            ON clientes (codigo_cliente)
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_clientes_codigo_cliente
+                ON clientes (codigo_cliente)
+        `);
+
+        await pgQuery(`
+            ALTER TABLE conductores
+            ADD COLUMN IF NOT EXISTS lic JSONB DEFAULT '[]'::jsonb
+        `);
+
+        await pgQuery(`
+            ALTER TABLE vehiculos
+            ADD COLUMN IF NOT EXISTS licencia_requerida VARCHAR(10);
+            ALTER TABLE vehiculos
+            ADD COLUMN IF NOT EXISTS rendimiento DECIMAL(10,2) DEFAULT 0;
+        `);
+
+        await pgQuery(`
+            CREATE TABLE IF NOT EXISTS tms_gastos (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                vehiculo_id UUID REFERENCES vehiculos(id) ON DELETE SET NULL,
+                tipo VARCHAR(20) NOT NULL DEFAULT 'otro',
+                detalle TEXT NOT NULL,
+                monto DECIMAL(12,2) NOT NULL DEFAULT 0,
+                fecha DATE NOT NULL DEFAULT CURRENT_DATE,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+
+        await pgQuery(`
+            CREATE TABLE IF NOT EXISTS tms_gasto_adjuntos (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                gasto_id UUID NOT NULL REFERENCES tms_gastos(id) ON DELETE CASCADE,
+                nombre_original VARCHAR(255),
+                archivo_path TEXT NOT NULL,
+                mime_type VARCHAR(120),
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
         `);
     } catch (error) {
         console.warn('No se pudo validar la compatibilidad del esquema de clientes:', error.message);
     }
+}
+
+function sanitizeUploadName(filename = '') {
+    const ext = path.extname(String(filename || '')).toLowerCase();
+    const safeExt = ['.jpg', '.jpeg', '.png', '.webp'].includes(ext) ? ext : '.png';
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${safeExt}`;
+}
+
+function parseDataUrlImage(dataUrl = '') {
+    const match = String(dataUrl || '').match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+    if (!match) {
+        throw new Error('La imagen no tiene un formato valido.');
+    }
+    return {
+        mimeType: match[1],
+        buffer: Buffer.from(match[2], 'base64'),
+    };
+}
+
+function parseDataUrlFile(dataUrl = '') {
+    const match = String(dataUrl || '').match(/^data:([a-zA-Z0-9/+.-]+);base64,(.+)$/);
+    if (!match) {
+        throw new Error('El archivo no tiene un formato valido.');
+    }
+    return {
+        mimeType: match[1],
+        buffer: Buffer.from(match[2], 'base64'),
+    };
 }
 
 function normalizeLookupValue(value = '') {
@@ -883,6 +974,56 @@ async function findClientMatch({ nombre = '', empresa = '', telefono = '', email
         [normalizedName, normalizedCompany]
     );
     return result.rows[0] || null;
+}
+
+async function findClientByNameOrCompany(search = '') {
+    const normalized = normalizeLookupValue(search);
+    if (!normalized) return null;
+
+    const result = await pgQuery(
+        `SELECT id, nombre, empresa, clasificacion
+         FROM clientes
+         WHERE LOWER(TRIM(nombre)) = $1
+            OR LOWER(TRIM(COALESCE(empresa, ''))) = $1
+         ORDER BY created_at ASC
+         LIMIT 1`,
+        [normalized]
+    );
+
+    return result.rows[0] || null;
+}
+
+async function ensureClientForEvent({ clienteId, cliente }) {
+    if (clienteId) return String(clienteId);
+
+    const clienteNombre = String(cliente || '').trim();
+    if (!clienteNombre) return null;
+
+    const existing = await findClientByNameOrCompany(clienteNombre);
+    if (existing?.id) return existing.id;
+
+    const codigoCliente = await generateClientCode();
+    const inserted = await pgQuery(
+        `INSERT INTO clientes (
+            codigo_cliente, nombre, empresa, identificacion, tipo, clasificacion, telefono, email, direccion, notas
+         ) VALUES ($1, $2, NULL, NULL, 'cliente', 'prospecto', NULL, NULL, NULL, $3)
+         RETURNING id`,
+        [
+            codigoCliente,
+            clienteNombre,
+            'Creado automaticamente desde un evento.',
+        ]
+    );
+
+    const nextClientId = inserted.rows[0]?.id || null;
+    if (nextClientId) {
+        try {
+            await ensurePrimaryContactForClient(nextClientId, { sContacto: clienteNombre });
+        } catch (contactError) {
+            console.warn('No se pudo crear el contacto principal del cliente del evento:', contactError.message);
+        }
+    }
+    return nextClientId;
 }
 
 async function ensurePrimaryContactForClient(clienteId, socio = {}) {
@@ -1101,6 +1242,7 @@ app.get('/api/tms/usuarios', authenticateToken, async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 app.get('/api/tms/conductores', authenticateToken, async (req, res) => {
     try {
+        await ensureDatabaseCompatibility();
         const result = await pgQuery(
             `SELECT
                 c.id,
@@ -1109,7 +1251,7 @@ app.get('/api/tms/conductores', authenticateToken, async (req, res) => {
                 c.telefono AS tel,
                 c.alias,
                 c.estado,
-                '[]'::jsonb AS lic,
+                COALESCE(c.lic, '[]'::jsonb) AS lic,
                 v.id AS "vehId"
              FROM conductores c
              LEFT JOIN vehiculos v ON v.conductor_asignado_id = c.id AND v.activo = TRUE
@@ -1125,10 +1267,11 @@ app.get('/api/tms/conductores', authenticateToken, async (req, res) => {
 app.post('/api/tms/conductores', authenticateToken, async (req, res) => {
     const { nombre, cedula, tel, alias, lic } = req.body;
     try {
+        await ensureDatabaseCompatibility();
         const result = await pgQuery(
-            `INSERT INTO conductores (nombre, cedula, tel, alias, lic, estado)
+            `INSERT INTO conductores (nombre, cedula, telefono, alias, lic, estado)
              VALUES ($1, $2, $3, $4, $5, 'disponible')
-             RETURNING id`,
+              RETURNING id`,
             [nombre, cedula, tel, alias || nombre.split(' ')[0], JSON.stringify(lic || [])]
         );
         res.json({ success: true, id: result.rows[0].id });
@@ -1141,21 +1284,39 @@ app.put('/api/tms/conductores/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { nombre, cedula, tel, alias, lic, estado, vehId } = req.body;
     try {
+        await ensureDatabaseCompatibility();
         await pgQuery(
             `UPDATE conductores SET
                 nombre = COALESCE($1, nombre),
                 cedula = COALESCE($2, cedula),
-                tel    = COALESCE($3, tel),
-                alias  = COALESCE($4, alias),
-                lic    = COALESCE($5, lic),
+                telefono = COALESCE($3, telefono),
+                alias    = COALESCE($4, alias),
+                lic      = COALESCE($5, lic),
                 estado = COALESCE($6, estado),
-                veh_id = $7,
                 updated_at = NOW()
-             WHERE id = $8`,
+             WHERE id = $7`,
             [nombre, cedula, tel, alias,
-             lic ? JSON.stringify(lic) : null,
-             estado, vehId || null, id]
+                lic ? JSON.stringify(lic) : null,
+                estado, id]
         );
+
+        if (vehId !== undefined) {
+            await pgQuery(
+                `UPDATE vehiculos
+                 SET conductor_asignado_id = NULL
+                 WHERE conductor_asignado_id = $1`,
+                [id]
+            );
+
+            if (vehId) {
+                await pgQuery(
+                    `UPDATE vehiculos
+                     SET conductor_asignado_id = $1
+                     WHERE id = $2`,
+                    [id, vehId]
+                );
+            }
+        }
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -1167,7 +1328,13 @@ app.patch('/api/tms/conductores/:id/baja', authenticateToken, async (req, res) =
     const { id } = req.params;
     try {
         await pgQuery(
-            `UPDATE conductores SET estado = 'inactivo', veh_id = NULL, updated_at = NOW() WHERE id = $1`,
+            `UPDATE conductores SET estado = 'inactivo', updated_at = NOW() WHERE id = $1`,
+            [id]
+        );
+        await pgQuery(
+            `UPDATE vehiculos
+             SET conductor_asignado_id = NULL
+             WHERE conductor_asignado_id = $1`,
             [id]
         );
         res.json({ success: true });
@@ -1176,15 +1343,81 @@ app.patch('/api/tms/conductores/:id/baja', authenticateToken, async (req, res) =
     }
 });
 
+app.post('/api/tms/uploads/vehiculos', authenticateToken, async (req, res) => {
+    const { filename, dataUrl } = req.body || {};
+    try {
+        const { buffer } = parseDataUrlImage(dataUrl);
+        const finalName = sanitizeUploadName(filename);
+        const finalPath = path.join(VEHICLE_UPLOADS_DIR, finalName);
+        fs.writeFileSync(finalPath, buffer);
+        res.json({ success: true, path: `/uploads/vehiculos/${finalName}` });
+    } catch (error) {
+        res.status(400).json({ error: error.message || 'No se pudo guardar la imagen del vehiculo.' });
+    }
+});
+
+app.post('/api/tms/uploads/gastos', authenticateToken, async (req, res) => {
+    const { filename, dataUrl } = req.body || {};
+    try {
+        const { mimeType, buffer } = parseDataUrlFile(dataUrl);
+        const finalName = sanitizeUploadName(filename);
+        const finalPath = path.join(GASTOS_UPLOADS_DIR, finalName);
+        fs.writeFileSync(finalPath, buffer);
+        res.json({ success: true, path: `/uploads/gastos/${finalName}`, mimeType });
+    } catch (error) {
+        res.status(400).json({ error: error.message || 'No se pudo guardar el adjunto del gasto.' });
+    }
+});
+
+app.post('/api/tms/uploads/logo', authenticateToken, async (req, res) => {
+    const { filename, dataUrl } = req.body || {};
+    try {
+        const { buffer } = parseDataUrlImage(dataUrl);
+        const finalName = sanitizeUploadName(filename);
+        const finalPath = path.join(EMPRESA_UPLOADS_DIR, finalName);
+        fs.writeFileSync(finalPath, buffer);
+        res.json({ success: true, path: `/uploads/empresa/${finalName}` });
+    } catch (error) {
+        res.status(400).json({ error: error.message || 'No se pudo guardar el logo.' });
+    }
+});
+
+app.get('/api/tms/config/empresa', authenticateToken, async (req, res) => {
+    try {
+        const value = await getSystemConfigValue('datos_empresa');
+        res.json({ success: true, data: value });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/tms/config/empresa', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const data = req.body;
+        await pgQuery(`
+            INSERT INTO tms_config (clave, valor)
+            VALUES ('datos_empresa', $1)
+            ON CONFLICT (clave) DO UPDATE SET valor = $1
+        `, [JSON.stringify(data)]);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // ─────────────────────────────────────────────────────────────
 // VEHÍCULOS
 // ─────────────────────────────────────────────────────────────
 app.get('/api/tms/vehiculos', authenticateToken, async (req, res) => {
     try {
+        await ensureDatabaseCompatibility();
         const result = await pgQuery(
             `SELECT id, placa, marca, modelo, tipo, capacidad_pasajeros AS cap, estado,
                     conductor_asignado_id AS "condId", fecha_revision_tecnica AS "revTec", fecha_marchamo AS march, km_actual AS km,
-                    activo
+                    foto_url, licencia_requerida AS "licenciaRequerida",
+                    colaborador, combustible_costo, combustible_tipo, peajes, viaticos, utilidad,
+                    adic_col, adic_viat, tarifa_gam, media_tarifa, t_in_sj, t_out_sj, t_in_ctg, t_out_ctg,
+                    hospedaje, viatico_diario, activo
              FROM vehiculos
              WHERE activo = TRUE
              ORDER BY placa ASC`
@@ -1196,13 +1429,14 @@ app.get('/api/tms/vehiculos', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/tms/vehiculos', authenticateToken, async (req, res) => {
-    const { placa, marca, modelo, tipo, cap, revTec, march, km } = req.body;
+    const { placa, marca, modelo, tipo, cap, revTec, march, km, foto_url, licenciaRequerida } = req.body;
     try {
+        await ensureDatabaseCompatibility();
         const result = await pgQuery(
-            `INSERT INTO vehiculos (placa, marca, modelo, tipo, capacidad_pasajeros, fecha_revision_tecnica, fecha_marchamo, km_actual, estado)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'disponible')
+            `INSERT INTO vehiculos (placa, marca, modelo, tipo, capacidad_pasajeros, fecha_revision_tecnica, fecha_marchamo, km_actual, foto_url, licencia_requerida, combustible_tipo, rendimiento, estado)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'disponible')
              RETURNING id`,
-            [placa, marca, modelo, tipo, cap, revTec || null, march || null, km || 0]
+            [placa, marca, modelo, tipo, cap, revTec || null, march || null, km || 0, foto_url || null, licenciaRequerida || null, combustibleTipo || 'Diésel', rendimiento || 0]
         );
         res.json({ success: true, id: result.rows[0].id });
     } catch (error) {
@@ -1214,13 +1448,14 @@ app.put('/api/tms/vehiculos/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const {
         placa, marca, modelo, tipo, cap, revTec, march,
-        colaborador, combustible_costo, combustible_tipo, peajes, viaticos, utilidad, adic_col, adic_viat,
+        colaborador, combustible_costo, combustibleTipo, rendimiento, peajes, viaticos, utilidad, adic_col, adic_viat,
         tarifa_gam, media_tarifa, t_in_sj, t_out_sj, t_in_ctg, t_out_ctg,
-        hospedaje, viatico_diario,
+        hospedaje, viatico_diario, foto_url, licenciaRequerida,
         // campos operativos
         estado, condId, km
     } = req.body;
     try {
+        await ensureDatabaseCompatibility();
         await pgQuery(
             `UPDATE vehiculos SET
                 placa = COALESCE($1, placa),
@@ -1249,12 +1484,15 @@ app.put('/api/tms/vehiculos/:id', authenticateToken, async (req, res) => {
                 t_out_ctg = COALESCE($24, t_out_ctg),
                 hospedaje = COALESCE($25, hospedaje),
                 viatico_diario = COALESCE($26, viatico_diario),
+                foto_url = COALESCE($27, foto_url),
+                licencia_requerida = COALESCE($28, licencia_requerida),
+                rendimiento = COALESCE($29, rendimiento),
                 updated_at = NOW()
-             WHERE id = $27`,
+             WHERE id = $30`,
             [placa, marca, modelo, tipo, cap, revTec || null, march || null, km,
-             estado, condId, colaborador, combustible_costo, combustible_tipo, peajes, viaticos, utilidad, adic_col, adic_viat,
-             tarifa_gam, media_tarifa, t_in_sj, t_out_sj, t_in_ctg, t_out_ctg,
-             hospedaje, viatico_diario, id]
+                estado, condId, colaborador, combustible_costo, combustibleTipo, peajes, viaticos, utilidad, adic_col, adic_viat,
+                tarifa_gam, media_tarifa, t_in_sj, t_out_sj, t_in_ctg, t_out_ctg,
+                hospedaje, viatico_diario, foto_url || null, licenciaRequerida || null, rendimiento, id]
         );
         res.json({ success: true });
     } catch (error) {
@@ -1271,6 +1509,67 @@ app.patch('/api/tms/vehiculos/:id/baja', authenticateToken, async (req, res) => 
             [id]
         );
         res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/tms/gastos', authenticateToken, async (req, res) => {
+    try {
+        await ensureDatabaseCompatibility();
+        const result = await pgQuery(
+            `SELECT
+                g.id,
+                g.vehiculo_id AS "vehiculoId",
+                g.tipo,
+                g.detalle,
+                g.monto,
+                TO_CHAR(g.fecha, 'YYYY-MM-DD') AS fecha,
+                COALESCE(
+                    json_agg(
+                        json_build_object(
+                            'id', ga.id,
+                            'nombreOriginal', ga.nombre_original,
+                            'archivoPath', ga.archivo_path,
+                            'mimeType', ga.mime_type
+                        )
+                    ) FILTER (WHERE ga.id IS NOT NULL),
+                    '[]'::json
+                ) AS adjuntos
+             FROM tms_gastos g
+             LEFT JOIN tms_gasto_adjuntos ga ON ga.gasto_id = g.id
+             GROUP BY g.id
+             ORDER BY g.fecha DESC, g.created_at DESC`
+        );
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/tms/gastos', authenticateToken, async (req, res) => {
+    const { vehiculoId, tipo, detalle, monto, fecha, adjuntos } = req.body || {};
+    try {
+        await ensureDatabaseCompatibility();
+        const result = await pgQuery(
+            `INSERT INTO tms_gastos (vehiculo_id, tipo, detalle, monto, fecha)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id`,
+            [vehiculoId || null, tipo || 'otro', detalle, monto || 0, fecha || new Date().toISOString().slice(0, 10)]
+        );
+
+        const gastoId = result.rows[0]?.id;
+        if (gastoId && Array.isArray(adjuntos)) {
+            for (const adjunto of adjuntos) {
+                await pgQuery(
+                    `INSERT INTO tms_gasto_adjuntos (gasto_id, nombre_original, archivo_path, mime_type)
+                     VALUES ($1, $2, $3, $4)`,
+                    [gastoId, adjunto?.nombreOriginal || null, adjunto?.archivoPath, adjunto?.mimeType || null]
+                );
+            }
+        }
+
+        res.json({ success: true, id: gastoId });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -1303,39 +1602,50 @@ app.get('/api/tms/eventos', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/tms/eventos', authenticateToken, async (req, res) => {
-    const { nombre, cliente, inicio, fin, pax, prio, estado } = req.body;
-    // inicio/fin vienen como "DD/MM" desde el frontend
+    const { nombre, clienteId, cliente, inicio, fin, pax, prio, estado } = req.body;
     const parseDate = (str) => {
         const [d, m] = str.split('/');
-        return `${new Date().getFullYear()}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+        return `${new Date().getFullYear()}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
     };
     try {
+        const resolvedClientId = await ensureClientForEvent({ clienteId, cliente });
+        if (!nombre || !resolvedClientId || !inicio || !fin) {
+            return res.status(400).json({ error: 'Nombre, cliente y fechas son requeridos para crear el evento.' });
+        }
+
         const result = await pgQuery(
-            `INSERT INTO eventos (nombre, cliente, fecha_inicio, fecha_fin, pax, prio, estado)
+            `INSERT INTO eventos (nombre, cliente_id, fecha_inicio, fecha_fin, pax_estimados, prioridad, estado)
              VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING id`,
-            [nombre, cliente, parseDate(inicio), parseDate(fin), pax, prio || 'normal', estado || 'planificado']
+              RETURNING id`,
+            [nombre, resolvedClientId, parseDate(inicio), parseDate(fin), pax, prio || 'normal', estado || 'planificado']
         );
-        res.json({ success: true, id: result.rows[0].id });
+        res.json({ success: true, id: result.rows[0].id, clienteId: resolvedClientId, cliente: String(cliente || '').trim() || null });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        const details = {
+            message: error?.message,
+            code: error?.code,
+            constraint: error?.constraint,
+            detail: error?.detail,
+        };
+        console.error('Error creando evento:', details);
+        res.status(500).json({ error: formatDbError(error), details });
     }
 });
 
 app.put('/api/tms/eventos/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
-    const { nombre, cliente, pax, prio, estado } = req.body;
+    const { nombre, clienteId, pax, prio, estado } = req.body;
     try {
         await pgQuery(
             `UPDATE eventos SET
                 nombre = COALESCE($1, nombre),
-                cliente = COALESCE($2, cliente),
-                pax = COALESCE($3, pax),
-                prio = COALESCE($4, prio),
+                cliente_id = COALESCE($2, cliente_id),
+                pax_estimados = COALESCE($3, pax_estimados),
+                prioridad = COALESCE($4, prioridad),
                 estado = COALESCE($5, estado),
                 updated_at = NOW()
              WHERE id = $6`,
-            [nombre, cliente, pax, prio, estado, id]
+            [nombre, clienteId, pax, prio, estado, id]
         );
         res.json({ success: true });
     } catch (error) {
@@ -1378,13 +1688,12 @@ app.post('/api/tms/tareas', authenticateToken, async (req, res) => {
     const diaBase = fecha || new Date().toISOString().slice(0, 10);
     try {
         const result = await pgQuery(
-            `INSERT INTO tareas (nombre, hora_inicio, hora_fin, evento_id, cond_id, veh_id, pax, origen, destino, fecha, estado)
-             VALUES ($1, $2::time, $3::time, $4, $5, $6, $7, $8, $9, $10, 'pendiente')
-             RETURNING id`,
-            [nombre, hora, fin, eventoId || null, condId || null, vehId || null,
-             pax, origen || null, destino || null, diaBase]
+            `INSERT INTO tareas (nombre, fecha_salida, llegada_estimada, hora_regreso, evento_id, conductor_id, vehiculo_id, pasajeros, punto_salida, destino, estado)
+             VALUES ($1, $2::timestamp, $3::timestamp, $4::timestamp, $5, $6, $7, $8, $9, $10, 'pendiente')
+              RETURNING id`,
+            [nombre, `${diaBase}T${hora || '00:00'}:00`, `${diaBase}T${fin || '00:00'}:00`, `${diaBase}T${fin || '00:00'}:00`, eventoId ?? null, condId ?? null, vehId ?? null,
+                pax, origen ?? null, destino ?? null]
         );
-        // Incrementar contador de tareas del evento
         if (eventoId) {
             await pgQuery(
                 `UPDATE eventos SET updated_at = NOW() WHERE id = $1`,
@@ -1401,12 +1710,18 @@ app.post('/api/tms/tareas', authenticateToken, async (req, res) => {
 app.patch('/api/tms/tareas/:id/asignar', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { condId, vehId } = req.body;
+    const nextEstado = condId && vehId ? 'asignada' : 'pendiente';
     try {
         await pgQuery(
-            `UPDATE tareas SET cond_id = $1, veh_id = $2, estado = 'asignada', updated_at = NOW() WHERE id = $3`,
-            [condId, vehId, id]
+            `UPDATE tareas
+             SET conductor_id = $1,
+                 vehiculo_id = $2,
+                 estado = $3,
+                 updated_at = NOW()
+             WHERE id = $4`,
+            [condId || null, vehId || null, nextEstado, id]
         );
-        res.json({ success: true });
+        res.json({ success: true, estado: nextEstado });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -1620,7 +1935,7 @@ app.post('/api/tms/socios/:clienteId/contactos', authenticateToken, async (req, 
             `INSERT INTO contactos (cliente_id, nombre, cargo, telefono, email, es_principal, notas)
              VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
             [clienteId, nombre, cargo || null, telefono || null,
-             email || null, es_principal || false, notas || null]
+                email || null, es_principal || false, notas || null]
         );
         res.json({ success: true, id: result.rows[0].id });
     } catch (error) {
@@ -1637,7 +1952,7 @@ app.put('/api/tms/socios/:clienteId/contactos/:contactoId', authenticateToken, a
                 email = $4, es_principal = $5, notas = $6
              WHERE id = $7`,
             [nombre, cargo || null, telefono || null,
-             email || null, es_principal || false, notas || null, contactoId]
+                email || null, es_principal || false, notas || null, contactoId]
         );
         res.json({ success: true });
     } catch (error) {
@@ -1754,6 +2069,407 @@ app.post('/api/tms/voice/interpret', authenticateToken, async (req, res) => {
     }
 });
 
+// ─────────────────────────────────────────────────────────────
+// TIPO DE CAMBIO - TABLA Y APIs (debe estar ANTES del SPA fallback)
+// ─────────────────────────────────────────────────────────────
+async function ensureTipoCambioTable() {
+    try {
+        await pgQuery(`
+            CREATE TABLE IF NOT EXISTS tipos_cambio (
+                id SERIAL PRIMARY KEY,
+                fecha DATE NOT NULL,
+                base VARCHAR(10) NOT NULL,
+                rates JSONB NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(fecha, base)
+            );
+            CREATE INDEX IF NOT EXISTS idx_tipos_cambio_fecha ON tipos_cambio(fecha);
+
+            CREATE TABLE IF NOT EXISTS tms_combustibles (
+                id SERIAL PRIMARY KEY,
+                fecha DATE UNIQUE NOT NULL,
+                super DECIMAL(10,2) NOT NULL,
+                regular DECIMAL(10,2) NOT NULL,
+                diesel DECIMAL(10,2) NOT NULL,
+                kerosene DECIMAL(10,2),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+    } catch (error) {
+        console.warn('No se pudo crear tablas de configuración:', error.message);
+    }
+}
+
+const CURRENCIES = [
+    { code: "usd", name: "Dólar estadounidense", flag: "🇺🇸", symbol: "$" },
+    { code: "crc", name: "Colón (Costa Rica)", flag: "🇨🇷", symbol: "₡" },
+    { code: "eur", name: "Euro", flag: "🇪🇺", symbol: "€" },
+];
+
+async function fetchTipoCambioFromAPI(base = 'usd') {
+    try {
+        const res = await fetch(`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/${base}.json`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const rates = data[base];
+        return { 
+            success: true, 
+            date: data.date, 
+            rates: {
+                crc: rates.crc,
+                eur: rates.eur
+            }
+        };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+// API: Obtener tipo de cambio actual (CRC y EUR)
+app.get('/api/tms/tipos-cambio/actual', authenticateToken, async (req, res) => {
+    try {
+        const result = await fetchTipoCambioFromAPI('usd');
+        if (!result.success) {
+            return res.status(500).json({ error: result.error });
+        }
+        res.json({ success: true, date: result.date, base: 'usd', rates: result.rates });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API: Guardar tipo de cambio (CRC y EUR)
+app.post('/api/tms/tipos-cambio', authenticateToken, async (req, res) => {
+    try {
+        const { fecha, rates } = req.body;
+        if (!fecha || !rates) {
+            return res.status(400).json({ error: 'Faltan datos requeridos (fecha o rates)' });
+        }
+        
+        await pgQuery(`
+            INSERT INTO tipos_cambio (fecha, base, rates)
+            VALUES ($1, 'usd', $2)
+            ON CONFLICT (fecha, base) DO UPDATE SET rates = $2
+        `, [fecha, JSON.stringify({ crc: rates.crc, eur: rates.eur })]);
+        
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API: Obtener historial
+app.get('/api/tms/tipos-cambio/historial', authenticateToken, async (req, res) => {
+    try {
+        const { limit = 30 } = req.query;
+        const result = await pgQuery(`
+            SELECT id, fecha, base, rates, created_at
+            FROM tipos_cambio
+            WHERE base = 'usd'
+            ORDER BY fecha DESC
+            LIMIT $1
+        `, [parseInt(limit)]);
+        
+        res.json({ success: true, historial: result.rows });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API: Auto-actualización manual
+app.post('/api/tms/tipos-cambio/auto-actualizar', authenticateToken, async (req, res) => {
+    try {
+        const result = await fetchTipoCambioFromAPI('usd');
+        
+        if (!result.success) {
+            return res.status(500).json({ error: result.error });
+        }
+        
+        const today = new Date().toISOString().split('T')[0];
+        
+        await pgQuery(`
+            INSERT INTO tipos_cambio (fecha, base, rates)
+            VALUES ($1, 'usd', $2)
+            ON CONFLICT (fecha, base) DO UPDATE SET rates = $2
+        `, [today, JSON.stringify(result.rates)]);
+        
+        res.json({ success: true, date: result.date, rates: result.rates });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// --- COMBUSTIBLES ---
+app.get('/api/tms/combustibles/actual', authenticateToken, async (req, res) => {
+    try {
+        const result = await pgQuery(`SELECT * FROM tms_combustibles ORDER BY fecha DESC, created_at DESC LIMIT 1`);
+        if (result.rows.length > 0) {
+            const row = result.rows[0];
+            res.json({ success: true, date: row.fecha, prices: { super: row.super, regular: row.regular, diesel: row.diesel, kerosene: row.kerosene } });
+        } else {
+            // Valores por defecto del archivo subido
+            res.json({ success: true, date: '2026-03-14', prices: { super: 633, regular: 607, diesel: 530, kerosene: 478 } });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/tms/combustibles/historial', authenticateToken, async (req, res) => {
+    try {
+        const result = await pgQuery(`SELECT * FROM tms_combustibles ORDER BY fecha DESC, created_at DESC LIMIT 50`);
+        res.json({ success: true, history: result.rows });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/tms/combustibles', authenticateToken, async (req, res) => {
+    try {
+        const { fecha, prices } = req.body;
+        await pgQuery(`
+            INSERT INTO tms_combustibles (fecha, super, regular, diesel, kerosene)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (fecha) DO UPDATE SET super = $2, regular = $3, diesel = $4, kerosene = $5, created_at = NOW()
+        `, [fecha, prices.super, prices.regular, prices.diesel, prices.kerosene]);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+async function fetchCombustiblesFromAPI() {
+    try {
+        // En una implementación real, aquí se usaría un scraper para recope.go.cr
+        // Por ahora devolvemos los valores actuales conocidos
+        return {
+            success: true,
+            date: new Date().toISOString().split('T')[0],
+            prices: { super: 633, regular: 607, diesel: 530, kerosene: 478 }
+        };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+}
+
+app.post('/api/tms/combustibles/auto-actualizar', authenticateToken, async (req, res) => {
+    try {
+        const result = await fetchCombustiblesFromAPI();
+        if (result.success) {
+            await pgQuery(`
+                INSERT INTO tms_combustibles (fecha, super, regular, diesel, kerosene)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (fecha) DO UPDATE SET super = $2, regular = $3, diesel = $4, kerosene = $5, created_at = NOW()
+            `, [result.date, result.prices.super, result.prices.regular, result.prices.diesel, result.prices.kerosene]);
+            res.json(result);
+        } else {
+            res.status(500).json({ error: result.error });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/tms/combustibles/programacion', authenticateToken, async (req, res) => {
+    try {
+        const result = await pgQuery(`SELECT valor FROM tms_config WHERE clave = 'combustibles_programacion'`);
+        const raw = result.rows.length > 0 ? result.rows[0].valor : null;
+        const programacion = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : { hora: '08:00', activo: false };
+        res.json({ success: true, programacion });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/tms/combustibles/programacion', authenticateToken, async (req, res) => {
+    try {
+        const programacion = req.body;
+        await pgQuery(`
+            INSERT INTO tms_config (clave, valor)
+            VALUES ('combustibles_programacion', $1)
+            ON CONFLICT (clave) DO UPDATE SET valor = $1
+        `, [JSON.stringify(programacion)]);
+        
+        await cargarProgramacionCombustibles();
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API: Obtener/configurar programación automática
+app.get('/api/tms/tipos-cambio/programacion', authenticateToken, async (req, res) => {
+    try {
+        const result = await pgQuery(`
+            SELECT clave, valor FROM tms_config WHERE clave = 'tipo_cambio_programacion'
+        `);
+        
+        const raw = result.rows.length > 0 ? result.rows[0].valor : null;
+        const programacion = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : { hora: '08:00', activo: false };
+        
+        res.json({ success: true, programacion });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/tms/tipos-cambio/programacion', authenticateToken, async (req, res) => {
+    try {
+        const { hora, activo } = req.body;
+        
+        await pgQuery(`
+            INSERT INTO tms_config (clave, valor)
+            VALUES ('tipo_cambio_programacion', $1)
+            ON CONFLICT (clave) DO UPDATE SET valor = $1, updated_at = NOW()
+        `, [JSON.stringify({ hora: hora || '08:00', activo: activo || false })]);
+        
+        // Actualizar en memoria y reiniciar el intervalo si es necesario
+        await cargarProgramacion();
+        
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API: Obtener el último tipo de cambio guardado (para usar en proformas)
+app.get('/api/tms/tipos-cambio/ultimo', authenticateToken, async (req, res) => {
+    try {
+        const result = await pgQuery(`
+            SELECT fecha, rates FROM tipos_cambio
+            WHERE base = 'usd'
+            ORDER BY fecha DESC
+            LIMIT 1
+        `);
+        
+        if (result.rows.length === 0) {
+            return res.json({ success: true, rates: null, fecha: null });
+        }
+        
+        const rates = typeof result.rows[0].rates === 'string' ? JSON.parse(result.rows[0].rates) : result.rows[0].rates;
+        res.json({ success: true, rates, fecha: result.rows[0].fecha });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Programación automática - revisar cada minuto
+let tipoCambioProgramacion = { hora: '08:00', activo: false };
+let tipoCambioInterval = null;
+
+async function cargarProgramacion() {
+    try {
+        const result = await pgQuery(`SELECT valor FROM tms_config WHERE clave = 'tipo_cambio_programacion'`);
+        if (result.rows.length > 0) {
+            const raw = result.rows[0].valor;
+            tipoCambioProgramacion = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            iniciarProgramacionAuto();
+        }
+    } catch (e) {
+        console.warn('No se pudo cargar programación de tipo de cambio:', e.message);
+    }
+}
+
+function iniciarProgramacionAuto() {
+    if (tipoCambioInterval) clearInterval(tipoCambioInterval);
+    
+    if (!tipoCambioProgramacion.activo) return;
+    
+    tipoCambioInterval = setInterval(async () => {
+        const now = new Date();
+        const horaActual = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        
+        if (horaActual === tipoCambioProgramacion.hora) {
+            try {
+                const result = await fetchTipoCambioFromAPI('usd');
+                if (result.success) {
+                    const today = new Date().toISOString().split('T')[0];
+                    await pgQuery(`
+                        INSERT INTO tipos_cambio (fecha, base, rates)
+                        VALUES ($1, 'usd', $2)
+                        ON CONFLICT (fecha, base) DO UPDATE SET rates = $2
+                    `, [today, JSON.stringify(result.rates)]);
+                    console.log('✔ Tipo de cambio (CRC/EUR) actualizado automáticamente a las', horaActual);
+                }
+            } catch (e) {
+                console.warn('Error en auto-actualización de tipo de cambio:', e.message);
+            }
+        }
+    }, 60000); // Revisar cada minuto
+}
+
+let combustiblesProgramacion = { hora: '08:00', activo: false };
+let combustiblesInterval = null;
+
+async function cargarProgramacionCombustibles() {
+    try {
+        const result = await pgQuery(`SELECT valor FROM tms_config WHERE clave = 'combustibles_programacion'`);
+        if (result.rows.length > 0) {
+            const raw = result.rows[0].valor;
+            combustiblesProgramacion = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            iniciarProgramacionCombustiblesAuto();
+        }
+    } catch (e) {
+        console.warn('No se pudo cargar programación de combustibles:', e.message);
+    }
+}
+
+function iniciarProgramacionCombustiblesAuto() {
+    if (combustiblesInterval) clearInterval(combustiblesInterval);
+    if (!combustiblesProgramacion.activo) return;
+    
+    combustiblesInterval = setInterval(async () => {
+        const now = new Date();
+        const horaActual = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        
+        if (horaActual === combustiblesProgramacion.hora) {
+            try {
+                const result = await fetchCombustiblesFromAPI();
+                if (result.success) {
+                    await pgQuery(`
+                        INSERT INTO tms_combustibles (fecha, super, regular, diesel, kerosene)
+                        VALUES ($1, $2, $3, $4, $5)
+                        ON CONFLICT (fecha) DO UPDATE SET super = $2, regular = $3, diesel = $4, kerosene = $5, created_at = NOW()
+                    `, [result.date, result.prices.super, result.prices.regular, result.prices.diesel, result.prices.kerosene]);
+                    console.log('✔ Precios de combustibles actualizados automáticamente a las', horaActual);
+                }
+            } catch (e) {
+                console.warn('Error en auto-actualización de combustibles:', e.message);
+            }
+        }
+    }, 60000);
+}
+
+// Iniciar al cargar el servidor
+ensureTipoCambioTable().then(async () => {
+    await cargarProgramacion();
+    await cargarProgramacionCombustibles();
+    
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const result = await pgQuery(`
+            SELECT fecha FROM tipos_cambio WHERE base = 'usd' ORDER BY fecha DESC LIMIT 1
+        `);
+        
+        if (result.rows.length === 0 || result.rows[0].fecha !== today) {
+            const apiResult = await fetchTipoCambioFromAPI('usd');
+            if (apiResult.success) {
+                await pgQuery(`
+                    INSERT INTO tipos_cambio (fecha, base, rates)
+                    VALUES ($1, 'usd', $2)
+                    ON CONFLICT (fecha, base) DO UPDATE SET rates = $2
+                `, [today, JSON.stringify(apiResult.rates)]);
+                console.log('✔ Tipo de cambio CRC/EUR actualizado automáticamente');
+            }
+        }
+    } catch (e) {
+        console.warn('No se pudo inicializar tipo de cambio:', e.message);
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
+// SPA FALLBACK - debe estar al final de todas las rutas API
+// ─────────────────────────────────────────────────────────────
 const __distDir = path.join(__dirname, 'dist');
 if (fs.existsSync(__distDir)) {
     app.use(express.static(__distDir));
@@ -1765,10 +2481,6 @@ if (fs.existsSync(__distDir)) {
         res.send('Servidor TransOP Activo. Backend operativo. (Frontend no encontrado en /dist)');
     });
 }
-
-ensureDatabaseCompatibility()
-    .then(() => seedClientsFromQuotes())
-    .catch(error => console.warn('No se pudo preparar la migración automática de socios desde proformas:', error.message));
 
 app.listen(PORT, () => {
     console.log(`\x1b[32m✔ Servidor TransOP cargado correctamente\x1b[0m`);

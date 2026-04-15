@@ -328,6 +328,7 @@ export default function FlotaGanttView({ tareas, conductores, vehiculos, eventos
                         const cond   = condMap[tarea.condId];
                         const veh    = vehMap[tarea.vehId];
                         const isHover = hoverId === tarea.id;
+                        const isEventTask = Boolean(tarea.eventoId);
 
                         return (
                           <div
@@ -341,6 +342,8 @@ export default function FlotaGanttView({ tareas, conductores, vehiculos, eventos
                               width: block.width - 2,
                               top: 6, height: ROW_H - 12,
                               background: col.bg,
+                              border: isEventTask ? '1px solid rgba(255,255,255,0.35)' : 'none',
+                              borderLeft: isEventTask ? '4px solid rgba(255,255,255,0.85)' : 'none',
                               borderRadius: 6,
                               overflow: 'hidden',
                               cursor: 'pointer',
@@ -352,6 +355,20 @@ export default function FlotaGanttView({ tareas, conductores, vehiculos, eventos
                               padding: '0 7px',
                             }}
                           >
+                            {isEventTask && (
+                              <div style={{
+                                position: 'absolute',
+                                top: 4,
+                                right: 6,
+                                fontSize: 8,
+                                fontWeight: 800,
+                                letterSpacing: 0.5,
+                                color: col.txt,
+                                opacity: 0.8,
+                              }}>
+                                EV
+                              </div>
+                            )}
                             {block.width > 60 && (
                               <div style={{ fontSize: 10, fontWeight: 700, color: col.txt, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.3 }}>
                                 {tarea.nombre}
@@ -359,7 +376,7 @@ export default function FlotaGanttView({ tareas, conductores, vehiculos, eventos
                             )}
                             {block.width > 120 && (
                               <div style={{ fontSize: 9, color: col.txt, opacity: .8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {evento?.cliente ?? ''}{cond && modeRows === 'vehiculo' ? ` · ${cond.alias ?? cond.nombre.split(' ')[0]}` : ''}
+                                {evento?.nombre ?? evento?.cliente ?? ''}{cond && modeRows === 'vehiculo' ? ` · ${cond.alias ?? cond.nombre.split(' ')[0]}` : ''}
                               </div>
                             )}
                             <div style={{

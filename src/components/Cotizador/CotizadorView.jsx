@@ -6,12 +6,18 @@ import {
   Clock,
   Eye,
   FileText,
+  Link,
   MapPin,
+  Pencil,
+  Plus,
   RefreshCcw,
+  Save,
   Search,
+  User,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { pdfGen } from '../../utils/pdfGenerator';
+import { normalizeTimeInput } from '../../utils/voiceDrafts';
 import { useSocios } from '../SociosView';
 import { T } from '../../theme';
 
@@ -28,12 +34,13 @@ const SECTION_ORDER = [
   { id: 'servicio', label: 'Servicio' },
   { id: 'costos', label: 'Costos operativos' },
   { id: 'extras', label: 'Hospedaje y viaticos' },
+  { id: 'itinerario', label: 'Itinerario' },
   { id: 'totales', label: 'Totales' },
 ];
 
 const PARAMS_DEFAULT = {
-  km: 0, combustible: 0.18, tipoCombustible: 'Diesel', tc: 520,
-  colaborador: 25, peajes: 15, viaticos: 10, ferry: 0, utilidad: 50, iva: 13,
+  km: 0, combustible: 0.18, tipoCombustible: 'Diesel', tc: 0,
+  colaborador: 25, peajes: 15, viaticos: 10, ferry: 0, utilidad: 0, utilidadPct: 0, iva: 13,
   chkDia: false, adicCol: 15, adicViat: 15,
   tarifaGAM: 150, diasGAM: 0, mediaTarifa: 75, diasSM: 0,
   tInSJ: 50, ckTinSJ: false, tOutSJ: 45, ckToutSJ: false,
@@ -488,12 +495,46 @@ function makeProformaNumber() {
   return `PRO-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
 }
 
+function to24HourFormat(timeStr) {
+  return normalizeTimeInput(timeStr);
+}
+
+function toIsoDate(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return '';
+  const clean = dateStr.trim();
+  if (!clean) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
+  const weekdays = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, jueves: 4, viernes: 5, sabado: 6 };
+  const lower = clean.toLowerCase();
+  if (weekdays[lower] !== undefined) {
+    const today = new Date();
+    const currentDay = today.getDay();
+    let daysToAdd = weekdays[lower] - currentDay;
+    if (daysToAdd <= 0) daysToAdd += 7;
+    const targetDate = new Date(today);
+    targetDate.setDate(today.getDate() + daysToAdd);
+    return targetDate.toISOString().split('T')[0];
+  }
+  const match = clean.match(/(\d{1,2})\s+de\s+(\w+)/);
+  if (match) {
+    const months = { enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5, julio: 6, agosto: 7, septiembre: 8, octubre: 9, noviembre: 10, diciembre: 11 };
+    if (months[match[2].toLowerCase()] !== undefined) {
+      const d = new Date();
+      d.setMonth(months[match[2].toLowerCase()]);
+      d.setDate(parseInt(match[1], 10));
+      return d.toISOString().split('T')[0];
+    }
+  }
+  return '';
+}
+
 function newSocio() {
   return {
-    cfNumero: makeProformaNumber(),
+    cfNumero: '',
     cfValidez: 15,
     cfPago: '50% adelanto, 50% al cierre',
     cfDescripcion: '',
+    cfDescripcionMode: 'auto',
     sCodigoCliente: '',
     sNombre: '',
     sCedula: '',
@@ -514,6 +555,28 @@ function newSocio() {
     sDestinoCoords: null,
     _estado: 'borrador',
   };
+}
+
+function buildAutoDescription(socio) {
+  const parts = [];
+  const route = [socio.sOrigen, socio.sDestino].filter(Boolean).join(' -> ');
+  const when = [socio.sFecha, socio.sHora].filter(Boolean).join(' ');
+
+  if (route) parts.push(`Servicio de transporte ${route}.`);
+  else parts.push('Servicio de transporte.');
+
+  if (when) parts.push(`Fecha y hora: ${when}.`);
+  if (socio.sPax) parts.push(`Pasajeros: ${socio.sPax}.`);
+  if (socio.sEmpresa || socio.sNombre) parts.push(`Cliente: ${socio.sEmpresa || socio.sNombre}.`);
+
+  return parts.join(' ').trim();
+}
+
+function inferDescriptionMode(socio) {
+  const manualText = String(socio?.cfDescripcion || '').trim();
+  const autoText = buildAutoDescription(socio).trim();
+  if (!manualText) return 'auto';
+  return manualText === autoText ? 'auto' : 'manual';
 }
 
 function Label({ estado }) {
@@ -547,7 +610,15 @@ function Field({ label, children, style = {} }) {
 }
 
 function fmt(v) {
-  return `$${Number(v || 0).toFixed(2)}`;
+  const fixed = Number(v || 0).toFixed(2);
+  const [whole, decimals] = fixed.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `$${grouped}.${decimals}`;
+}
+
+function fmtCRC(v) {
+  const whole = String(Math.round(Number(v || 0)));
+  return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
 function shortText(text, fallback = 'Sin informacion') {
@@ -572,6 +643,155 @@ function chooseSuggestedVehicle(vehiculos, pasajeros, currentVehiculoId = null) 
   if (currentVehicle && Number(currentVehicle.cap || 0) >= pax) return currentVehicle.id;
 
   return null;
+}
+
+function buildVehicleDefaults(vehiculo = {}, fuelPrices = null, tc = 512) {
+  let combustible = Number(vehiculo.combustible_costo) || 0;
+  if (fuelPrices && Number(vehiculo.rendimiento) > 0) {
+    const tipo = (vehiculo.combustible_tipo || 'Diésel').toLowerCase();
+    const priceCRC = Number(fuelPrices[tipo === 'súper' ? 'super' : tipo === 'regular' ? 'regular' : 'diesel']) || 0;
+    const safeTC = Number(tc) || 512;
+    if (priceCRC > 0 && safeTC > 0) {
+      combustible = (priceCRC / (Number(vehiculo.rendimiento) || 1)) / safeTC;
+    }
+  }
+  return {
+    colaborador: Number(vehiculo.colaborador) || 0,
+    combustible: Number(combustible) || 0,
+    tipoCombustible: vehiculo.combustible_tipo || 'Diésel',
+    peajes: Number(vehiculo.peajes) || 0,
+    viaticos: Number(vehiculo.viaticos) || 0,
+    utilidad: Number(vehiculo.utilidad) || 0,
+  };
+}
+
+function createProformaUnit(base = {}, vehiculos = [], preferredVehiculoId = null, fuelPrices = null, tc = 512) {
+  const vehiculoId = base.vehiculoId || preferredVehiculoId || chooseSuggestedVehicle(vehiculos, base.sPax || 0, null) || vehiculos[0]?.id || null;
+  const vehiculo = vehiculos.find(item => item.id === vehiculoId) || {};
+  const defaults = buildVehicleDefaults(vehiculo, fuelPrices, tc);
+  return {
+    id: base.id || `unit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    sFecha: base.sFecha || '',
+    sHora: base.sHora || '',
+    sPax: Number(base.sPax || 1),
+    sOrigen: base.sOrigen || '',
+    sOrigenCoords: base.sOrigenCoords || null,
+    sDestino: base.sDestino || '',
+    sDestinoCoords: base.sDestinoCoords || null,
+    km: Number(base.km || 0),
+    combustible: Number(base.combustible ?? defaults.combustible),
+    tipoCombustible: base.tipoCombustible || defaults.tipoCombustible,
+    colaborador: Number(base.colaborador ?? defaults.colaborador),
+    peajes: Number(base.peajes ?? defaults.peajes),
+    ferry: Number(base.ferry ?? defaults.ferry),
+    ...defaults,
+    ...base,
+    vehiculoId,
+  };
+}
+
+function hydrateProformaUnits({ savedUnits = [], socioData = {}, paramsData = {}, vehiculos = [], vehiculoId = null }) {
+  if (Array.isArray(savedUnits) && savedUnits.length > 0) {
+    return savedUnits.map(unit => createProformaUnit(unit, vehiculos, unit.vehiculoId || vehiculoId));
+  }
+
+  return [createProformaUnit({
+    sFecha: socioData.sFecha || '',
+    sHora: socioData.sHora || '',
+    sPax: socioData.sPax || 1,
+    sOrigen: socioData.sOrigen || '',
+    sOrigenCoords: socioData.sOrigenCoords || null,
+    sDestino: socioData.sDestino || '',
+    sDestinoCoords: socioData.sDestinoCoords || null,
+    km: paramsData.km || 0,
+    combustible: paramsData.combustible,
+    tipoCombustible: paramsData.tipoCombustible,
+    colaborador: paramsData.colaborador,
+    peajes: paramsData.peajes,
+    ferry: paramsData.ferry,
+    vehiculoId,
+  }, vehiculos, vehiculoId)];
+}
+
+function createItineraryRow(base = {}) {
+  return {
+    id: base.id || `itin-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    fecha: base.fecha || '',
+    hora: normalizeTimeInput(base.hora || '') || '',
+    origen: base.origen || '',
+    destino: base.destino || '',
+  };
+}
+
+function sanitizeItineraryRows(rows = []) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map(row => createItineraryRow(row));
+}
+
+function itineraryRowComplete(row) {
+  return Boolean(String(row?.fecha || '').trim() && String(row?.hora || '').trim() && String(row?.origen || '').trim() && String(row?.destino || '').trim());
+}
+
+function addOneHour(time) {
+  const normalized = normalizeTimeInput(time || '');
+  if (!normalized) return '01:00';
+  const [h, m] = normalized.split(':').map(Number);
+  const nextMinutes = ((h * 60 + m + 60) % (24 * 60));
+  const hh = String(Math.floor(nextMinutes / 60)).padStart(2, '0');
+  const mm = String(nextMinutes % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function toSlashDate(isoDate) {
+  if (!isoDate || !String(isoDate).includes('-')) return '';
+  const [, month, day] = String(isoDate).split('-');
+  if (!month || !day) return '';
+  return `${day}/${month}`;
+}
+
+function getEmpresaUtilidadPct(empresaData = {}) {
+  const raw = empresaData?.porcentaje_utilidad
+    ?? empresaData?.porcentajeUtilidad
+    ?? empresaData?.utilidadPct
+    ?? empresaData?.utilidad_pct;
+  return Number(raw) || 0;
+}
+
+function buildDefaultParams({ tc = PARAMS_DEFAULT.tc, empresaData = {} } = {}) {
+  return {
+    ...PARAMS_DEFAULT,
+    tc: Number(tc) || PARAMS_DEFAULT.tc,
+    utilidadPct: getEmpresaUtilidadPct(empresaData),
+    utilidad: 0,
+  };
+}
+
+function normalizeStoredParams(rawParams = {}, { fallbackTc = PARAMS_DEFAULT.tc, empresaData = {} } = {}) {
+  const hasUtilityPct = rawParams.utilidadPct != null
+    || rawParams.porcentajeUtilidad != null
+    || rawParams.porcentaje_utilidad != null;
+  return {
+    ...PARAMS_DEFAULT,
+    ...rawParams,
+    tc: Number(rawParams.tc) || Number(fallbackTc) || PARAMS_DEFAULT.tc,
+    utilidadPct: hasUtilityPct
+      ? (Number(rawParams.utilidadPct ?? rawParams.porcentajeUtilidad ?? rawParams.porcentaje_utilidad) || 0)
+      : getEmpresaUtilidadPct(empresaData),
+    utilidad: hasUtilityPct ? 0 : (Number(rawParams.utilidad) || 0),
+  };
+}
+
+function summarizeUnits(units = [], vehiculos = []) {
+  if (!Array.isArray(units) || units.length === 0) return 'Sin unidades definidas';
+  const compact = units.slice(0, 3).map((unit, index) => {
+    const vehiculo = vehiculos.find(item => item.id === unit.vehiculoId);
+    const unitLabel = vehiculo?.placa || `U${index + 1}`;
+    const pax = unit.sPax ? `${unit.sPax} pax` : 'Sin pax';
+    const route = [unit.sOrigen, unit.sDestino].filter(Boolean).join(' -> ') || 'Sin ruta';
+    return `${unitLabel}: ${pax} · ${shortText(route, 'Sin ruta')}`;
+  });
+  if (units.length > 3) compact.push(`+${units.length - 3} mas`);
+  return compact.join(' | ');
 }
 
 function buildListItem(proforma) {
@@ -605,11 +825,10 @@ function AccordionSection({ id, label, summary, open, onToggle, children, accent
         style={{
           width: '100%',
           display: 'flex',
-          alignItems: 'flex-start',
+          alignItems: 'center',
           justifyContent: 'space-between',
           gap: 14,
           padding: '16px 18px',
-          minHeight: 108,
           border: 'none',
           background: 'transparent',
           color: T.txt,
@@ -621,28 +840,20 @@ function AccordionSection({ id, label, summary, open, onToggle, children, accent
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 14, fontWeight: 800, color: open ? accent : T.txt }}>{label}</span>
           </div>
-          <div
-            style={{
-              maxHeight: open ? 0 : 200,
-              opacity: open ? 0 : 1,
-              overflow: 'hidden',
-              transform: open ? 'translateY(-8px)' : 'translateY(0)',
-              transition: 'max-height 0.24s ease, opacity 0.2s ease, transform 0.24s ease, margin-top 0.24s ease',
-              marginTop: open ? 0 : 8,
-            }}
-          >
+          {!open && summary && (
             <div
               style={{
+                marginTop: 6,
                 fontSize: 12,
                 color: T.sub,
-                lineHeight: 1.55,
+                lineHeight: 1.45,
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
               }}
             >
               {summary}
             </div>
-          </div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
           {actions}
@@ -677,14 +888,41 @@ function AccordionSection({ id, label, summary, open, onToggle, children, accent
   );
 }
 
-export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }) {
-  const { token } = useAuth();
+export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied, onHeaderMetaChange, onCreateEvento, onCreateTarea }) {
+  const { token, user } = useAuth();
   const authH = useMemo(() => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }), [token]);
 
-  const [viewMode, setViewMode] = useState('lista');
+  const [tabs, setTabs] = useState([{ id: 'lista', type: 'list', label: 'Proformas' }]);
+  const [activeTabId, setActiveTabId] = useState('lista');
+  const [tabsData, setTabsData] = useState({});
+
+  // Persistencia de pestañas en localStorage para evitar pérdida de datos al cambiar de módulo
+  useEffect(() => {
+    const savedTabs = localStorage.getItem('tms_cotizador_tabs');
+    const savedData = localStorage.getItem('tms_cotizador_tabs_data');
+    if (savedTabs) {
+      try {
+        const parsedTabs = JSON.parse(savedTabs);
+        const parsedData = JSON.parse(savedData);
+        if (parsedTabs && parsedTabs.length > 0) {
+          setTabs(parsedTabs);
+          setTabsData(parsedData || {});
+        }
+      } catch (e) { console.error("Error cargando cache de pestañas", e); }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tabs.length > 0) {
+      localStorage.setItem('tms_cotizador_tabs', JSON.stringify(tabs));
+      localStorage.setItem('tms_cotizador_tabs_data', JSON.stringify(tabsData));
+    }
+  }, [tabs, tabsData]);
   const [openSection, setOpenSection] = useState('');
   const [vehiculoActivo, setVehiculoActivo] = useState(null);
-  const [params, setParams] = useState({ ...PARAMS_DEFAULT });
+  const [units, setUnits] = useState([createProformaUnit()]);
+  const [activeUnitId, setActiveUnitId] = useState(null);
+  const [params, setParams] = useState(() => buildDefaultParams());
   const [socio, setSocio] = useState(newSocio());
   const [resData, setResData] = useState({});
   const [historial, setHistorial] = useState([]);
@@ -700,22 +938,35 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [mapPickerField, setMapPickerField] = useState('');
+  const [clienteFromBD, setClienteFromBD] = useState(false);
+  const [conductores, setConductores] = useState([]);
+  const [showConductorPicker, setShowConductorPicker] = useState(false);
+  const [fuelPrices, setFuelPrices] = useState(null);
+  const [empresaData, setEmpresaData] = useState({});
+  const [itineraryRows, setItineraryRows] = useState([]);
+  const [operationMsg, setOperationMsg] = useState('');
 
   const autosaveTimer = useRef(null);
   const lastSavedSignature = useRef('');
   const savingRef = useRef(false);
   const guardarRef = useRef(null);
 
-
   const { socios: sociosBD, loading: loadingSocios } = useSocios(token);
+  const activeTab = tabs.find(tab => tab.id === activeTabId) || tabs[0];
+  const isListTab = activeTab?.type === 'list';
+  const isDetailTab = !isListTab;
+  const activeUnit = units.find(unit => unit.id === activeUnitId) || units[0] || null;
 
   const cargarDatos = useCallback(async () => {
     setLoading(true);
     try {
-      const [vRes, hRes, cRes] = await Promise.all([
+      const [vRes, hRes, cRes, tcRes, fRes, eRes] = await Promise.all([
         fetch('/api/tms/vehiculos', { headers: authH }),
         fetch('/api/tms/proformas', { headers: authH }),
         fetch('/api/tms/config/global', { headers: authH }),
+        fetch('/api/tms/tipos-cambio/ultimo', { headers: authH }),
+        fetch('/api/tms/combustibles/actual', { headers: authH }),
+        fetch('/api/tms/config/empresa', { headers: authH }),
       ]);
 
       if (vRes.ok) {
@@ -734,6 +985,29 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
           setParams(prev => ({ ...prev, ...restParams }));
         }
       }
+
+      // Obtener tipo de cambio del API
+      if (tcRes.ok) {
+        const tcData = await tcRes.json();
+        if (tcData.success && tcData.rate) {
+          setParams(prev => ({ ...prev, tc: tcData.rate }));
+        }
+      }
+      if (fRes.ok) {
+        const fData = await fRes.json();
+        if (fData.success) setFuelPrices(fData.prices);
+      }
+      if (eRes && eRes.ok) {
+        const eData = await eRes.json();
+        if (eData.success) {
+          const nextEmpresa = eData.data || {};
+          setEmpresaData(nextEmpresa);
+          setParams(prev => {
+            if (Number(prev.utilidadPct || 0) > 0 || Number(prev.utilidad || 0) > 0) return prev;
+            return { ...prev, utilidadPct: getEmpresaUtilidadPct(nextEmpresa) };
+          });
+        }
+      }
     } catch (error) {
       console.error('Error cargando datos del cotizador:', error);
     } finally {
@@ -746,28 +1020,23 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
   }, [cargarDatos, token]);
 
   useEffect(() => {
-    const v = vehiculos.find(item => item.id === vehiculoActivo);
-    if (!v) return;
-    setParams(prev => ({
-      ...prev,
-      colaborador: Number(v.colaborador) || prev.colaborador,
-      combustible: Number(v.combustible_costo) || prev.combustible,
-      tipoCombustible: v.combustible_tipo || prev.tipoCombustible,
-      peajes: Number(v.peajes) || prev.peajes,
-      viaticos: Number(v.viaticos) || prev.viaticos,
-      utilidad: Number(v.utilidad) || prev.utilidad,
-      adicCol: Number(v.adic_col) || prev.adicCol,
-      adicViat: Number(v.adic_viat) || prev.adicViat,
-      tarifaGAM: Number(v.tarifa_gam) || prev.tarifaGAM,
-      mediaTarifa: Number(v.media_tarifa) || prev.mediaTarifa,
-      tInSJ: Number(v.t_in_sj) || prev.tInSJ,
-      tOutSJ: Number(v.t_out_sj) || prev.tOutSJ,
-      tInCTG: Number(v.t_in_ctg) || prev.tInCTG,
-      tOutCTG: Number(v.t_out_ctg) || prev.tOutCTG,
-      hospedaje: Number(v.hospedaje) || prev.hospedaje,
-      viatDiario: Number(v.viatico_diario) || prev.viatDiario,
+    if (!vehiculos.length) return;
+    setUnits(prev => prev.map((unit, index) => {
+      if (unit.vehiculoId) return unit;
+      if (index !== 0) return unit;
+      return createProformaUnit(unit, vehiculos, vehiculoActivo || vehiculos[0]?.id || null, fuelPrices, params.tc);
     }));
-  }, [vehiculoActivo, vehiculos]);
+  }, [vehiculoActivo, vehiculos, fuelPrices, params.tc]);
+
+  useEffect(() => {
+    if (!units.length) {
+      if (activeUnitId !== null) setActiveUnitId(null);
+      return;
+    }
+    if (!activeUnitId || !units.some(unit => unit.id === activeUnitId)) {
+      setActiveUnitId(units[0].id);
+    }
+  }, [activeUnitId, units]);
 
   const calculateDistance = async ({ silent = false } = {}) => {
     const origin = String(socio.sOrigen || '').trim();
@@ -806,21 +1075,15 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
   }
 
   useEffect(() => {
-    if (viewMode !== 'detalle') return;
-
-    const suggestedVehicleId = chooseSuggestedVehicle(vehiculos, socio.sPax, vehiculoActivo);
-    if (suggestedVehicleId !== vehiculoActivo) {
-      setVehiculoActivo(suggestedVehicleId);
-    }
-  }, [socio.sPax, vehiculoActivo, vehiculos, viewMode]);
-
-
-  useEffect(() => {
     const p = params;
-    const km = Number(p.km) || 0;
-    const costoKm = km * p.combustible;
-    let base = costoKm + p.colaborador + p.peajes + p.viaticos + p.ferry + p.utilidad;
-    if (p.chkDia) base += p.adicCol + p.adicViat;
+    const unitBreakdown = units.map(unit => {
+      const costoKm = Number(unit.km || 0) * Number(unit.combustible || 0);
+      const subtotal = costoKm + Number(unit.colaborador || 0) + Number(unit.peajes || 0) + Number(unit.ferry || 0);
+      return { ...unit, costoKm, subtotal };
+    });
+    const baseUnits = unitBreakdown.reduce((acc, unit) => acc + unit.subtotal, 0);
+    const adicionalDia = p.chkDia ? Number(p.adicCol || 0) + Number(p.adicViat || 0) : 0;
+    const base = baseUnits + adicionalDia;
 
     const tarFijas =
       (p.diasGAM * p.tarifaGAM) + (p.diasSM * p.mediaTarifa) +
@@ -830,38 +1093,211 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
     const hospedajeCalculado = p.hospedajeTotalManual > 0
       ? p.hospedajeTotalManual
       : (p.noches * p.hospedaje * Math.max(Number(p.persHosp || 0), 0));
-    const extras = hospedajeCalculado + (p.viatDiario * p.persViat);
-    const subtotal = base + tarFijas + extras;
-    const ivaAmt = subtotal * (p.iva / 100);
-    const total = subtotal + ivaAmt;
+    const viaticosDiarios = Number(p.viatDiario || 0) * Number(p.persViat || 0);
+    const extras = hospedajeCalculado + viaticosDiarios;
+    const subtotalOperativo = base;
+    const subtotalTransfer = tarFijas;
+    const subtotalExtras = extras;
+    const utilidadBase = subtotalOperativo + subtotalTransfer + subtotalExtras;
+    const utilidadAmt = Number(p.utilidadPct || 0) > 0
+      ? utilidadBase * (Number(p.utilidadPct || 0) / 100)
+      : Number(p.utilidad || 0);
+    const subtotalAntesIVA = utilidadBase + utilidadAmt;
+    const ivaAmt = subtotalAntesIVA * (p.iva / 100);
+    const total = subtotalAntesIVA + ivaAmt;
 
-    setResData({ costoKm, base, tarFijas, hospedajeCalculado, extras, subtotal, ivaAmt, total, totalCRC: total * p.tc });
-  }, [params]);
+    setResData({
+      unitBreakdown,
+      costoKm: baseUnits,
+      base,
+      adicionalDia,
+      subtotalOperativo,
+      subtotalTransfer,
+      subtotalExtras,
+      tarFijas,
+      hospedajeCalculado,
+      viaticosDiarios,
+      extras,
+      utilidadAmt,
+      subtotal: subtotalAntesIVA,
+      ivaAmt,
+      total,
+      totalCRC: total * p.tc,
+    });
+  }, [params, units]);
 
   const currentStatus = socio._estado || 'borrador';
-  const selectedVehiculo = vehiculos.find(item => item.id === vehiculoActivo);
+  const selectedVehiculo = vehiculos.find(item => item.id === (units[0]?.vehiculoId || vehiculoActivo));
+  const primaryItineraryRow = useMemo(() => createItineraryRow({
+    id: 'itin-base',
+    fecha: units[0]?.sFecha || socio.sFecha || '',
+    hora: units[0]?.sHora || socio.sHora || '',
+    origen: units[0]?.sOrigen || socio.sOrigen || '',
+    destino: units[0]?.sDestino || socio.sDestino || '',
+  }), [socio.sDestino, socio.sFecha, socio.sHora, socio.sOrigen, units]);
+  const itineraryRowsComplete = useMemo(() => {
+    const extraRows = sanitizeItineraryRows(itineraryRows).filter(row => itineraryRowComplete(row));
+    return itineraryRowComplete(primaryItineraryRow)
+      ? [primaryItineraryRow, ...extraRows]
+      : extraRows;
+  }, [itineraryRows, primaryItineraryRow]);
+  const itineraryIsEvent = itineraryRowsComplete.length > 1;
+  const autoDescription = useMemo(() => {
+    const firstUnit = units[0] || {};
+    return buildAutoDescription({
+      ...socio,
+      sOrigen: firstUnit.sOrigen || '',
+      sDestino: firstUnit.sDestino || '',
+      sFecha: firstUnit.sFecha || '',
+      sHora: firstUnit.sHora || '',
+      sPax: firstUnit.sPax || 0,
+    });
+  }, [socio, units]);
+
+  useEffect(() => {
+    if (socio.cfDescripcionMode !== 'auto') return;
+    if ((socio.cfDescripcion || '') === autoDescription) return;
+    setSocio(prev => ({ ...prev, cfDescripcion: autoDescription }));
+  }, [autoDescription, socio.cfDescripcion, socio.cfDescripcionMode]);
+
+  const buildCurrentTabSnapshot = useCallback(() => ({
+    selectedId,
+    params: { ...params },
+    socio: { ...socio },
+    units: units.map(unit => ({ ...unit })),
+    itineraryRows: itineraryRows.map(row => ({ ...row })),
+    activeUnitId,
+    vehiculoActivo,
+    openSection,
+    socioSearch,
+    showSocioSuggestions,
+    showStatusMenu,
+    mapPickerField,
+    voiceFeedback,
+    clienteFromBD,
+    autoSaveEnabled,
+    distanceStatus,
+    savedMsg,
+    operationMsg,
+  }), [
+    autoSaveEnabled,
+    clienteFromBD,
+    distanceStatus,
+    itineraryRows,
+    mapPickerField,
+    openSection,
+    operationMsg,
+    params,
+    savedMsg,
+    selectedId,
+    showSocioSuggestions,
+    showStatusMenu,
+    socio,
+    socioSearch,
+    units,
+    activeUnitId,
+    vehiculoActivo,
+    voiceFeedback,
+  ]);
+
+  const restoreTabSnapshot = useCallback((snapshot) => {
+    if (!snapshot) {
+      setSelectedId(null);
+      const freshDefaults = buildDefaultParams({ tc: params.tc, empresaData });
+      setParams(freshDefaults);
+      setSocio(newSocio());
+      setUnits([createProformaUnit({}, vehiculos, vehiculos[0]?.id || null, fuelPrices, freshDefaults.tc)]);
+      setItineraryRows([]);
+      setActiveUnitId(null);
+      setVehiculoActivo(vehiculos.length > 0 ? vehiculos[0].id : null);
+      setOpenSection('');
+      setSocioSearch('');
+      setShowSocioSuggestions(false);
+      setShowStatusMenu(false);
+      setMapPickerField('');
+      setVoiceFeedback(null);
+      setClienteFromBD(false);
+      setAutoSaveEnabled(false);
+      setDistanceStatus('');
+      setSavedMsg('');
+      setOperationMsg('');
+      lastSavedSignature.current = '';
+      return;
+    }
+
+    // Sanitize units data to prevent NaN errors
+    const safeUnits = (snapshot.units || []).map(u => ({
+      ...u,
+      id: u.id || `unit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      km: Number(u.km) || 0,
+      combustible: Number(u.combustible) || 0,
+      colaborador: Number(u.colaborador) || 0,
+      peajes: Number(u.peajes) || 0,
+      ferry: Number(u.ferry) || 0,
+      sPax: Number(u.sPax) || 1,
+    }));
+
+    // Sanitize params to avoid unparsed numeric values
+    const safeParams = snapshot.params ? {
+      ...normalizeStoredParams(snapshot.params, { fallbackTc: params.tc || 512, empresaData }),
+      adicCol: Number(snapshot.params.adicCol) || 0,
+      adicViat: Number(snapshot.params.adicViat) || 0,
+      hospedaje: Number(snapshot.params.hospedaje) || 0,
+      noches: Number(snapshot.params.noches) || 0,
+      persHosp: Number(snapshot.params.persHosp) || 0,
+      persViat: Number(snapshot.params.persViat) || 0,
+      hospedajeTotalManual: Number(snapshot.params.hospedajeTotalManual) || 0,
+    } : buildDefaultParams({ tc: params.tc, empresaData });
+
+    setSelectedId(snapshot.selectedId || null);
+    setParams(safeParams);
+    setSocio(snapshot.socio ? { ...newSocio(), ...snapshot.socio } : newSocio());
+    setUnits(safeUnits.length ? safeUnits : [createProformaUnit({}, vehiculos, null, fuelPrices, safeParams.tc)]);
+    setItineraryRows(sanitizeItineraryRows(snapshot.itineraryRows || []));
+    setVehiculoActivo(snapshot.vehiculoActivo || (vehiculos[0]?.id || null));
+    setActiveUnitId(snapshot.activeUnitId || (safeUnits.length ? safeUnits[0].id : null));
+    setOpenSection(snapshot.openSection || '');
+    setSocioSearch(snapshot.socioSearch || '');
+    setShowSocioSuggestions(Boolean(snapshot.showSocioSuggestions));
+    setShowStatusMenu(Boolean(snapshot.showStatusMenu));
+    setMapPickerField(snapshot.mapPickerField || '');
+    setVoiceFeedback(snapshot.voiceFeedback || null);
+    setClienteFromBD(Boolean(snapshot.clienteFromBD));
+    setAutoSaveEnabled(Boolean(snapshot.autoSaveEnabled));
+    setDistanceStatus(snapshot.distanceStatus || '');
+    setSavedMsg(snapshot.savedMsg || '');
+    setOperationMsg(snapshot.operationMsg || '');
+  }, [empresaData, fuelPrices, params.tc, vehiculos]);
 
   const payloadSignature = useMemo(() => JSON.stringify({
     numero: socio.cfNumero,
     cliente_nombre: socio.sNombre,
     cliente_empresa: socio.sEmpresa,
     total_usd: resData.total,
-    data_json: { params, socio, vehiculoId: vehiculoActivo, estado: currentStatus },
-  }), [currentStatus, params, resData.total, socio, vehiculoActivo]);
+    data_json: { params, socio, units, itineraryRows, vehiculoId: units[0]?.vehiculoId || vehiculoActivo, estado: currentStatus },
+  }), [currentStatus, itineraryRows, params, resData.total, socio, units, vehiculoActivo]);
 
-  const guardar = useCallback(async (estadoOverride) => {
-    if (savingRef.current) return;
+  const guardar = useCallback(async (estadoOverride, forceCreate = false) => {
+    if (savingRef.current) return null;
     const estado = estadoOverride ?? socio._estado ?? 'borrador';
+    
+    let numeroFinal = socio.cfNumero;
+    if (!numeroFinal && forceCreate) {
+      numeroFinal = makeProformaNumber();
+    }
+    
+    // No guardamos a la BD si no tenemos numero (caso de borrador no guardado aun)
+    if (!numeroFinal) return null;
+
     const payload = {
-      numero: socio.cfNumero,
+      numero: numeroFinal,
       cliente_nombre: socio.sNombre,
       cliente_empresa: socio.sEmpresa,
       total_usd: resData.total,
-      data_json: { params, socio: { ...socio, _estado: estado }, vehiculoId: vehiculoActivo, estado },
+      data_json: { params, socio: { ...socio, _estado: estado }, units, itineraryRows, vehiculoId: units[0]?.vehiculoId || vehiculoActivo, estado },
     };
 
     savingRef.current = true;
-    console.log('[guardar] Enviando payload:', JSON.stringify(payload).slice(0, 200));
     try {
       const res = await fetch('/api/tms/proformas', {
         method: 'POST',
@@ -869,65 +1305,166 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
         body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
-      console.log('[guardar] Respuesta:', res.status, JSON.stringify(data).slice(0, 200));
       if (!res.ok) throw new Error(data.error || `Error ${res.status} al guardar`);
 
-      setSocio(prev => ({ ...prev, _estado: estado }));
-      setSelectedId(data.id || selectedId);
+      setSocio(prev => ({ ...prev, cfNumero: numeroFinal, _estado: estado }));
+      const resolvedId = data.id || selectedId;
+      setSelectedId(resolvedId);
+      if (activeTabId !== 'lista') {
+        setTabs(prev => prev.map(tab => (
+          tab.id === activeTabId
+            ? {
+                ...tab,
+                id: resolvedId ? `proforma-${resolvedId}` : tab.id,
+                type: resolvedId ? 'proforma' : tab.type,
+                sourceId: resolvedId || tab.sourceId,
+                label: socio.cfNumero,
+              }
+            : tab
+        )));
+        if (resolvedId && activeTabId !== `proforma-${resolvedId}`) {
+          setTabsData(prev => {
+            const next = { ...prev };
+            next[`proforma-${resolvedId}`] = next[activeTabId] || buildCurrentTabSnapshot();
+            delete next[activeTabId];
+            return next;
+          });
+          setActiveTabId(`proforma-${resolvedId}`);
+        }
+      }
       lastSavedSignature.current = JSON.stringify(payload);
       setSavedMsg('Guardado ✓');
       setTimeout(() => setSavedMsg(''), 1800);
       // Solo refrescamos el historial, no params — para no pisar km ni otros campos
       const hRes = await fetch('/api/tms/proformas', { headers: authH });
       if (hRes.ok) setHistorial(await hRes.json());
+      return { numero: numeroFinal, id: resolvedId, estado };
     } catch (error) {
       console.error('Error guardando proforma:', error);
       setSavedMsg('Error al guardar');
       setTimeout(() => setSavedMsg(''), 2500);
+      throw error;
     } finally {
       savingRef.current = false;
     }
-  }, [authH, params, resData.total, selectedId, socio, vehiculoActivo]);
+  }, [activeTabId, authH, buildCurrentTabSnapshot, itineraryRows, params, resData.total, selectedId, socio, units, vehiculoActivo]);
 
   // Mantener guardarRef apuntando siempre a la versión más reciente de guardar
   // para poder llamarla desde el autosave sin que sea una dependencia del timer
   guardarRef.current = guardar;
 
   useEffect(() => {
-    if (!autoSaveEnabled || viewMode !== 'detalle') return;
+    if (!autoSaveEnabled || !isDetailTab || !socio.cfNumero) return;
     if (payloadSignature === lastSavedSignature.current) return;
 
     clearTimeout(autosaveTimer.current);
     autosaveTimer.current = setTimeout(() => {
-      // Llamamos via ref para no tener guardar en las deps del effect
-      // (si guardar estuviera en deps, cada cambio de campo cancela el timer)
       guardarRef.current?.();
-    }, 900);
+    }, 1400);
 
     return () => clearTimeout(autosaveTimer.current);
-  // guardar NO va en deps — usamos guardarRef para leer la versión fresca
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSaveEnabled, payloadSignature, viewMode]);
+  }, [autoSaveEnabled, isDetailTab, payloadSignature]);
+
+  // Sincronizar estado local con tabsData permanentemente
+  useEffect(() => {
+    if (activeTabId === 'lista') return;
+    const snapshot = buildCurrentTabSnapshot();
+    setTabsData(prev => ({
+      ...prev,
+      [activeTabId]: {
+        ...(prev[activeTabId] || {}),
+        ...snapshot
+      }
+    }));
+  }, [units, socio, params, activeTabId, buildCurrentTabSnapshot]);
+
+  useEffect(() => {
+    clearTimeout(autosaveTimer.current);
+
+    if (activeTabId === 'lista') {
+      setSelectedId(null);
+      setOpenSection('');
+      setShowStatusMenu(false);
+      setMapPickerField('');
+      setVoiceFeedback(null);
+      setAutoSaveEnabled(false);
+      setSavedMsg('');
+      return;
+    }
+
+    restoreTabSnapshot(tabsData[activeTabId]);
+  }, [activeTabId, restoreTabSnapshot]);
+
+  const persistCurrentTab = useCallback(() => {
+    if (activeTabId === 'lista') return;
+    setTabsData(prev => ({ ...prev, [activeTabId]: buildCurrentTabSnapshot() }));
+  }, [activeTabId, buildCurrentTabSnapshot]);
 
   const toggleSection = (sectionId) => {
     setOpenSection(prev => (prev === sectionId ? '' : sectionId));
   };
 
+  const upsertDetailTab = useCallback((tabConfig, snapshot, signature = '') => {
+    setTabs(prev => {
+      const exists = prev.some(tab => tab.id === tabConfig.id);
+      if (exists) {
+        return prev.map(tab => (tab.id === tabConfig.id ? { ...tab, ...tabConfig } : tab));
+      }
+      return [...prev, tabConfig];
+    });
+    setTabsData(prev => ({
+      ...prev,
+      [tabConfig.id]: {
+        ...(prev[tabConfig.id] || {}),
+        ...snapshot,
+      },
+    }));
+    lastSavedSignature.current = signature;
+    setActiveTabId(tabConfig.id);
+  }, [activeTabId, persistCurrentTab]);
+
+  const activateTab = useCallback((tabId) => {
+    if (tabId === activeTabId) return;
+    persistCurrentTab();
+    setActiveTabId(tabId);
+  }, [activeTabId, persistCurrentTab]);
+
+  const closeTab = useCallback((tabId) => {
+    if (tabId === 'lista') return;
+    clearTimeout(autosaveTimer.current);
+    setTabs(prev => prev.filter(tab => tab.id !== tabId));
+    setTabsData(prev => {
+      const next = { ...prev };
+      delete next[tabId];
+      return next;
+    });
+    setActiveTabId(prev => (prev === tabId ? 'lista' : prev));
+  }, []);
+
   const nuevaProforma = () => {
     clearTimeout(autosaveTimer.current);
-    setSelectedId(null);
-    setParams({ ...PARAMS_DEFAULT });
-    setSocio(newSocio());
-    setVoiceFeedback(null);
-    setOpenSection('');
-    setSocioSearch('');
-    setShowSocioSuggestions(false);
-    setViewMode('detalle');
-    setShowStatusMenu(false);
-    setMapPickerField('');
-    if (vehiculos.length > 0) setVehiculoActivo(vehiculos[0].id);
-    lastSavedSignature.current = '';
-    setAutoSaveEnabled(false);
+    const newTabId = `new-${Date.now()}`;
+    const draftSocio = newSocio();
+    upsertDetailTab(
+      { id: newTabId, type: 'new', label: draftSocio.cfNumero || 'Nueva proforma' },
+      {
+        selectedId: null,
+        params: buildDefaultParams({ tc: params.tc, empresaData }),
+        socio: draftSocio,
+        units: [createProformaUnit({}, vehiculos, vehiculos[0]?.id || null, fuelPrices, params.tc)],
+        vehiculoActivo: vehiculos.length > 0 ? vehiculos[0].id : null,
+        openSection: '',
+        socioSearch: '',
+        showSocioSuggestions: false,
+        showStatusMenu: false,
+        mapPickerField: '',
+        voiceFeedback: null,
+        clienteFromBD: false,
+        autoSaveEnabled: false,
+        distanceStatus: '',
+        savedMsg: '',
+      }
+    );
   };
 
   const applyVoiceDraft = useCallback((draft) => {
@@ -935,10 +1472,31 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
 
     const data = draft.quoteData || {};
     const nextPax = Number(data.sPax || data.pasajeros || 1);
-    clearTimeout(autosaveTimer.current);
-    setSelectedId(null);
-    setParams(prev => ({
-      ...prev,
+    const draftSocio = {
+      ...newSocio(),
+      sCodigoCliente: data.sCodigoCliente || data.codigoCliente || '',
+      sNombre: data.sNombre || data.nombreCliente || '',
+      sEmpresa: data.sEmpresa || data.empresa || '',
+      sContacto: data.sContacto || data.contacto || '',
+      sCargo: data.sCargo || data.cargo || '',
+      sTel: data.sTel || data.telefono || '',
+      sEmail: data.sEmail || data.email || '',
+      sCedula: data.sCedula || data.identificacion || data.id || '',
+      sDireccion: data.sDireccion || data.direccion || '',
+      sNotas: data.sNotas || data.notas || '',
+      sOrigen: data.sOrigen || data.origen || '',
+      sDestino: data.sDestino || data.destino || '',
+      sFecha: toIsoDate(data.sFecha || data.fechaServicio || ''),
+      sHora: to24HourFormat(data.sHora || data.horaServicio || ''),
+      sPax: nextPax,
+      cfDescripcion: data.cfDescripcion || data.descripcion || draft.transcript || '',
+      cfDescripcionMode: data.cfDescripcionMode || 'auto',
+      cfPago: data.cfPago || newSocio().cfPago,
+      cfValidez: data.cfValidez || newSocio().cfValidez,
+      _estado: 'borrador',
+    };
+    const nextParams = {
+      ...buildDefaultParams({ tc: params.tc, empresaData }),
       ...(typeof data.km === 'number' ? { km: data.km } : {}),
       ...(typeof data.noches === 'number' ? { noches: data.noches } : {}),
       ...(typeof data.persViat === 'number' ? { persViat: data.persViat } : {}),
@@ -949,52 +1507,96 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
       ...(typeof data.ckToutSJ === 'boolean' ? { ckToutSJ: data.ckToutSJ } : {}),
       ...(typeof data.ckTinCTG === 'boolean' ? { ckTinCTG: data.ckTinCTG } : {}),
       ...(typeof data.ckToutCTG === 'boolean' ? { ckToutCTG: data.ckToutCTG } : {}),
-    }));
-    setSocio({
-      ...newSocio(),
-      sCodigoCliente: data.sCodigoCliente || data.codigoCliente || '',
-      sNombre: data.sNombre || data.nombreCliente || '',
-      sEmpresa: data.sEmpresa || data.empresa || '',
-      sContacto: data.sContacto || data.contacto || '',
-      sCargo: data.sCargo || data.cargo || '',
-      sTel: data.sTel || data.telefono || '',
-      sEmail: data.sEmail || data.email || '',
-      sDireccion: data.sDireccion || data.direccion || '',
-      sOrigen: data.sOrigen || data.origen || '',
-      sDestino: data.sDestino || data.destino || '',
-      sFecha: data.sFecha || data.fechaServicio || '',
-      sHora: data.sHora || data.horaServicio || '',
-      sPax: nextPax,
-      cfDescripcion: data.cfDescripcion || data.descripcion || draft.transcript || '',
-      cfPago: data.cfPago || newSocio().cfPago,
-      cfValidez: data.cfValidez || newSocio().cfValidez,
-      _estado: 'borrador',
-    });
-    setVehiculoActivo(prev => chooseSuggestedVehicle(vehiculos, nextPax, prev));
-    setVoiceFeedback({
+      ...(typeof data.peajes === 'number' ? { peajes: data.peajes } : {}),
+      ...(typeof data.colaborador === 'number' ? { colaborador: data.colaborador } : {}),
+      ...(typeof data.combustible === 'number' ? { combustible: data.combustible } : {}),
+      ...(typeof data.viaticos === 'number' ? { viaticos: data.viaticos } : {}),
+      ...(typeof data.utilidadPct === 'number' ? { utilidadPct: data.utilidadPct } : {}),
+      ...(typeof data.porcentajeUtilidad === 'number' ? { utilidadPct: data.porcentajeUtilidad } : {}),
+      ...(typeof data.utilidad === 'number' ? { utilidadPct: data.utilidad } : {}),
+      ...(data.tipoCombustible ? { tipoCombustible: data.tipoCombustible } : {}),
+      ...(typeof data.tc === 'number' ? { tc: data.tc } : {}),
+      ...(data.tipoVehiculo ? { tipoVehiculo: data.tipoVehiculo } : {}),
+    };
+    const nextVoiceFeedback = {
       message: draft.assistantMessage || '',
       missingFields: Array.isArray(draft.missingFields) ? draft.missingFields : [],
       interpretationNotes: Array.isArray(draft.interpretationNotes) ? draft.interpretationNotes : [],
-    });
-    setSocioSearch(data.sNombre || data.nombreCliente || data.sEmpresa || data.empresa || '');
-    setViewMode('detalle');
-    setOpenSection(data.sOrigen || data.origen || data.sDestino || data.destino ? 'servicio' : 'cliente');
-    setShowSocioSuggestions(false);
-    setShowStatusMenu(false);
-    setAutoSaveEnabled(true);
+    };
+    const draftTabId = `voice-${draft.id}`;
+
+    clearTimeout(autosaveTimer.current);
+    upsertDetailTab(
+      { id: draftTabId, type: 'new', label: draftSocio.cfNumero || 'Nueva proforma' },
+      {
+        selectedId: null,
+        params: nextParams,
+        socio: draftSocio,
+        units: [createProformaUnit({
+          sFecha: draftSocio.sFecha,
+          sHora: draftSocio.sHora,
+          sPax: draftSocio.sPax,
+          sOrigen: draftSocio.sOrigen,
+          sDestino: draftSocio.sDestino,
+          km: nextParams.km || 0,
+          combustible: nextParams.combustible,
+          tipoCombustible: nextParams.tipoCombustible,
+          colaborador: nextParams.colaborador,
+          peajes: nextParams.peajes,
+          ferry: nextParams.ferry,
+        }, vehiculos, chooseSuggestedVehicle(vehiculos, nextPax, vehiculoActivo), fuelPrices, nextParams.tc || params.tc)],
+        itineraryRows: [],
+        vehiculoActivo: chooseSuggestedVehicle(vehiculos, nextPax, vehiculoActivo),
+        openSection: data.sOrigen || data.origen || data.sDestino || data.destino ? 'servicio' : 'cliente',
+        socioSearch: data.sNombre || data.nombreCliente || data.sEmpresa || data.empresa || '',
+        showSocioSuggestions: false,
+        showStatusMenu: false,
+        mapPickerField: '',
+        voiceFeedback: nextVoiceFeedback,
+        clienteFromBD: false,
+        autoSaveEnabled: true,
+        distanceStatus: '',
+        savedMsg: '',
+        operationMsg: '',
+      }
+    );
     lastSavedSignature.current = '';
     onVoiceDraftApplied?.(draft.id);
-  }, [onVoiceDraftApplied, vehiculos]);
+  }, [empresaData, onVoiceDraftApplied, upsertDetailTab, vehiculoActivo, vehiculos, params.tc, fuelPrices]);
+
+  const handleNuevaProforma = () => {
+    const nextSocio = newSocio();
+    const tabId = `new-${Date.now()}`;
+    upsertDetailTab(
+      { id: tabId, type: 'new', label: '' },
+      {
+        selectedId: null,
+        params: buildDefaultParams({ tc: params.tc, empresaData }),
+        socio: nextSocio,
+        units: [createProformaUnit({}, vehiculos, vehiculos[0]?.id || null, fuelPrices, params.tc)],
+        itineraryRows: [],
+        vehiculoActivo: vehiculos[0]?.id || null,
+        openSection: 'cliente',
+        socioSearch: '',
+        showSocioSuggestions: false,
+        showStatusMenu: false,
+        mapPickerField: '',
+        voiceFeedback: { message: '', missingFields: [], interpretationNotes: [] },
+        clienteFromBD: false,
+        autoSaveEnabled: false,
+        distanceStatus: '',
+        savedMsg: '',
+        operationMsg: '',
+      }
+    );
+  };
 
   const cancelarDetalle = () => {
-    clearTimeout(autosaveTimer.current);
-    setViewMode('lista');
-    setSelectedId(null);
-    setVoiceFeedback(null);
-    setAutoSaveEnabled(false);
-    setSavedMsg('');
-    setShowStatusMenu(false);
-    setMapPickerField('');
+    if (activeTabId !== 'lista') {
+      closeTab(activeTabId);
+    } else {
+      setActiveTabId('lista');
+    }
   };
 
   useEffect(() => {
@@ -1006,38 +1608,69 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
     const data = proforma.data_json || {};
     const socioData = data.socio || {};
     const paramsData = data.params || {};
-
-    setSelectedId(proforma.id);
-    setParams({ ...PARAMS_DEFAULT, ...paramsData });
-    setSocio({ ...newSocio(), ...socioData, cfNumero: proforma.numero, _estado: data.estado || socioData._estado || 'borrador' });
-    setVehiculoActivo(data.vehiculoId || vehiculoActivo);
-    setVoiceFeedback(null);
-    setOpenSection('');
-    setSocioSearch('');
-    setShowSocioSuggestions(false);
-    setViewMode('detalle');
-    setAutoSaveEnabled(true);
-    setShowStatusMenu(false);
-    setMapPickerField('');
-    lastSavedSignature.current = JSON.stringify({
+    const nextItineraryRows = sanitizeItineraryRows(data.itineraryRows || []);
+    const nextUnits = hydrateProformaUnits({
+      savedUnits: data.units,
+      socioData,
+      paramsData,
+      vehiculos,
+      vehiculoId: data.vehiculoId || vehiculoActivo,
+    });
+    const socioTransformado = {
+      ...newSocio(),
+      ...socioData,
+      sHora: to24HourFormat(socioData.sHora || ''),
+      sFecha: toIsoDate(socioData.sFecha || ''),
+      cfNumero: proforma.numero,
+      cfDescripcionMode: socioData.cfDescripcionMode || inferDescriptionMode({ ...socioData, cfNumero: proforma.numero }),
+      _estado: data.estado || socioData._estado || 'borrador'
+    };
+    const tabId = `proforma-${proforma.id}`;
+    const signature = JSON.stringify({
       numero: proforma.numero,
       cliente_nombre: proforma.cliente_nombre,
       cliente_empresa: proforma.cliente_empresa,
       total_usd: proforma.total_usd,
-      data_json: { ...data, socio: { ...newSocio(), ...socioData, cfNumero: proforma.numero, _estado: data.estado || socioData._estado || 'borrador' } },
+      data_json: { params: paramsData, socio: socioTransformado, units: nextUnits, itineraryRows: nextItineraryRows, vehiculoId: data.vehiculoId, estado: data.estado || socioData._estado || 'borrador' },
     });
+    upsertDetailTab(
+      { id: tabId, type: 'proforma', sourceId: proforma.id, label: proforma.numero },
+      {
+        selectedId: proforma.id,
+        params: normalizeStoredParams(paramsData, { fallbackTc: params.tc, empresaData }),
+        socio: socioTransformado,
+        units: nextUnits,
+        itineraryRows: nextItineraryRows,
+        vehiculoActivo: data.vehiculoId || nextUnits[0]?.vehiculoId || vehiculoActivo,
+        openSection: '',
+        socioSearch: '',
+        showSocioSuggestions: false,
+        showStatusMenu: false,
+        mapPickerField: '',
+        voiceFeedback: null,
+        clienteFromBD: false,
+        autoSaveEnabled: true,
+        distanceStatus: '',
+        savedMsg: '',
+        operationMsg: '',
+      },
+      signature
+    );
   };
 
-  const borrarProforma = async (id) => {
+  const borrarProforma = useCallback(async (id) => {
     if (!confirm('Eliminar esta proforma de la base de datos?')) return;
     try {
       await fetch(`/api/tms/proformas/${id}`, { method: 'DELETE', headers: authH });
       setHistorial(prev => prev.filter(item => item.id !== id));
-      if (selectedId === id) cancelarDetalle();
+      if (selectedId === id) {
+        const relatedTab = tabs.find(tab => tab.sourceId === id);
+        if (relatedTab) closeTab(relatedTab.id);
+      }
     } catch (error) {
       console.error('Error eliminando proforma:', error);
     }
-  };
+  }, [authH, closeTab, selectedId, tabs]);
 
   const actualizarEstado = async (nuevoEstado) => {
     setSocio(prev => ({ ...prev, _estado: nuevoEstado }));
@@ -1046,8 +1679,24 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
   };
 
   const generarPDF = async () => {
-    await guardar();
-    pdfGen({ params, socio, resData, vehiculo: selectedVehiculo });
+    const result = await guardar(null, true);
+    const numero = result?.numero || socio.cfNumero || makeProformaNumber();
+    pdfGen({
+      params,
+      socio: { ...socio, cfNumero: numero },
+      resData,
+      vehiculo: selectedVehiculo,
+      config: empresaData,
+      seller: user,
+    });
+  };
+
+  const handleGuardar = () => {
+    if (selectedId || socio.cfNumero) guardar();
+  };
+
+  const handleGuardarManual = () => {
+    guardar(null, true);
   };
 
   const pChange = ({ target: { name, value, type, checked } }) => {
@@ -1055,9 +1704,131 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
     setAutoSaveEnabled(true);
   };
 
+  const updateUnit = (unitId, field, value) => {
+    setUnits(prev => prev.map(unit => {
+      if (unit.id !== unitId) return unit;
+      const next = { ...unit, [field]: field === 'sPax' || ['km', 'combustible', 'colaborador', 'peajes', 'ferry'].includes(field) ? Number(value) || 0 : value };
+      if (field === 'sOrigen') next.sOrigenCoords = null;
+      if (field === 'sDestino') next.sDestinoCoords = null;
+      return next;
+    }));
+    setAutoSaveEnabled(true);
+  };
+
+  const assignVehicleToUnit = (unitId, vehiculoId) => {
+    const vehiculo = vehiculos.find(item => item.id === vehiculoId);
+    setUnits(prev => prev.map(unit => (
+      unit.id === unitId
+        ? {
+            ...unit,
+            ...buildVehicleDefaults(vehiculo, fuelPrices, params.tc),
+            vehiculoId,
+          }
+        : unit
+    )));
+    setAutoSaveEnabled(true);
+  };
+
+  const addUnit = () => {
+    const nextUnit = createProformaUnit({}, vehiculos, vehiculos[0]?.id || null, fuelPrices, params.tc);
+    setUnits(prev => [...prev, nextUnit]);
+    setActiveUnitId(nextUnit.id);
+    setAutoSaveEnabled(true);
+  };
+
+  const addItineraryRow = () => {
+    setItineraryRows(prev => [...prev, createItineraryRow()]);
+    setAutoSaveEnabled(true);
+  };
+
+  const updateItineraryRow = (rowId, field, value) => {
+    setItineraryRows(prev => prev.map(row => (
+      row.id === rowId
+        ? { ...row, [field]: field === 'hora' ? (normalizeTimeInput(value) || '') : value }
+        : row
+    )));
+    setAutoSaveEnabled(true);
+  };
+
+  const removeItineraryRow = (rowId) => {
+    setItineraryRows(prev => prev.filter(row => row.id !== rowId));
+    setAutoSaveEnabled(true);
+  };
+
+  const createOperationFromProforma = async () => {
+    const rows = itineraryRowsComplete;
+    if (!rows.length) {
+      setOperationMsg('Completa al menos el primer tramo del itinerario.');
+      return;
+    }
+    if (rows.some(row => !itineraryRowComplete(row))) {
+      setOperationMsg('Completa fecha, hora, origen y destino en todos los tramos del itinerario.');
+      return;
+    }
+
+    const cliente = socio.sNombre || socio.sEmpresa || 'Cliente';
+    const baseName = socio.cfNumero || 'Proforma';
+    const pax = Number(units[0]?.sPax || socio.sPax || 1);
+
+    try {
+      if (itineraryIsEvent) {
+        const sortedDates = rows.map(row => row.fecha).filter(Boolean).sort();
+        const createdEvent = await onCreateEvento?.({
+          nombre: `${baseName} · ${cliente}`,
+          cliente,
+          inicio: toSlashDate(sortedDates[0]),
+          fin: toSlashDate(sortedDates[sortedDates.length - 1]),
+          pax,
+          prio: 'normal',
+          estado: 'planificado',
+        });
+        const eventoId = createdEvent?.id;
+        if (!eventoId) throw new Error('No se pudo crear el evento.');
+
+        for (let index = 0; index < rows.length; index += 1) {
+          const row = rows[index];
+          const createdTask = await onCreateTarea?.({
+            nombre: `Tramo ${index + 1} · ${row.origen} → ${row.destino}`,
+            hora: row.hora,
+            fin: addOneHour(row.hora),
+            eventoId,
+            condId: null,
+            vehId: null,
+            pax,
+            origen: row.origen,
+            destino: row.destino,
+            fecha: row.fecha,
+          });
+          if (!createdTask?.id) throw new Error(`No se pudo crear el tramo ${index + 1}.`);
+        }
+
+        setOperationMsg(`Evento creado con ${rows.length} tramos.`);
+      } else {
+        const row = rows[0];
+        const createdTask = await onCreateTarea?.({
+          nombre: `${baseName} · ${row.origen} → ${row.destino}`,
+          hora: row.hora,
+          fin: addOneHour(row.hora),
+          eventoId: null,
+          condId: null,
+          vehId: null,
+          pax,
+          origen: row.origen,
+          destino: row.destino,
+          fecha: row.fecha,
+        });
+        if (!createdTask?.id) throw new Error('No se pudo crear la tarea.');
+        setOperationMsg('Tarea creada desde la proforma.');
+      }
+    } catch (error) {
+      console.error('Error creando operación desde proforma:', error);
+      setOperationMsg(error.message || 'No se pudo crear la operación.');
+    }
+  };
+
   const sChange = ({ target: { name, value } }) => {
     if (name === 'sOrigen' || name === 'sDestino') {
-          setDistanceStatus('');
+      setDistanceStatus('');
       const coordField = name === 'sOrigen' ? 'sOrigenCoords' : 'sDestinoCoords';
       setSocio(prev => ({ ...prev, [name]: value, [coordField]: null }));
       setAutoSaveEnabled(true);
@@ -1069,7 +1840,25 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
       return;
     }
 
-    setSocio(prev => ({ ...prev, [name]: value }));
+    setSocio(prev => ({
+      ...prev,
+      [name]: value,
+      ...(name === 'cfDescripcion' ? { cfDescripcionMode: 'manual' } : {}),
+    }));
+    setAutoSaveEnabled(true);
+  };
+
+  const toggleDescriptionMode = () => {
+    setSocio(prev => {
+      if (prev.cfDescripcionMode === 'auto') {
+        return { ...prev, cfDescripcionMode: 'manual' };
+      }
+      return {
+        ...prev,
+        cfDescripcionMode: 'auto',
+        cfDescripcion: buildAutoDescription(prev),
+      };
+    });
     setAutoSaveEnabled(true);
   };
 
@@ -1092,22 +1881,26 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
   };
 
   const cargarDesdeSocio = (item) => {
-    const principal = item.contactos?.find(contacto => contacto.es_principal) || item.contactos?.[0] || {};
     setSocio(prev => ({
       ...prev,
       sCodigoCliente: item.codigoCliente || '',
       sNombre: item.nombre || '',
-      sEmail: principal.email || item.email || '',
-      sTel: principal.telefono || item.telefono || '',
-      sEmpresa: item.empresa || '',
-      sCedula: item.identificacion || '',
-      sCargo: principal.cargo || '',
-      sContacto: principal.nombre || '',
-      sDireccion: item.direccion || '',
+      sEmpresa: item.nombre || item.empresa || '',
     }));
     setSocioSearch(item.nombre || item.empresa || item.codigoCliente || '');
     setShowSocioSuggestions(false);
     setOpenSection('cliente');
+    setAutoSaveEnabled(true);
+  };
+
+  const handleClienteNombreChange = (value) => {
+    setSocioSearch(value);
+    setShowSocioSuggestions(true);
+    setSocio(prev => ({
+      ...prev,
+      sNombre: value,
+      sEmpresa: value,
+    }));
     setAutoSaveEnabled(true);
   };
 
@@ -1161,11 +1954,19 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
   ].filter(Boolean).join(' | ');
 
   const costosResumen = [
-    Number(params.km) ? `${Number(params.km)} km` : '0 km',
-    `Combustible ${fmt(resData.costoKm)}`,
-    `Base ${fmt(resData.base)}`,
-    resData.tarFijas > 0 ? `Transfers ${fmt(resData.tarFijas)}` : '',
+    `${units.length} unidad${units.length > 1 ? 'es' : ''}`,
+    summarizeUnits(units, vehiculos),
   ].filter(Boolean).join(' | ');
+
+  const transferResumen = [
+    params.diasGAM > 0 ? `${params.diasGAM} dias GAM` : '',
+    params.diasSM > 0 ? `${params.diasSM} dias sin movimiento` : '',
+    params.ckTinSJ ? 'IN SJO' : '',
+    params.ckToutSJ ? 'OUT SJO' : '',
+    params.ckTinCTG ? 'IN CTG' : '',
+    params.ckToutCTG ? 'OUT CTG' : '',
+    resData.subtotalTransfer > 0 ? `Subtotal ${fmt(resData.subtotalTransfer)}` : '',
+  ].filter(Boolean).join(' | ') || 'Sin tarifas transfer';
 
   const extrasResumen = [
     params.noches > 0 ? `${params.noches} noches` : 'Sin noches',
@@ -1175,22 +1976,93 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
     params.persHosp ? `${params.persHosp} personas con hospedaje` : '',
     params.persViat ? `${params.persViat} con viaticos` : '',
     params.viatDiario ? `Viatico diario ${fmt(params.viatDiario)}` : '',
+    resData.subtotalExtras > 0 ? `Subtotal ${fmt(resData.subtotalExtras)}` : '',
   ].filter(Boolean).join(' | ');
 
-  const totalesResumen = `Subtotal ${fmt(resData.subtotal)} | IVA ${fmt(resData.ivaAmt)} | Total ${fmt(resData.total)}`;
+  const itineraryResumen = [
+    itineraryRowsComplete.length > 0 ? `${itineraryRowsComplete.length} tramo${itineraryRowsComplete.length > 1 ? 's' : ''}` : 'Sin itinerario',
+    itineraryRowsComplete[0] ? `${itineraryRowsComplete[0].origen || 'Origen'} → ${itineraryRowsComplete[itineraryRowsComplete.length - 1]?.destino || 'Destino'}` : '',
+    itineraryIsEvent ? 'Genera evento' : (itineraryRowsComplete.length === 1 ? 'Genera tarea' : ''),
+  ].filter(Boolean).join(' | ');
+
+  useEffect(() => {
+    onHeaderMetaChange?.({ tc: params.tc });
+    return () => onHeaderMetaChange?.({ tc: null });
+  }, [onHeaderMetaChange, params.tc]);
 
   return (
-    <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: viewMode === 'detalle' ? 'nowrap' : 'wrap', width: '100%', overflowX: 'hidden' }}>
-      <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {viewMode === 'lista' && (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', overflowX: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+        {tabs.map(tab => {
+          const isActive = tab.id === activeTabId;
+          const canClose = tab.id !== 'lista';
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => activateTab(tab.id)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '10px 14px',
+                borderRadius: 12,
+                border: `1px solid ${isActive ? `${T.AMB}55` : T.bdr}`,
+                background: isActive ? T.ambDim : T.card,
+                color: isActive ? T.AMB : T.sub,
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: isActive ? 800 : 600,
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              <span>{tab.label || 'Nueva proforma'}</span>
+              {canClose && (
+                <span
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    closeTab(tab.id);
+                  }}
+                  style={{
+                    width: 18,
+                    height: 18,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 999,
+                    background: isActive ? `${T.AMB}22` : T.card2,
+                    color: isActive ? T.AMB : T.mute,
+                    fontSize: 12,
+                    lineHeight: 1,
+                  }}
+                >
+                  ×
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: isDetailTab ? 'nowrap' : 'wrap', width: '100%', overflowX: 'hidden' }}>
+      <div style={{ flex: isDetailTab ? '0 0 700px' : '1 1 0', width: isDetailTab ? 700 : 'auto', minWidth: isDetailTab ? 700 : 0, maxWidth: isDetailTab ? 700 : 'none', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {isListTab && (
           <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 24 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
               <div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: T.txt }}>Proformas</div>
                 <div style={{ fontSize: 13, color: T.mute }}>Lista de cotizaciones con acceso directo al detalle.</div>
               </div>
-              <button onClick={cargarDatos} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 12px', background: 'transparent', border: `1px solid ${T.bdr2}`, borderRadius: 8, color: T.sub, cursor: 'pointer', fontSize: 13 }}>
-                <RefreshCcw size={14} /> Actualizar
+              <button 
+                onClick={handleNuevaProforma} 
+                style={{ 
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', 
+                  background: T.ambDim, border: `1px solid ${T.AMB}44`, borderRadius: 8, 
+                  color: T.AMB, cursor: 'pointer', fontSize: 13, fontWeight: 500
+                }}
+              >
+                <Plus size={14}/> Nueva Proforma
               </button>
             </div>
 
@@ -1198,10 +2070,6 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
               <Search size={14} color={T.mute} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por numero, cliente, codigo o ruta..." style={{ background: 'transparent', border: 'none', outline: 'none', color: T.txt, fontSize: 13, flex: 1 }} />
             </div>
-
-            <button onClick={nuevaProforma} style={{ marginBottom: 18, padding: '8px 0', background: 'transparent', border: 'none', color: T.AMB, cursor: 'pointer', fontSize: 13, fontWeight: 800 }}>
-              Crear proforma
-            </button>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 1.4fr 0.8fr 0.9fr', gap: 12, padding: '0 12px 10px', fontSize: 11, fontWeight: 700, color: T.mute, letterSpacing: 0.3 }}>
               <div>PROFORMA</div>
@@ -1244,9 +2112,9 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
           </div>
         )}
 
-        {viewMode === 'detalle' && (
+        {isDetailTab && (
             <div style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 12, overflowX: 'hidden' }}>
-              {voiceFeedback && (
+              {voiceFeedback && voiceFeedback.message && (
                 <div style={{ background: T.card2, border: `1px solid ${T.AMB}44`, borderRadius: 12, padding: 14 }}>
                   <div style={{ fontSize: 11, fontWeight: 800, color: T.AMB, letterSpacing: 0.3, marginBottom: 8 }}>INTERPRETACION ASISTIDA</div>
                   {voiceFeedback.message && (
@@ -1266,19 +2134,16 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
               )}
               <AccordionSection id="cliente" label="Cliente" summary={contactoResumen} open={openSection === 'cliente'} onToggle={toggleSection}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
-                  <Field label="Buscar cliente o empresa" style={{ gridColumn: '1 / -1' }}>
+                  <Field label="Nombre cliente" style={{ gridColumn: 'span 8' }}>
                     <div style={{ position: 'relative' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.card2, border: `1px solid ${showSocioSuggestions ? `${T.AMB}55` : T.bdr2}`, borderRadius: 10, padding: '0 12px' }}>
-                        <Search size={14} color={showSocioSuggestions ? T.AMB : T.mute} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, padding: '0 12px' }}>
+                        <Search size={14} color={T.mute} />
                         <input
-                          value={socioSearch}
-                          onChange={e => {
-                            setSocioSearch(e.target.value);
-                            setShowSocioSuggestions(true);
-                          }}
+                          value={socioSearch || socio.sNombre || ''}
+                          onChange={e => handleClienteNombreChange(e.target.value)}
                           onFocus={() => setShowSocioSuggestions(true)}
-                          onBlur={() => setTimeout(() => setShowSocioSuggestions(false), 120)}
-                          placeholder="Escribe nombre, empresa o ID del socio..."
+                          onBlur={() => setTimeout(() => setShowSocioSuggestions(false), 200)}
+                          placeholder="Nombre, empresa o ID del cliente..."
                           style={{ ...inputStyle, padding: '11px 0', border: 'none', background: 'transparent' }}
                         />
                       </div>
@@ -1312,126 +2177,168 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
                       )}
                     </div>
                   </Field>
-                  <Field label="ID cliente" style={{ gridColumn: 'span 2' }}>
-                    <input name="sCodigoCliente" value={socio.sCodigoCliente} onChange={sChange} style={inputStyle} placeholder="Codigo" />
+                  <Field label="ID cliente" style={{ gridColumn: 'span 4' }}>
+                    <input name="sCodigoCliente" value={socio.sCodigoCliente} onChange={sChange} onBlur={handleGuardar} style={inputStyle} placeholder="Codigo" />
                   </Field>
-                  <Field label="Cliente" style={{ gridColumn: 'span 5' }}>
-                    <input name="sNombre" value={socio.sNombre} onChange={sChange} style={inputStyle} placeholder="Nombre del cliente" />
-                  </Field>
-                  <Field label="Empresa" style={{ gridColumn: 'span 5' }}>
-                    <input name="sEmpresa" value={socio.sEmpresa} onChange={sChange} style={inputStyle} placeholder="Empresa" />
-                  </Field>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 14 }}>
                   <Field label="Contacto" style={{ gridColumn: 'span 4' }}>
-                    <input name="sContacto" value={socio.sContacto} onChange={sChange} style={inputStyle} placeholder="Persona de contacto" />
+                    <input name="sContacto" value={socio.sContacto} onChange={sChange} onBlur={handleGuardar} style={inputStyle} placeholder="Persona de contacto" />
                   </Field>
                   <Field label="Cargo" style={{ gridColumn: 'span 4' }}>
-                    <input name="sCargo" value={socio.sCargo} onChange={sChange} style={inputStyle} placeholder="Cargo" />
+                    <input name="sCargo" value={socio.sCargo} onChange={sChange} onBlur={handleGuardar} style={inputStyle} placeholder="Cargo" />
                   </Field>
                   <Field label="Telefono" style={{ gridColumn: 'span 4' }}>
-                    <input name="sTel" value={socio.sTel} onChange={sChange} style={inputStyle} placeholder="Telefono" />
+                    <input name="sTel" value={socio.sTel} onChange={sChange} onBlur={handleGuardar} style={inputStyle} placeholder="Telefono" />
                   </Field>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 14 }}>
                   <Field label="Correo" style={{ gridColumn: 'span 6' }}>
-                    <input name="sEmail" value={socio.sEmail} onChange={sChange} style={inputStyle} placeholder="Correo electronico" />
+                    <input name="sEmail" value={socio.sEmail} onChange={sChange} onBlur={handleGuardar} style={inputStyle} placeholder="Correo electronico" />
                   </Field>
                   <Field label="Direccion" style={{ gridColumn: 'span 6' }}>
-                    <input name="sDireccion" value={socio.sDireccion} onChange={sChange} style={inputStyle} placeholder="Direccion" />
-                  </Field>
-                </div>
-
-                <div style={{ marginTop: 14 }}>
-                  <Field label="Descripcion del servicio / comentarios">
-                    <textarea name="cfDescripcion" value={socio.cfDescripcion} onChange={sChange} style={areaStyle} placeholder="Resumen corto del servicio solicitado" />
+                    <input name="sDireccion" value={socio.sDireccion} onChange={sChange} onBlur={handleGuardar} style={inputStyle} placeholder="Direccion" />
                   </Field>
                 </div>
               </AccordionSection>
 
-              <AccordionSection id="servicio" label="Servicio" summary={servicioResumen} open={openSection === 'servicio'} onToggle={toggleSection}>
+              <AccordionSection
+                id="costos"
+                label="Costos operativos"
+                summary={costosResumen}
+                open={openSection === 'costos'}
+                onToggle={toggleSection}
+                actions={<div style={{ padding: '6px 10px', borderRadius: 999, background: T.ambDim, color: T.AMB, fontSize: 11, fontWeight: 800 }}>{fmt(resData.subtotalOperativo)}</div>}
+              >
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
-                  <Field label="Fecha de servicio" style={{ gridColumn: 'span 3' }}><input type="date" name="sFecha" value={socio.sFecha} onChange={sChange} style={inputStyle} /></Field>
-                  <Field label="Hora de servicio" style={{ gridColumn: 'span 3' }}><input type="time" name="sHora" value={socio.sHora} onChange={sChange} style={inputStyle} /></Field>
-                  <Field label="Origen" style={{ gridColumn: 'span 3' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 8 }}>
-                      <input name="sOrigen" value={socio.sOrigen} onChange={sChange} style={inputStyle} placeholder="Escribe o elige desde el mapa" />
-                      <button type="button" onClick={() => openMapPicker('origen')} style={mapIconButtonStyle} title="Elegir origen en el mapa">
-                        <MapPin size={16} />
+                  <Field label="Descripcion" style={{ gridColumn: 'span 12' }}>
+                    <div style={{ position: 'relative' }}>
+                      <textarea
+                        name="cfDescripcion"
+                        value={socio.cfDescripcion}
+                        onChange={sChange}
+                        onBlur={handleGuardar}
+                        readOnly={socio.cfDescripcionMode === 'auto'}
+                        style={{
+                          ...areaStyle,
+                          paddingRight: 42,
+                          color: socio.cfDescripcionMode === 'auto' ? T.sub : T.txt,
+                          cursor: socio.cfDescripcionMode === 'auto' ? 'default' : 'text',
+                        }}
+                        placeholder="Resumen corto del servicio solicitado"
+                      />
+                      <button
+                        type="button"
+                        onClick={toggleDescriptionMode}
+                        title={socio.cfDescripcionMode === 'auto' ? 'Pasar a descripcion manual' : 'Volver a descripcion vinculada'}
+                        style={{
+                          position: 'absolute',
+                          right: 10,
+                          bottom: 10,
+                          width: 28,
+                          height: 28,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: 8,
+                          border: `1px solid ${socio.cfDescripcionMode === 'auto' ? `${T.AMB}55` : T.bdr2}`,
+                          background: socio.cfDescripcionMode === 'auto' ? T.ambDim : T.card2,
+                          color: socio.cfDescripcionMode === 'auto' ? T.AMB : T.sub,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {socio.cfDescripcionMode === 'auto' ? <Link size={14} /> : <Pencil size={14} />}
                       </button>
                     </div>
                   </Field>
-                  <Field label="Destino" style={{ gridColumn: 'span 3' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 8 }}>
-                      <input name="sDestino" value={socio.sDestino} onChange={sChange} style={inputStyle} placeholder="Escribe o elige desde el mapa" />
-                      <button type="button" onClick={() => openMapPicker('destino')} style={mapIconButtonStyle} title="Elegir destino en el mapa">
-                        <MapPin size={16} />
+                  <div style={{ gridColumn: 'span 12', fontSize: 12, fontWeight: 700, color: T.sub, marginTop: 4 }}>Unidades del servicio</div>
+                  <div style={{ gridColumn: 'span 12', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+                      {units.map((unit, index) => {
+                        const vehiculo = vehiculos.find(item => item.id === unit.vehiculoId);
+                        const isActive = unit.id === activeUnit?.id;
+                        return (
+                          <button
+                            key={unit.id}
+                            type="button"
+                            onClick={() => setActiveUnitId(unit.id)}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              padding: '9px 12px',
+                              borderRadius: 12,
+                              border: `1px solid ${isActive ? `${T.AMB}55` : T.bdr}`,
+                              background: isActive ? T.ambDim : T.card,
+                              color: isActive ? T.AMB : T.sub,
+                              cursor: 'pointer',
+                              fontSize: 12,
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <span>Unidad {index + 1}</span>
+                            <span style={{ color: isActive ? T.AMB : T.mute }}>{vehiculo?.placa || 'Sin unidad'}</span>
+                          </button>
+                        );
+                      })}
+                      <button type="button" onClick={addUnit} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, borderRadius: 12, border: `1px dashed ${T.AMB}66`, background: T.card, color: T.AMB, cursor: 'pointer', flexShrink: 0 }}>
+                        <Plus size={16} />
                       </button>
                     </div>
-                  </Field>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    onClick={() => calculateDistance()}
-                    style={{
-                      padding: '9px 12px',
-                      background: T.ambDim,
-                      border: `1px solid ${T.AMB}44`,
-                      borderRadius: 8,
-                      color: T.AMB,
-                      cursor: 'pointer',
-                      fontSize: 12,
-                      fontWeight: 700,
-                    }}
-                  >
-                    Calcular km
-                  </button>
-                  {distanceStatus && (
-                    <div style={{ fontSize: 12, color: distanceStatus.toLowerCase().includes('distancia estimada') ? T.GRN : T.mute }}>
-                      {distanceStatus}
-                    </div>
-                  )}
-                  <div style={{ fontSize: 12, color: T.mute }}>
-                    Puedes calcular automatico o escribir los kilometros manualmente.
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 14 }}>
-                  <Field label="Pasajeros" style={{ gridColumn: 'span 2' }}><input type="number" name="sPax" value={socio.sPax} onChange={sChange} style={inputStyle} /></Field>
-                  <Field label="Direccion" style={{ gridColumn: 'span 10' }}><input name="sDireccion" value={socio.sDireccion} onChange={sChange} style={inputStyle} /></Field>
-                </div>
-              </AccordionSection>
 
-              <AccordionSection id="costos" label="Costos operativos" summary={costosResumen} open={openSection === 'costos'} onToggle={toggleSection}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
-                  <Field label="Kilometros" style={{ gridColumn: 'span 4' }}>
-                    <input type="number" name="km" value={params.km} onChange={pChange} style={inputStyle} min="0" />
-                  </Field>
-                                    <Field label={`Costo ${params.tipoCombustible}/km ($)`} style={{ gridColumn: 'span 4' }}><input type="number" step="0.01" name="combustible" value={params.combustible} onChange={pChange} style={inputStyle} /></Field>
-                  <Field label="Tipo cambio" style={{ gridColumn: 'span 4' }}><input type="number" name="tc" value={params.tc} onChange={pChange} style={inputStyle} /></Field>
-                  <Field label="Colaborador ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="colaborador" value={params.colaborador} onChange={pChange} style={inputStyle} /></Field>
-                  <Field label="Peajes ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="peajes" value={params.peajes} onChange={pChange} style={inputStyle} /></Field>
-                  <Field label="Viaticos ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="viaticos" value={params.viaticos} onChange={pChange} style={inputStyle} /></Field>
-                  <Field label="Ferry ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="ferry" value={params.ferry} onChange={pChange} style={inputStyle} /></Field>
-                  <Field label="Utilidad ($)" style={{ gridColumn: 'span 6' }}><input type="number" name="utilidad" value={params.utilidad} onChange={pChange} style={inputStyle} /></Field>
-                  <Field label="IVA (%)" style={{ gridColumn: 'span 6' }}><input type="number" name="iva" value={params.iva} onChange={pChange} style={inputStyle} /></Field>
-                </div>
-
-                <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${T.bdr}` }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 12 }}>Tarifa transfer</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14 }}>
-                    <Field label="Tarifa diaria GAM ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="tarifaGAM" value={params.tarifaGAM} onChange={pChange} style={inputStyle} /></Field>
-                    <Field label="Dias GAM" style={{ gridColumn: 'span 3' }}><input type="number" name="diasGAM" value={params.diasGAM} onChange={pChange} style={inputStyle} /></Field>
-                    <Field label="Media tarifa ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="mediaTarifa" value={params.mediaTarifa} onChange={pChange} style={inputStyle} /></Field>
-                    <Field label="Dias sin movimiento" style={{ gridColumn: 'span 3' }}><input type="number" name="diasSM" value={params.diasSM} onChange={pChange} style={inputStyle} /></Field>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 10, marginTop: 12 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.sub, fontSize: 13 }}><input type="checkbox" name="ckTinSJ" checked={params.ckTinSJ} onChange={pChange} /> Transfer IN Aeropuerto SJO (${params.tInSJ})</label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.sub, fontSize: 13 }}><input type="checkbox" name="ckToutSJ" checked={params.ckToutSJ} onChange={pChange} /> Transfer OUT Aeropuerto SJO (${params.tOutSJ})</label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.sub, fontSize: 13 }}><input type="checkbox" name="ckTinCTG" checked={params.ckTinCTG} onChange={pChange} /> Transfer IN Aeropuerto Cartago (${params.tInCTG})</label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.sub, fontSize: 13 }}><input type="checkbox" name="ckToutCTG" checked={params.ckToutCTG} onChange={pChange} /> Transfer OUT Aeropuerto Cartago (${params.tOutCTG})</label>
+                    {activeUnit && (() => {
+                      const vehiculo = vehiculos.find(item => item.id === activeUnit.vehiculoId);
+                      const activeIndex = units.findIndex(unit => unit.id === activeUnit.id);
+                      const unitSubtotal = (Number(activeUnit.km || 0) * Number(activeUnit.combustible || 0)) + Number(activeUnit.colaborador || 0) + Number(activeUnit.peajes || 0) + Number(activeUnit.ferry || 0);
+                      return (
+                        <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 14 }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '160px minmax(0,1fr)', gap: 14, alignItems: 'start' }}>
+                            <div>
+                              <div style={{ height: 110, borderRadius: 12, overflow: 'hidden', border: `1px solid ${T.bdr}`, background: T.card2 }}>
+                                {vehiculo?.foto_url ? <img src={vehiculo.foto_url} alt={vehiculo?.placa || `Unidad ${activeIndex + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.mute, fontSize: 12 }}>Sin imagen</div>}
+                              </div>
+                              <div style={{ marginTop: 10, fontSize: 11, color: T.mute }}>Unidad {activeIndex + 1}</div>
+                              <div style={{ marginTop: 4, fontSize: 16, fontWeight: 800, color: T.AMB }}>{fmt(unitSubtotal)}</div>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 12 }}>
+                              <Field label="Vehiculo" style={{ gridColumn: 'span 12' }}>
+                                <select value={activeUnit.vehiculoId || ''} onChange={e => assignVehicleToUnit(activeUnit.id, e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
+                                  <option value="">Seleccionar unidad</option>
+                                  {vehiculos.filter(item => item.estado !== 'fuera_de_servicio').map(item => (
+                                    <option key={item.id} value={item.id}>{item.placa} · {item.marca} {item.modelo} · {item.cap} pax</option>
+                                  ))}
+                                </select>
+                              </Field>
+                              <Field label="Fecha" style={{ gridColumn: 'span 4' }}><input type="date" value={activeUnit.sFecha} onChange={e => updateUnit(activeUnit.id, 'sFecha', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
+                              <Field label="Hora" style={{ gridColumn: 'span 4' }}><input type="time" value={normalizeTimeInput(activeUnit.sHora)} onChange={e => updateUnit(activeUnit.id, 'sHora', normalizeTimeInput(e.target.value))} onBlur={handleGuardar} style={inputStyle} /></Field>
+                              <Field label="Pasajeros" style={{ gridColumn: 'span 4' }}><input type="number" value={activeUnit.sPax || 1} onChange={e => updateUnit(activeUnit.id, 'sPax', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
+                              <Field label="Origen" style={{ gridColumn: 'span 6' }}><input value={activeUnit.sOrigen} onChange={e => updateUnit(activeUnit.id, 'sOrigen', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Origen" /></Field>
+                              <Field label="Destino" style={{ gridColumn: 'span 6' }}><input value={activeUnit.sDestino} onChange={e => updateUnit(activeUnit.id, 'sDestino', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Destino" /></Field>
+                              <Field label="Kilometros" style={{ gridColumn: 'span 3' }}><input type="number" value={activeUnit.km || 0} onChange={e => updateUnit(activeUnit.id, 'km', e.target.value)} onBlur={handleGuardar} style={inputStyle} min="0" /></Field>
+                              <Field label={`Costo ${activeUnit.tipoCombustible || 'Diésel'}/km`} style={{ gridColumn: 'span 3' }}>
+                                <div style={{ position: 'relative' }}>
+                                  <input type="number" step="0.001" value={activeUnit.combustible || 0} onChange={e => updateUnit(activeUnit.id, 'combustible', e.target.value)} onBlur={handleGuardar} style={inputStyle} />
+                                  <button 
+                                    title="Recalcular según precios actuales"
+                                    onClick={() => {
+                                      const v = vehiculos.find(x => x.id === activeUnit.vehiculoId);
+                                      if (v) {
+                                        const defs = buildVehicleDefaults(v, fuelPrices, params.tc);
+                                        updateUnit(activeUnit.id, 'combustible', defs.combustible);
+                                      }
+                                    }}
+                                    style={{ position: 'absolute', right: 5, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: T.AMB, cursor: 'pointer', padding: 4 }}
+                                  >
+                                    <RefreshCcw size={14} />
+                                  </button>
+                                </div>
+                              </Field>
+                              <Field label="Colaborador" style={{ gridColumn: 'span 2' }}><input type="number" value={activeUnit.colaborador || 0} onChange={e => updateUnit(activeUnit.id, 'colaborador', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
+                              <Field label="Peajes" style={{ gridColumn: 'span 2' }}><input type="number" value={activeUnit.peajes || 0} onChange={e => updateUnit(activeUnit.id, 'peajes', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
+                              <Field label="Ferry" style={{ gridColumn: 'span 2' }}><input type="number" value={activeUnit.ferry || 0} onChange={e => updateUnit(activeUnit.id, 'ferry', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -1442,151 +2349,289 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
                   </label>
                   {params.chkDia && (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 12 }}>
-                      <Field label="Adicional colaborador ($)" style={{ gridColumn: 'span 6' }}><input type="number" name="adicCol" value={params.adicCol} onChange={pChange} style={inputStyle} /></Field>
-                      <Field label="Adicional viaticos ($)" style={{ gridColumn: 'span 6' }}><input type="number" name="adicViat" value={params.adicViat} onChange={pChange} style={inputStyle} /></Field>
+                      <Field label="Adicional colaborador ($)" style={{ gridColumn: 'span 6' }}><input type="number" name="adicCol" value={params.adicCol || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                      <Field label="Adicional viaticos ($)" style={{ gridColumn: 'span 6' }}><input type="number" name="adicViat" value={params.adicViat || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
                     </div>
                   )}
                 </div>
               </AccordionSection>
 
-              <AccordionSection id="extras" label="Hospedaje y viaticos" summary={extrasResumen} open={openSection === 'extras'} onToggle={toggleSection}>
+              <AccordionSection
+                id="transfer"
+                label="Tarifa transfer"
+                summary={transferResumen}
+                open={openSection === 'transfer'}
+                onToggle={toggleSection}
+                actions={<div style={{ padding: '6px 10px', borderRadius: 999, background: T.ambDim, color: T.AMB, fontSize: 11, fontWeight: 800 }}>{fmt(resData.subtotalTransfer)}</div>}
+              >
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
-                  <Field label="Hospedaje/noche ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="hospedaje" value={params.hospedaje} onChange={pChange} style={inputStyle} /></Field>
-                  <Field label="Numero de noches" style={{ gridColumn: 'span 3' }}><input type="number" name="noches" value={params.noches} onChange={pChange} style={inputStyle} /></Field>
-                  <Field label="Personas con hospedaje" style={{ gridColumn: 'span 3' }}><input type="number" name="persHosp" value={params.persHosp} onChange={pChange} style={inputStyle} /></Field>
-                  <Field label="Hospedaje total manual ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="hospedajeTotalManual" value={params.hospedajeTotalManual} onChange={pChange} style={inputStyle} /></Field>
+                  <Field label="Tarifa diaria GAM ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="tarifaGAM" value={params.tarifaGAM || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                  <Field label="Dias GAM" style={{ gridColumn: 'span 3' }}><input type="number" name="diasGAM" value={params.diasGAM || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                  <Field label="Media tarifa ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="mediaTarifa" value={params.mediaTarifa || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                  <Field label="Dias sin movimiento" style={{ gridColumn: 'span 3' }}><input type="number" name="diasSM" value={params.diasSM || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 14 }}>
-                  <Field label="Viatico diario/persona ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="viatDiario" value={params.viatDiario} onChange={pChange} style={inputStyle} /></Field>
-                  <Field label="Personas con viaticos" style={{ gridColumn: 'span 3' }}><input type="number" name="persViat" value={params.persViat} onChange={pChange} style={inputStyle} /></Field>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 10, marginTop: 12 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.sub, fontSize: 13 }}><input type="checkbox" name="ckTinSJ" checked={params.ckTinSJ} onChange={pChange} onBlur={handleGuardar} /> Transfer IN Aeropuerto SJO (${params.tInSJ})</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.sub, fontSize: 13 }}><input type="checkbox" name="ckToutSJ" checked={params.ckToutSJ} onChange={pChange} onBlur={handleGuardar} /> Transfer OUT Aeropuerto SJO (${params.tOutSJ})</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.sub, fontSize: 13 }}><input type="checkbox" name="ckTinCTG" checked={params.ckTinCTG} onChange={pChange} onBlur={handleGuardar} /> Transfer IN Aeropuerto Cartago (${params.tInCTG})</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.sub, fontSize: 13 }}><input type="checkbox" name="ckToutCTG" checked={params.ckToutCTG} onChange={pChange} onBlur={handleGuardar} /> Transfer OUT Aeropuerto Cartago (${params.tOutCTG})</label>
                 </div>
               </AccordionSection>
 
-              <AccordionSection id="totales" label="Totales" summary={totalesResumen} open={openSection === 'totales'} onToggle={toggleSection} accent={T.GRN}>
-                <div style={{ marginTop: 16 }}>
-                  {[
-                    ['Combustible', resData.costoKm],
-                    ['Colaborador', params.colaborador],
-                    ['Peajes', params.peajes],
-                    ['Viaticos', params.viaticos],
-                    params.ferry > 0 ? ['Ferry', params.ferry] : null,
-                    params.utilidad > 0 ? ['Utilidad', params.utilidad] : null,
-                    params.chkDia ? ['Adicional dia', params.adicCol + params.adicViat] : null,
-                    resData.tarFijas > 0 ? ['Tarifas / transfers', resData.tarFijas] : null,
-                    resData.hospedajeCalculado > 0 ? ['Hospedaje', resData.hospedajeCalculado] : null,
-                    (params.viatDiario * params.persViat) > 0 ? ['Viaticos diarios', params.viatDiario * params.persViat] : null,
-                  ].filter(Boolean).map(([label, value]) => (
-                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 12 }}>
-                      <span style={{ color: T.sub }}>{label}</span>
-                      <span style={{ color: T.txt, fontWeight: 600 }}>{fmt(value)}</span>
+              <AccordionSection
+                id="extras"
+                label="Hospedaje y viaticos"
+                summary={extrasResumen}
+                open={openSection === 'extras'}
+                onToggle={toggleSection}
+                actions={<div style={{ padding: '6px 10px', borderRadius: 999, background: T.ambDim, color: T.AMB, fontSize: 11, fontWeight: 800 }}>{fmt(resData.subtotalExtras)}</div>}
+              >
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
+                  <Field label="Hospedaje/noche ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="hospedaje" value={params.hospedaje || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                  <Field label="Numero de noches" style={{ gridColumn: 'span 3' }}><input type="number" name="noches" value={params.noches || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                  <Field label="Personas con hospedaje" style={{ gridColumn: 'span 3' }}><input type="number" name="persHosp" value={params.persHosp || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                  <Field label="Hospedaje total manual ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="hospedajeTotalManual" value={params.hospedajeTotalManual || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 14 }}>
+                  <Field label="Viatico diario/persona ($)" style={{ gridColumn: 'span 3' }}><input type="number" name="viatDiario" value={params.viatDiario || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                  <Field label="Personas con viaticos" style={{ gridColumn: 'span 3' }}><input type="number" name="persViat" value={params.persViat || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                </div>
+              </AccordionSection>
+
+              <AccordionSection
+                id="itinerario"
+                label="Itinerario"
+                summary={itineraryResumen}
+                open={openSection === 'itinerario'}
+                onToggle={toggleSection}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+                  <div style={{ padding: 12, borderRadius: 12, background: T.card2, border: `1px solid ${T.bdr}` }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: T.AMB, letterSpacing: 0.3, marginBottom: 10 }}>TRAMO BASE DE LA PROFORMA</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 12 }}>
+                      <Field label="Fecha" style={{ gridColumn: 'span 3' }}><input value={primaryItineraryRow.fecha} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} /></Field>
+                      <Field label="Hora de salida" style={{ gridColumn: 'span 3' }}><input value={primaryItineraryRow.hora} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} /></Field>
+                      <Field label="Origen" style={{ gridColumn: 'span 3' }}><input value={primaryItineraryRow.origen} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} /></Field>
+                      <Field label="Destino" style={{ gridColumn: 'span 3' }}><input value={primaryItineraryRow.destino} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} /></Field>
+                    </div>
+                  </div>
+
+                  {itineraryRows.map((row, index) => (
+                    <div key={row.id} style={{ padding: 12, borderRadius: 12, background: T.card2, border: `1px solid ${T.bdr}` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: T.sub, letterSpacing: 0.3 }}>TRAMO ADICIONAL {index + 2}</div>
+                        <button type="button" onClick={() => removeItineraryRow(row.id)} style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${T.RED}33`, background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>Quitar</button>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 12 }}>
+                        <Field label="Fecha" style={{ gridColumn: 'span 3' }}><input type="date" value={row.fecha} onChange={e => updateItineraryRow(row.id, 'fecha', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
+                        <Field label="Hora de salida" style={{ gridColumn: 'span 3' }}><input type="time" value={row.hora} onChange={e => updateItineraryRow(row.id, 'hora', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
+                        <Field label="Origen" style={{ gridColumn: 'span 3' }}><input value={row.origen} onChange={e => updateItineraryRow(row.id, 'origen', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Origen" /></Field>
+                        <Field label="Destino" style={{ gridColumn: 'span 3' }}><input value={row.destino} onChange={e => updateItineraryRow(row.id, 'destino', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Destino" /></Field>
+                      </div>
                     </div>
                   ))}
 
-                  <div style={{ borderTop: `1px solid ${T.bdr2}`, margin: '14px 0 12px' }} />
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-                    <span style={{ color: T.sub }}>Subtotal</span>
-                    <span style={{ color: T.txt, fontWeight: 700 }}>{fmt(resData.subtotal)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 14 }}>
-                    <span style={{ color: T.sub }}>IVA ({params.iva}%)</span>
-                    <span style={{ color: T.txt }}>{fmt(resData.ivaAmt)}</span>
-                  </div>
-
-                  <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 12, padding: '14px 16px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: T.sub }}>TOTAL USD</span>
-                      <span style={{ fontSize: 24, fontWeight: 800, color: T.AMB }}>{fmt(resData.total)}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: T.mute, textAlign: 'right', marginTop: 4 }}>CRC {Math.round(resData.totalCRC || 0).toLocaleString('es-CR')}</div>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
-                    <button onClick={generarPDF} style={{ width: '100%', padding: 13, background: T.AMB, border: 'none', borderRadius: 10, color: '#000', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                      <FileText size={16} /> Generar PDF
-                    </button>
-                    <button onClick={cancelarDetalle} style={{ width: '100%', padding: 12, background: 'transparent', border: `1px solid ${T.bdr2}`, borderRadius: 10, color: T.sub, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
-                      Cerrar detalle
-                    </button>
-                  </div>
+                  <button type="button" onClick={addItineraryRow} style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, border: `1px dashed ${T.AMB}66`, background: T.card, color: T.AMB, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+                    <Plus size={14} /> Agregar tramo
+                  </button>
                 </div>
               </AccordionSection>
+
           </div>
         )}
       </div>
 
-      <div style={{ width: 320, minWidth: 320, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {viewMode === 'detalle' && (
-          <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, letterSpacing: 0.3 }}>PROFORMA</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: T.AMB, marginTop: 4 }}>{socio.cfNumero}</div>
-              </div>
-              {savedMsg && <div style={{ color: savedMsg.includes('Error') ? T.RED : T.GRN, fontSize: 12, fontWeight: 700 }}>{savedMsg}</div>}
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: 12 }}>
-              <Field label="Forma de pago">
-                <input name="cfPago" value={socio.cfPago} onChange={sChange} style={inputStyle} />
-              </Field>
-              <Field label="Validez">
-                <input type="number" name="cfValidez" value={socio.cfValidez} onChange={sChange} style={inputStyle} />
-              </Field>
-            </div>
-
-            <div style={{ position: 'relative' }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, letterSpacing: 0.3, marginBottom: 8 }}>ESTADO</div>
-              <button
-                type="button"
-                onClick={() => setShowStatusMenu(prev => !prev)}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  padding: '10px 12px',
-                  borderRadius: 10,
-                  border: `1px solid ${T.bdr2}`,
-                  background: T.card2,
-                  cursor: 'pointer',
-                }}
-              >
-                <Label estado={currentStatus} />
-                <ChevronDown size={16} color={T.mute} style={{ transform: showStatusMenu ? 'rotate(180deg)' : 'rotate(0deg)' }} />
-              </button>
-
-              {showStatusMenu && (
-                <div style={{ position: 'absolute', top: 74, left: 0, right: 0, background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 12, boxShadow: '0 18px 40px rgba(0,0,0,0.18)', zIndex: 3, overflow: 'hidden' }}>
-                  {ESTADOS.map(item => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => actualizarEstado(item.id)}
-                      style={{
-                        width: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 12,
-                        padding: '11px 12px',
-                        border: 'none',
-                        borderBottom: `1px solid ${T.bdr}`,
-                        background: item.id === currentStatus ? item.bg : 'transparent',
-                        color: T.txt,
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
-                    >
-                      <span style={{ fontSize: 13, fontWeight: item.id === currentStatus ? 800 : 600 }}>{item.label}</span>
-                      {item.id === currentStatus && <CheckCircle size={14} color={item.color} />}
-                    </button>
-                  ))}
+      <div style={{ width: 320, minWidth: 320, maxWidth: 320, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {isDetailTab && (
+          <>
+            <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, letterSpacing: 0.3 }}>PROFORMA</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: T.AMB, marginTop: 4 }}>{socio.cfNumero || '(NUEVA)'}</div>
                 </div>
-              )}
+                {savedMsg && <div style={{ color: savedMsg.includes('Error') ? T.RED : T.GRN, fontSize: 12, fontWeight: 700 }}>{savedMsg}</div>}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="Forma de pago" style={{ gridColumn: 'span 2' }}>
+                  <input name="cfPago" value={socio.cfPago} onChange={sChange} onBlur={handleGuardar} style={inputStyle} />
+                </Field>
+                <Field label="Porcentaje de utilidad">
+                  <input value={`${Number(params.utilidadPct || 0).toFixed(2)}%`} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} />
+                </Field>
+                <Field label="Validez">
+                  <input type="number" name="cfValidez" value={socio.cfValidez} onChange={sChange} style={inputStyle} />
+                </Field>
+              </div>
+
+              <div style={{ position: 'relative' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, letterSpacing: 0.3, marginBottom: 8 }}>ESTADO</div>
+                <button
+                  type="button"
+                  onClick={() => setShowStatusMenu(prev => !prev)}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: `1px solid ${T.bdr2}`,
+                    background: T.card2,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Label estado={currentStatus} />
+                  <ChevronDown size={16} color={T.mute} style={{ transform: showStatusMenu ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+                </button>
+
+                {showStatusMenu && (
+                  <div style={{ position: 'absolute', top: 74, left: 0, right: 0, background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 12, boxShadow: '0 18px 40px rgba(0,0,0,0.18)', zIndex: 3, overflow: 'hidden' }}>
+                    {ESTADOS.map(item => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => actualizarEstado(item.id)}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          padding: '11px 12px',
+                          border: 'none',
+                          borderBottom: `1px solid ${T.bdr}`,
+                          background: item.id === currentStatus ? item.bg : 'transparent',
+                          color: T.txt,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                      >
+                        <span style={{ fontSize: 13, fontWeight: item.id === currentStatus ? 800 : 600 }}>{item.label}</span>
+                        {item.id === currentStatus && <CheckCircle size={14} color={item.color} />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
-          </div>
+            <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, letterSpacing: 0.3 }}>TOTALES</div>
+
+              <div>
+                {[
+                  ['Costos operativos', resData.subtotalOperativo],
+                  resData.subtotalTransfer > 0 ? ['Tarifa transfer', resData.subtotalTransfer] : null,
+                  resData.subtotalExtras > 0 ? ['Hospedaje y viaticos', resData.subtotalExtras] : null,
+                  resData.utilidadAmt > 0 ? [`Utilidad (${Number(params.utilidadPct || 0).toFixed(2)}%)`, resData.utilidadAmt] : null,
+                ].filter(Boolean).map(([label, value]) => (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 12 }}>
+                    <span style={{ color: T.sub }}>{label}</span>
+                    <span style={{ color: T.txt, fontWeight: 600 }}>{fmt(value)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ borderTop: `1px solid ${T.bdr2}`, margin: '2px 0 0' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ color: T.sub }}>Subtotal</span>
+                <span style={{ color: T.txt, fontWeight: 700 }}>{fmt(resData.subtotal)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ color: T.sub }}>IVA ({params.iva}%)</span>
+                <span style={{ color: T.txt }}>{fmt(resData.ivaAmt)}</span>
+              </div>
+
+              <div style={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 12, padding: '14px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: T.sub }}>TOTAL USD</span>
+                  <span style={{ fontSize: 24, fontWeight: 800, color: T.AMB }}>{fmt(resData.total)}</span>
+                </div>
+                <div style={{ fontSize: 11, color: T.mute, textAlign: 'right', marginTop: 4 }}>CRC {fmtCRC(resData.totalCRC)}</div>
+              </div>
+
+              <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px solid ${T.bdr}`, background: T.card2 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, letterSpacing: 0.3, marginBottom: 8 }}>OPERACIÓN</div>
+                <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5 }}>
+                  {itineraryIsEvent
+                    ? 'Con varios tramos en itinerario se creará un evento con todas las tareas asociadas.'
+                    : 'Con un solo tramo se creará una tarea individual para operación diaria.'}
+                </div>
+                {operationMsg && (
+                  <div style={{ fontSize: 12, color: operationMsg.toLowerCase().includes('no se pudo') || operationMsg.toLowerCase().includes('completa') ? T.RED : T.GRN, marginTop: 8 }}>
+                    {operationMsg}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
+                <button
+                  onClick={createOperationFromProforma}
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    background: T.card2,
+                    color: T.txt,
+                    border: `1px solid ${T.bdr}`,
+                    borderRadius: 12,
+                    fontSize: 13,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <Clock size={16} /> {itineraryIsEvent ? 'Crear evento' : 'Crear tarea'}
+                </button>
+                <button
+                  onClick={handleGuardarManual}
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    background: T.BLU,
+                    color: '#fff',
+                    border: `1px solid ${T.BLU}55`,
+                    borderRadius: 12,
+                    fontSize: 14,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    boxShadow: '0 10px 24px rgba(59,130,246,0.20)',
+                  }}
+                >
+                  <Save size={16} /> Guardar proforma
+                </button>
+                <button
+                  onClick={generarPDF}
+                  style={{
+                    width: '100%',
+                    padding: '13px 14px',
+                    background: T.ambDim,
+                    border: `1px solid ${T.AMB}55`,
+                    borderRadius: 12,
+                    color: T.AMB,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: 800,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <FileText size={16} /> Generar PDF
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
 
@@ -1598,6 +2643,7 @@ export default function CotizadorView({ voiceDraft = null, onVoiceDraftApplied }
         onClose={() => setMapPickerField('')}
         onConfirm={applyMapLocation}
       />
+    </div>
     </div>
   );
 }
