@@ -65,11 +65,27 @@ function buildFooterCompany(config = {}) {
   ].filter(Boolean);
 }
 
-function formatMoney(value) {
-  const fixed = Number(value || 0).toFixed(2);
-  const [whole, decimals] = fixed.split('.');
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return `$${grouped}.${decimals}`;
+function getDisplayAmount(value, currency = 'CRC', params = {}) {
+  const amount = Number(value) || 0;
+  const crcPerUsd = Number(params.tc) || 512;
+  const eurPerUsd = Number(params.eurRate) || 0.92;
+  if (currency === 'USD') return amount / crcPerUsd;
+  if (currency === 'EUR') return (amount / crcPerUsd) * eurPerUsd;
+  return amount;
+}
+
+function formatMoney(value, currency = 'CRC', params = {}) {
+  const amount = getDisplayAmount(value, currency, params);
+  try {
+    return new Intl.NumberFormat('es-CR', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currency} ${amount.toFixed(2)}`;
+  }
 }
 
 function buildIntro(config = {}) {
@@ -102,6 +118,7 @@ function buildFooterHtml(config = {}) {
 }
 
 export function pdfGen({ params, socio, resData, config = {}, seller = null }) {
+  const displayCurrency = socio?.cfMoneda || 'CRC';
   const companyName = escapeHtml(config.nombre || 'TransOP S.A.');
   const logoUrl = String(config.logo || '').trim();
   const logoScale = Math.max(0.5, Math.min(3, Number(config.logo_scale || 1)));
@@ -599,7 +616,7 @@ export function pdfGen({ params, socio, resData, config = {}, seller = null }) {
             <td>
               <div class="service-desc">${detail}</div>
             </td>
-            <td class="amount">${formatMoney(resData.subtotal)}</td>
+            <td class="amount">${formatMoney(resData.subtotal, displayCurrency, params)}</td>
           </tr>
         </tbody>
       </table>
@@ -608,16 +625,31 @@ export function pdfGen({ params, socio, resData, config = {}, seller = null }) {
         <div class="totals">
           <div class="totals-row">
             <span>Subtotal</span>
-            <span>${formatMoney(resData.subtotal)}</span>
+            <span>${formatMoney(resData.subtotal, displayCurrency, params)}</span>
           </div>
+          ${Number(resData.utilidadAmt || 0) > 0 ? `
+          <div class="totals-row">
+            <span>Utilidad (${Number(params.utilidadPct || 0).toFixed(2)}%)</span>
+            <span>${formatMoney(resData.utilidadAmt, displayCurrency, params)}</span>
+          </div>` : ''}
+          ${Number(resData.descuentoAmt || 0) > 0 ? `
+          <div class="totals-row">
+            <span>Descuento (${Number(params.descuentoPct || 0).toFixed(2)}%)</span>
+            <span>-${formatMoney(resData.descuentoAmt, displayCurrency, params)}</span>
+          </div>` : ''}
           <div class="totals-row">
             <span>Impuesto de ventas</span>
-            <span>${formatMoney(resData.ivaAmt)}</span>
+            <span>${formatMoney(resData.ivaAmt, displayCurrency, params)}</span>
           </div>
           <div class="totals-row total">
-            <span>Total</span>
-            <span>${formatMoney(resData.total)}</span>
+            <span>Total (${displayCurrency})</span>
+            <span>${formatMoney(resData.total, displayCurrency, params)}</span>
           </div>
+          ${displayCurrency !== 'CRC' ? `
+          <div class="totals-row">
+            <span>Total base</span>
+            <span>${formatMoney(resData.total, 'CRC', params)}</span>
+          </div>` : ''}
         </div>
       </div>
     </div>

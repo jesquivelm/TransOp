@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import { Building2, Phone, Plus, RefreshCcw, Search, Trash2, User, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Phone, Search, Trash2, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { useTabs } from "../context/TabsContext";
 
 const T = {
   bg: "var(--bg)",
@@ -65,20 +66,6 @@ const inputStyle = {
   boxSizing: "border-box",
 };
 
-function StatCard({ label, value, color = T.txt, icon: Icon }) {
-  return (
-    <div style={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 12, padding: "16px 20px", flex: 1, minWidth: 120 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
-          <div style={{ fontSize: 12, color: T.mute, marginBottom: 6, fontWeight: 500 }}>{label}</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color, lineHeight: 1 }}>{value}</div>
-        </div>
-        {Icon && <Icon size={20} color={color} style={{ opacity: 0.7 }} />}
-      </div>
-    </div>
-  );
-}
-
 function Field({ label, children }) {
   return (
     <div style={{ marginBottom: 14 }}>
@@ -137,9 +124,9 @@ function toErrorMessage(error, fallback) {
   return fallback;
 }
 
-function SociosView({ voiceDraft = null, onVoiceDraftApplied }) {
+function SociosView({ voiceDraft = null, onVoiceDraftApplied, onOpenSocio }) {
   const { token } = useAuth();
-  const authHeaders = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" }), [token]);
 
   const [socios, setSocios] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -182,7 +169,7 @@ function SociosView({ voiceDraft = null, onVoiceDraftApplied }) {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [authHeaders]);
 
   useEffect(() => {
     if (token) cargar();
@@ -219,32 +206,6 @@ function SociosView({ voiceDraft = null, onVoiceDraftApplied }) {
     setShowForm(true);
     onVoiceDraftApplied?.(voiceDraft.id);
   }, [onVoiceDraftApplied, voiceDraft]);
-
-  const abrirNuevo = () => {
-    setEditing(null);
-    setForm(EMPTY_FORM);
-    setError("");
-    setShowForm(true);
-  };
-
-  const abrirEditar = (socio) => {
-    setEditing(socio);
-    setForm({
-      nombre: socio.nombre ?? "",
-      codigoCliente: socio.codigoCliente ?? "",
-      empresa: socio.empresa ?? "",
-      identificacion: socio.identificacion ?? "",
-      email: socio.email ?? "",
-      telefono: socio.telefono ?? "",
-      tipo: socio.tipo ?? "cliente",
-      clasificacion: socio.clasificacion ?? "cliente",
-      direccion: socio.direccion ?? "",
-      notas: socio.notas ?? "",
-      contactos: socio.contactos ?? [],
-    });
-    setError("");
-    setShowForm(true);
-  };
 
   const guardar = async () => {
     if (!form.nombre.trim()) {
@@ -344,19 +305,8 @@ function SociosView({ voiceDraft = null, onVoiceDraftApplied }) {
     return matchSearch && matchTipo;
   });
 
-  const totalClientes = socios.filter(socio => socio.tipo === "cliente").length;
-  const totalProveedores = socios.filter(socio => socio.tipo === "proveedor").length;
-  const totalProspectos = socios.filter(socio => socio.clasificacion === "prospecto").length;
-
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-        <StatCard label="Total socios" value={socios.length} icon={User} color={T.txt} />
-        <StatCard label="Clientes" value={totalClientes} icon={User} color={T.BLU} />
-        <StatCard label="Proveedores" value={totalProveedores} icon={Building2} color={T.AMB} />
-        <StatCard label="Prospectos" value={totalProspectos} icon={Plus} color={T.GRN} />
-      </div>
-
       <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: "20px 24px" }}>
         <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 200, background: T.card2, border: `1px solid ${T.bdr2}`, borderRadius: 8, padding: "8px 12px" }}>
@@ -404,7 +354,7 @@ function SociosView({ voiceDraft = null, onVoiceDraftApplied }) {
                 style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 10px", borderRadius: 10, cursor: "pointer", transition: "background .15s", border: "1px solid transparent" }}
                 onMouseEnter={e => { e.currentTarget.style.background = T.card2; }}
                 onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-                onClick={() => abrirEditar(socio)}
+                onClick={() => onOpenSocio?.(socio)}
               >
                 <div style={{ width: 38, height: 38, borderRadius: "50%", background: T.card3, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 14, fontWeight: 700, color: T.AMB }}>
                   {socio.nombre.split(" ").map(n => n[0]).slice(0, 2).join("")}
@@ -624,46 +574,285 @@ function SociosView({ voiceDraft = null, onVoiceDraftApplied }) {
 
 export default SociosView;
 
-export function useSocios(token) {
-  const [socios, setSocios] = useState([]);
+export function SocioDetailView({ socioId, onCloseTab }) {
+  const { token } = useAuth();
+  const { closeTab } = useTabs();
+  const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" }), [token]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(EMPTY_FORM);
 
-  const cargar = useCallback(async () => {
-    if (!token) return;
+  const cargarDetalle = useCallback(async () => {
+    if (!token || !socioId) return;
     setLoading(true);
-
+    setError("");
     try {
-      const res = await fetch("/api/tms/socios", {
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      });
+      const res = await fetch("/api/tms/socios", { headers: authHeaders });
       const payload = await res.json().catch(() => []);
       if (!res.ok) throw new Error(payload.error || `Error ${res.status} al cargar socios`);
 
-      const sociosConContactos = await Promise.all(
-        payload.map(async socio => {
-          try {
-            const contactosRes = await fetch(`/api/tms/socios/${socio.id}/contactos`, {
-              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            });
-            const contactos = contactosRes.ok ? await contactosRes.json() : [];
-            return { ...socio, clasificacion: socio.clasificacion || "cliente", contactos };
-          } catch {
-            return { ...socio, clasificacion: socio.clasificacion || "cliente", contactos: [] };
-          }
-        })
-      );
+      const socio = Array.isArray(payload) ? payload.find(item => String(item.id) === String(socioId)) : null;
+      if (!socio) throw new Error("No se encontro el socio solicitado.");
 
-      setSocios(sociosConContactos);
-    } catch (error) {
-      console.error("useSocios error:", error);
+      const contactosRes = await fetch(`/api/tms/socios/${socio.id}/contactos`, { headers: authHeaders });
+      const contactos = contactosRes.ok ? await contactosRes.json() : [];
+      const enriched = { ...socio, clasificacion: socio.clasificacion || "cliente", contactos };
+
+      setEditing(enriched);
+      setForm({
+        nombre: enriched.nombre ?? "",
+        codigoCliente: enriched.codigoCliente ?? "",
+        empresa: enriched.empresa ?? "",
+        identificacion: enriched.identificacion ?? "",
+        email: enriched.email ?? "",
+        telefono: enriched.telefono ?? "",
+        tipo: enriched.tipo ?? "cliente",
+        clasificacion: enriched.clasificacion ?? "cliente",
+        direccion: enriched.direccion ?? "",
+        notas: enriched.notas ?? "",
+        contactos: enriched.contactos ?? [],
+      });
+    } catch (detailError) {
+      console.error("Error cargando detalle de socio:", detailError);
+      setError(toErrorMessage(detailError, "No se pudo cargar el detalle del socio."));
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [authHeaders, socioId, token]);
 
   useEffect(() => {
-    cargar();
-  }, [cargar]);
+    cargarDetalle();
+  }, [cargarDetalle]);
 
-  return { socios, loading, recargar: cargar };
+  const guardar = async () => {
+    if (!form.nombre.trim() || !editing?.id) {
+      setError("El nombre es obligatorio.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+
+    const body = {
+      nombre: form.nombre.trim(),
+      codigoCliente: form.codigoCliente.trim(),
+      empresa: form.empresa.trim() || null,
+      identificacion: form.identificacion.trim() || null,
+      tipo: form.tipo || "cliente",
+      clasificacion: form.clasificacion || "cliente",
+      telefono: form.telefono.trim() || null,
+      email: form.email.trim() || null,
+      direccion: form.direccion.trim() || null,
+      notas: form.notas.trim() || null,
+    };
+
+    try {
+      const res = await fetch(`/api/tms/socios/${editing.id}`, {
+        method: "PUT",
+        headers: authHeaders,
+        body: JSON.stringify(body),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.error || `Error ${res.status} al actualizar socio`);
+
+      const contactosNuevos = form.contactos.filter(contacto => !contacto.id && contacto.nombre.trim());
+      for (const contacto of contactosNuevos) {
+        const contactRes = await fetch(`/api/tms/socios/${editing.id}/contactos`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            nombre: contacto.nombre,
+            cargo: contacto.cargo || null,
+            telefono: contacto.telefono || null,
+            email: contacto.email || null,
+            es_principal: Boolean(contacto.es_principal),
+          }),
+        });
+        const contactPayload = await contactRes.json().catch(() => ({}));
+        if (!contactRes.ok) throw new Error(contactPayload.error || `Error ${contactRes.status} al guardar contactos`);
+      }
+
+      await cargarDetalle();
+    } catch (saveError) {
+      console.error("Error actualizando socio:", saveError);
+      setError(toErrorMessage(saveError, "No se pudo actualizar el socio."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cerrar = () => {
+    if (onCloseTab) onCloseTab();
+    else if (editing?.id) closeTab(`socio-${editing.id}`);
+  };
+
+  if (loading) {
+    return <div style={{ padding: 40, textAlign: "center", color: T.mute, fontSize: 13 }}>Cargando detalle del socio...</div>;
+  }
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 16, padding: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: T.txt }}>{editing?.nombre || "Socio"}</div>
+          <div style={{ fontSize: 12, color: T.mute, marginTop: 4 }}>
+            {editing?.codigoCliente || "Sin codigo"} {editing?.telefono ? `· ${editing.telefono}` : ""}
+          </div>
+        </div>
+        <button onClick={cerrar} style={{ padding: "9px 14px", background: "transparent", border: `1px solid ${T.bdr2}`, borderRadius: 10, color: T.sub, cursor: "pointer" }}>
+          Cerrar pestaña
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ padding: "10px 14px", background: T.redDim, border: `1px solid ${T.RED}44`, borderRadius: 8, color: T.RED, fontSize: 13, marginBottom: 16 }}>
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+        {editing && <div style={{ gridColumn: "1 / -1" }}>
+          <Field label="Código Cliente">
+            <input value={form.codigoCliente} readOnly style={{ ...inputStyle, color: T.mute, background: T.card2, cursor: "default" }} />
+          </Field>
+        </div>}
+
+        <div style={{ gridColumn: "1 / -1" }}>
+          <Field label="Nombre Completo *">
+            <input value={form.nombre} onChange={e => setForm(prev => ({ ...prev, nombre: e.target.value }))} style={inputStyle} />
+          </Field>
+        </div>
+
+        <Field label="Clasificación">
+          <select value={form.clasificacion} onChange={e => setForm(prev => ({ ...prev, clasificacion: e.target.value }))} style={{ ...inputStyle, cursor: "pointer" }}>
+            {CLASIFICACIONES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+        </Field>
+
+        <Field label="Tipo de Socio">
+          <select value={form.tipo} onChange={e => setForm(prev => ({ ...prev, tipo: e.target.value }))} style={{ ...inputStyle, cursor: "pointer" }}>
+            {TIPOS.map(tipo => <option key={tipo.id} value={tipo.id}>{tipo.label}</option>)}
+          </select>
+        </Field>
+
+        <Field label="Correo Electrónico">
+          <input type="email" value={form.email} onChange={e => setForm(prev => ({ ...prev, email: e.target.value }))} style={inputStyle} />
+        </Field>
+
+        <Field label="Empresa">
+          <input value={form.empresa} onChange={e => setForm(prev => ({ ...prev, empresa: e.target.value }))} style={inputStyle} />
+        </Field>
+
+        <Field label="Identificación">
+          <input value={form.identificacion} onChange={e => setForm(prev => ({ ...prev, identificacion: e.target.value }))} style={inputStyle} />
+        </Field>
+
+        <div style={{ gridColumn: "1 / -1" }}>
+          <Field label="Teléfono">
+            <input value={form.telefono} onChange={e => setForm(prev => ({ ...prev, telefono: e.target.value }))} style={inputStyle} />
+          </Field>
+        </div>
+      </div>
+
+      <Field label="Dirección">
+        <input value={form.direccion} onChange={e => setForm(prev => ({ ...prev, direccion: e.target.value }))} style={inputStyle} />
+      </Field>
+
+      <Field label="Notas internas">
+        <textarea value={form.notas} onChange={e => setForm(prev => ({ ...prev, notas: e.target.value }))} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
+      </Field>
+
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ fontSize: 12, fontWeight: 600, color: T.sub, display: "block", marginBottom: 8 }}>
+          Contactos Adicionales
+        </label>
+
+        {form.contactos.map((contacto, index) => (
+          <div key={`${contacto.id || "nuevo"}-${index}`} style={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 8, padding: 12, marginBottom: 10 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <input
+                placeholder="Nombre *"
+                value={contacto.nombre}
+                onChange={e => {
+                  const next = [...form.contactos];
+                  next[index] = { ...next[index], nombre: e.target.value };
+                  setForm(prev => ({ ...prev, contactos: next }));
+                }}
+                style={{ flex: 2, padding: "7px 10px", background: T.card, border: `1px solid ${T.bdr2}`, borderRadius: 6, color: T.txt, fontSize: 13 }}
+              />
+              <input
+                placeholder="Cargo"
+                value={contacto.cargo || ""}
+                onChange={e => {
+                  const next = [...form.contactos];
+                  next[index] = { ...next[index], cargo: e.target.value };
+                  setForm(prev => ({ ...prev, contactos: next }));
+                }}
+                style={{ flex: 1, padding: "7px 10px", background: T.card, border: `1px solid ${T.bdr2}`, borderRadius: 6, color: T.txt, fontSize: 13 }}
+              />
+              <button
+                onClick={() => setForm(prev => ({ ...prev, contactos: prev.contactos.filter((_, idx) => idx !== index) }))}
+                style={{ padding: 8, background: T.redDim, border: "none", borderRadius: 6, color: T.RED, cursor: "pointer", flexShrink: 0 }}
+              >
+                <X size={12} />
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                placeholder="Teléfono"
+                value={contacto.telefono || ""}
+                onChange={e => {
+                  const next = [...form.contactos];
+                  next[index] = { ...next[index], telefono: e.target.value };
+                  setForm(prev => ({ ...prev, contactos: next }));
+                }}
+                style={{ flex: 1, padding: "7px 10px", background: T.card, border: `1px solid ${T.bdr2}`, borderRadius: 6, color: T.txt, fontSize: 13 }}
+              />
+              <input
+                placeholder="Email"
+                value={contacto.email || ""}
+                onChange={e => {
+                  const next = [...form.contactos];
+                  next[index] = { ...next[index], email: e.target.value };
+                  setForm(prev => ({ ...prev, contactos: next }));
+                }}
+                style={{ flex: 1, padding: "7px 10px", background: T.card, border: `1px solid ${T.bdr2}`, borderRadius: 6, color: T.txt, fontSize: 13 }}
+              />
+              <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: T.mute, cursor: "pointer", flexShrink: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={contacto.es_principal || false}
+                  onChange={e => {
+                    const next = [...form.contactos];
+                    next[index] = { ...next[index], es_principal: e.target.checked };
+                    setForm(prev => ({ ...prev, contactos: next }));
+                  }}
+                />
+                Principal
+              </label>
+            </div>
+          </div>
+        ))}
+
+        <button
+          onClick={() => setForm(prev => ({ ...prev, contactos: [...prev.contactos, { nombre: "", cargo: "", telefono: "", email: "", es_principal: false }] }))}
+          style={{ padding: "6px 12px", background: T.card2, border: `1px solid ${T.bdr2}`, borderRadius: 6, color: T.sub, cursor: "pointer", fontSize: 12 }}
+        >
+          + Agregar contacto
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+        <button onClick={cargarDetalle} style={{ padding: "10px 20px", background: "transparent", border: `1px solid ${T.bdr2}`, borderRadius: 8, color: T.sub, cursor: "pointer", fontSize: 14 }}>
+          Recargar
+        </button>
+        <button onClick={guardar} disabled={saving} style={{ padding: "10px 20px", background: T.AMB, border: "none", borderRadius: 8, color: "#000", cursor: saving ? "wait" : "pointer", fontSize: 14, fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
+          {saving ? "Guardando..." : "Guardar"}
+        </button>
+      </div>
+    </div>
+  );
 }

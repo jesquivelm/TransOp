@@ -28,6 +28,7 @@ const TABS_CONFIG = [
     label: 'General',
     icon: Settings,
     subtabs: [
+      { id: 'cotizaciones', label: 'Cotizaciones', icon: TrendingUp },
       { id: 'empresa', label: 'Datos de Empresa', icon: Info },
       { id: 'base_datos', label: 'Base de Datos', icon: Database },
       { id: 'apis', label: 'APIs', icon: KeyRound },
@@ -35,6 +36,12 @@ const TABS_CONFIG = [
       { id: 'combustibles', label: 'Precios Combustibles', icon: Fuel },
     ],
   },
+];
+
+const DISPLAY_CURRENCIES = [
+  { code: 'CRC', label: 'Colones (CRC)' },
+  { code: 'USD', label: 'Dólares (USD)' },
+  { code: 'EUR', label: 'Euros (EUR)' },
 ];
 
 const EMPTY_DB_FORM = {
@@ -706,10 +713,12 @@ function DatabaseConfigPanel() {
 function ApiKeysPanel() {
   const { token } = useAuth();
   const [groqApiKey, setGroqApiKey] = useState('');
+  const [googleMapsApiKey, setGoogleMapsApiKey] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [hasStoredKey, setHasStoredKey] = useState(false);
+  const [hasGoogleMapsKey, setHasGoogleMapsKey] = useState(false);
 
   const authHeaders = useMemo(() => ({
     Authorization: `Bearer ${token}`,
@@ -731,9 +740,14 @@ function ApiKeysPanel() {
       const savedKey = data?.groqApiKey || '';
       setGroqApiKey(savedKey);
       setHasStoredKey(Boolean(savedKey));
+
+      const savedGoogleKey = data?.googleMapsApiKey || '';
+      setGoogleMapsApiKey(savedGoogleKey);
+      setHasGoogleMapsKey(Boolean(savedGoogleKey));
     } catch (error) {
       setMessage(error.message || 'No se pudo cargar la configuración de APIs.');
       setHasStoredKey(false);
+      setHasGoogleMapsKey(false);
     } finally {
       setLoading(false);
     }
@@ -754,6 +768,7 @@ function ApiKeysPanel() {
         body: JSON.stringify({
           valor: {
             groqApiKey: groqApiKey.trim(),
+            googleMapsApiKey: googleMapsApiKey.trim(),
           },
         }),
       });
@@ -764,9 +779,13 @@ function ApiKeysPanel() {
       }
 
       setHasStoredKey(Boolean(groqApiKey.trim()));
-      setMessage(groqApiKey.trim() ? 'Llave de Groq guardada correctamente.' : 'La llave de Groq se eliminó de la configuración.');
+      setHasGoogleMapsKey(Boolean(googleMapsApiKey.trim()));
+      const msgs = [];
+      if (groqApiKey.trim()) msgs.push('Groq');
+      if (googleMapsApiKey.trim()) msgs.push('Google Maps');
+      setMessage(msgs.length > 0 ? `APIs guardadas: ${msgs.join(', ')}` : 'Las APIs se eliminaron de la configuración.');
     } catch (error) {
-      setMessage(error.message || 'No se pudo guardar la llave de Groq.');
+      setMessage(error.message || 'No se pudieron guardar las APIs.');
     } finally {
       setSaving(false);
     }
@@ -840,6 +859,28 @@ function ApiKeysPanel() {
               style={{ ...inputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace' }}
             />
           </Field>
+
+          <div style={{ height: 24 }} />
+
+          <Field
+            label="Google Maps API Key"
+            hint="Se usa para el Route Designer (diseño de rutas). Requiere clave con APIs habilitadas: Maps JavaScript, Places y Directions."
+          >
+            <input
+              type="password"
+              value={googleMapsApiKey}
+              onChange={e => setGoogleMapsApiKey(e.target.value)}
+              placeholder="AIza..."
+              style={{ ...inputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace' }}
+            />
+          </Field>
+
+          {hasGoogleMapsKey && (
+            <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: T.grnDim, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <CheckCircle size={14} color={T.GRN} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: T.GRN }}>Google Maps API configurada</span>
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 8 }}>
@@ -1199,6 +1240,240 @@ function TipoCambioPanel() {
 }
 
 // ─────────────────────────────────────────────────────────────
+function CotizacionesPanel() {
+  const { token } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState('');
+  const [form, setForm] = useState({
+    monedaBase: 'CRC',
+    monedaDefault: 'CRC',
+    colaborador: 12800,
+    peajes: 7680,
+    carga: 0,
+    viaticos: 5120,
+    ferry: 0,
+    utilidadPct: 25,
+    iva: 13,
+    transfers: [
+      { id: 'transfer-in-sjo', descripcion: 'Transfer IN Aeropuerto SJO', costo: 25600, activo: true },
+      { id: 'transfer-out-sjo', descripcion: 'Transfer OUT Aeropuerto SJO', costo: 23040, activo: true },
+      { id: 'transfer-in-ctg', descripcion: 'Transfer IN Aeropuerto Cartago', costo: 33280, activo: true },
+      { id: 'transfer-out-ctg', descripcion: 'Transfer OUT Aeropuerto Cartago', costo: 30720, activo: true },
+    ],
+  });
+
+  const authHeaders = useMemo(() => ({
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  }), [token]);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/tms/config/cotizaciones', { headers: authHeaders });
+      const data = await res.json();
+      if (data && typeof data === 'object' && !data.error) {
+        setForm(prev => ({
+          monedaBase: 'CRC',
+          monedaDefault: data.monedaDefault || prev.monedaDefault || 'CRC',
+          colaborador: Number(data.colaborador ?? prev.colaborador) || 0,
+          peajes: Number(data.peajes ?? prev.peajes) || 0,
+          carga: Number(data.carga ?? prev.carga) || 0,
+          viaticos: Number(data.viaticos ?? prev.viaticos) || 0,
+          ferry: Number(data.ferry ?? prev.ferry) || 0,
+          utilidadPct: Number(data.utilidadPct ?? data.porcentajeUtilidad ?? prev.utilidadPct) || 0,
+          iva: Number(data.iva ?? prev.iva) || 0,
+          transfers: Array.isArray(data.transfers) && data.transfers.length > 0 ? data.transfers.map((item, index) => ({
+            id: item.id || `transfer-${index + 1}`,
+            descripcion: item.descripcion || '',
+            costo: Number(item.costo) || 0,
+            activo: item.activo !== false,
+          })) : prev.transfers,
+        }));
+      }
+    } catch (error) {
+      setStatus(`Error cargando configuración: ${error.message}`);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { loadData(); }, []);
+
+  const updateTransfer = (index, field, value) => {
+    setForm(prev => ({
+      ...prev,
+      transfers: prev.transfers.map((item, itemIndex) => (
+        itemIndex === index
+          ? { ...item, [field]: field === 'costo' ? Number(value || 0) : value }
+          : item
+      )),
+    }));
+  };
+
+  const addTransfer = () => {
+    setForm(prev => ({
+      ...prev,
+      transfers: [...prev.transfers, { id: `transfer-${Date.now()}`, descripcion: '', costo: 0, activo: true }],
+    }));
+  };
+
+  const removeTransfer = (index) => {
+    setForm(prev => ({
+      ...prev,
+      transfers: prev.transfers.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
+
+  const handleSave = async (event) => {
+    event.preventDefault();
+    setLoading(true);
+    setStatus('Guardando...');
+    try {
+      const payload = {
+        monedaBase: 'CRC',
+        monedaDefault: form.monedaDefault || 'CRC',
+        colaborador: Number(form.colaborador) || 0,
+        peajes: Number(form.peajes) || 0,
+        carga: Number(form.carga) || 0,
+        viaticos: Number(form.viaticos) || 0,
+        ferry: Number(form.ferry) || 0,
+        utilidadPct: Number(form.utilidadPct) || 0,
+        iva: Number(form.iva) || 0,
+        transfers: form.transfers.map(item => ({
+          id: item.id,
+          descripcion: String(item.descripcion || '').trim(),
+          costo: Number(item.costo) || 0,
+          activo: item.activo !== false,
+        })).filter(item => item.descripcion),
+      };
+      const res = await fetch('/api/tms/config/cotizaciones', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ valor: payload }),
+      });
+      const data = await res.json();
+      setStatus(data.success ? 'Cotizaciones guardadas correctamente' : `Error: ${data.error || 'No se pudo guardar.'}`);
+    } catch (error) {
+      setStatus(`Error: ${error.message}`);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div style={{ padding: 18, borderRadius: 14, border: `1px solid ${T.bdr}`, background: T.card2 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: T.txt, marginBottom: 6 }}>Moneda base del sistema</div>
+        <div style={{ fontSize: 12, color: T.sub, marginBottom: 14 }}>Todos los cálculos internos de proformas se guardan y operan en colones.</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <Field label="Moneda base">
+            <input value={form.monedaBase} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} />
+          </Field>
+          <Field label="Moneda por defecto en proforma">
+            <select value={form.monedaDefault} onChange={e => setForm(prev => ({ ...prev, monedaDefault: e.target.value }))} style={{ ...inputStyle, cursor: 'pointer' }}>
+              {DISPLAY_CURRENCIES.map(item => (
+                <option key={item.code} value={item.code}>{item.label}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      </div>
+
+      <div style={{ padding: 18, borderRadius: 14, border: `1px solid ${T.bdr}`, background: T.card2 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: T.txt, marginBottom: 6 }}>Defaults operativos de proforma</div>
+        <div style={{ fontSize: 12, color: T.sub, marginBottom: 14 }}>Estos valores se cargan automáticamente al crear una proforma nueva.</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 16 }}>
+          <Field label="Colaborador">
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+              <input type="number" min="0" step="0.01" value={form.colaborador || 0} onChange={e => setForm(prev => ({ ...prev, colaborador: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
+            </div>
+          </Field>
+          <Field label="Peajes">
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+              <input type="number" min="0" step="0.01" value={form.peajes || 0} onChange={e => setForm(prev => ({ ...prev, peajes: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
+            </div>
+          </Field>
+          <Field label="Carga">
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+              <input type="number" min="0" step="0.01" value={form.carga || 0} onChange={e => setForm(prev => ({ ...prev, carga: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
+            </div>
+          </Field>
+          <Field label="Viáticos">
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+              <input type="number" min="0" step="0.01" value={form.viaticos || 0} onChange={e => setForm(prev => ({ ...prev, viaticos: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
+            </div>
+          </Field>
+          <Field label="Ferry">
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+              <input type="number" min="0" step="0.01" value={form.ferry || 0} onChange={e => setForm(prev => ({ ...prev, ferry: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
+            </div>
+          </Field>
+          <Field label="Utilidad por defecto">
+            <div style={{ position: 'relative' }}>
+              <input type="number" min="0" step="0.01" value={form.utilidadPct || 0} onChange={e => setForm(prev => ({ ...prev, utilidadPct: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingRight: 28 }} />
+              <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>%</span>
+            </div>
+          </Field>
+          <Field label="IVA por defecto">
+            <div style={{ position: 'relative' }}>
+              <input type="number" min="0" step="0.01" value={form.iva || 0} onChange={e => setForm(prev => ({ ...prev, iva: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingRight: 28 }} />
+              <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>%</span>
+            </div>
+          </Field>
+        </div>
+      </div>
+
+      <div style={{ padding: 18, borderRadius: 14, border: `1px solid ${T.bdr}`, background: T.card2 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.txt }}>Transfers configurables</div>
+            <div style={{ fontSize: 12, color: T.sub }}>Estos transfers aparecerán como selección directa dentro de la proforma.</div>
+          </div>
+          <button type="button" onClick={addTransfer} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${T.AMB}44`, background: T.ambDim, color: T.AMB, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+            Agregar transfer
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {form.transfers.map((item, index) => (
+            <div key={item.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) 180px 120px auto', gap: 12, alignItems: 'end', padding: 14, borderRadius: 12, border: `1px solid ${T.bdr}`, background: T.card }}>
+              <Field label="Descripción">
+                <input value={item.descripcion} onChange={e => updateTransfer(index, 'descripcion', e.target.value)} style={inputStyle} placeholder="Nombre del transfer" />
+              </Field>
+              <Field label="Costo">
+                <div style={{ position: 'relative' }}>
+                  <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+                  <input type="number" min="0" step="0.01" value={item.costo || 0} onChange={e => updateTransfer(index, 'costo', e.target.value)} style={{ ...inputStyle, paddingLeft: 28 }} />
+                </div>
+              </Field>
+              <Field label="Activo">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, color: T.sub, fontSize: 13 }}>
+                  <input type="checkbox" checked={item.activo !== false} onChange={e => updateTransfer(index, 'activo', e.target.checked)} />
+                  Visible
+                </label>
+              </Field>
+              <button type="button" onClick={() => removeTransfer(index)} style={{ padding: '10px 12px', borderRadius: 10, border: 'none', background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                Quitar
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <button type="submit" disabled={loading} style={{ padding: '12px 24px', borderRadius: 10, border: 'none', background: T.BLU, color: '#fff', fontSize: 14, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Save size={18} /> Guardar Cotizaciones
+        </button>
+        <div style={{ fontSize: 12, color: status.toLowerCase().includes('error') ? T.RED : T.mute }}>{status || (loading ? 'Cargando...' : 'Administra la tabla de transfers y la moneda visual por defecto.')}</div>
+      </div>
+    </form>
+  );
+}
+
 // PANEL: PRECIOS DE COMBUSTIBLES
 // ─────────────────────────────────────────────────────────────
 function CombustiblesPanel() {
@@ -1467,10 +1742,9 @@ function CombustiblesPanel() {
 
 export default function ConfiguracionesView() {
   const [activeTab, setActiveTab] = useState('general');
-  const [activeSubtab, setActiveSubtab] = useState('empresa');
+  const [activeSubtab, setActiveSubtab] = useState('cotizaciones');
 
   const currentTab = TABS_CONFIG.find(t => t.id === activeTab);
-  const currentSubtab = currentTab?.subtabs.find(s => s.id === activeSubtab);
 
   return (
     <div style={{ display: 'flex', gap: 24, height: 'calc(100vh - 160px)' }}>
@@ -1556,17 +1830,6 @@ export default function ConfiguracionesView() {
 
         <div style={{ flex: 1, padding: 32, overflowY: 'auto' }}>
           <div style={{ maxWidth: 860 }}>
-            <div style={{ marginBottom: 24 }}>
-              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: T.txt }}>{currentSubtab?.label}</h2>
-              <p style={{ margin: '4px 0 0', fontSize: 13, color: T.mute }}>
-                {activeSubtab === 'base_datos'
-                  ? 'Configura la conexión a PostgreSQL, valida el acceso y aplica cambios sin salir del sistema.'
-                  : activeSubtab === 'apis'
-                    ? 'Administra las llaves de integración que usarán los servicios inteligentes y de voz del sistema.'
-                  : 'Ajusta los parámetros visuales y de comportamiento del módulo.'}
-              </p>
-            </div>
-
             {activeSubtab === 'empresa'
               ? <DatosEmpresaPanel />
               : activeSubtab === 'base_datos'
@@ -1577,6 +1840,8 @@ export default function ConfiguracionesView() {
                     ? <TipoCambioPanel />
                     : activeSubtab === 'combustibles'
                       ? <CombustiblesPanel />
+                      : activeSubtab === 'cotizaciones'
+                        ? <CotizacionesPanel />
                       : <PlaceholderContent subtabId={activeSubtab} />}
           </div>
         </div>

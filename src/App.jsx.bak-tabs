@@ -3,19 +3,17 @@ import {
   LayoutDashboard, CalendarDays, CheckSquare, Users, Bus, Receipt,
   BarChart3, AlertTriangle, CheckCircle, XCircle, Clock, MapPin,
   Phone, Plus, Search, ChevronRight, Shield, Wrench, X, User,
-  MessageSquare, Zap, Eye, RefreshCcw, ChevronDown, Moon, Sun, Calculator, Settings, Trash2
+  MessageSquare, Zap, Eye, RefreshCcw, ChevronDown, Moon, Sun, Calculator, Settings
 } from "lucide-react";
 
 import CotizadorView from './components/Cotizador/CotizadorView';
-import SociosView, { SocioDetailView } from './components/SociosView';
+import SociosView from './components/SociosView';
 import LoginView from './components/Auth/LoginView';
 import UsuarioMgmtView from './components/Admin/UsuarioMgmtView';
 import ConfiguracionesView from './components/Admin/ConfiguracionesView';
 import FlotaGanttView from './components/FlotaGanttView';
 import VoiceAssistantButton from './components/VoiceAssistantButton';
-import GlobalTabs from './components/GlobalTabs';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { TabsProvider, useTabs } from './context/TabsContext';
 import { T } from './theme';
 import { normalizeTimeInput, normalizeVoiceInterpretation } from './utils/voiceDrafts';
 
@@ -62,14 +60,6 @@ const endOfMonthISO = (dateStr) => {
   date.setMonth(date.getMonth() + 1, 0);
   return date.toISOString().slice(0, 10);
 };
-const VEHICLE_TYPE_OPTIONS = [
-  { value: 'sedan', label: 'Automóvil' },
-  { value: 'van', label: 'Van' },
-  { value: 'buseta', label: 'Buseta' },
-  { value: 'bus', label: 'Bus' },
-  { value: 'microbus', label: 'Microbús' },
-  { value: 'otro', label: 'Otro' },
-];
 const getTaskRangeBounds = (dateStr, scope) => {
   if (scope === 'week') return { desde: startOfWeekISO(dateStr), hasta: endOfWeekISO(dateStr) };
   if (scope === 'month') return { desde: startOfMonthISO(dateStr), hasta: endOfMonthISO(dateStr) };
@@ -454,6 +444,8 @@ function Dashboard({ tareas, conductores, vehiculos, eventos, onAsignar }) {
   const tableRow = { borderBottom:`1px solid ${T.bdr}`, padding:'12px 0' };
   const tdSt = (w) => ({ width:w, padding:'0 8px', verticalAlign:'middle', color:T.txt, fontSize:13 });
 
+  const fechaHoy = new Date().toLocaleDateString('es-CR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
   return (
     <div>
       <div style={{ display:'flex', gap:12, marginBottom:24, flexWrap:'wrap' }}>
@@ -464,6 +456,7 @@ function Dashboard({ tareas, conductores, vehiculos, eventos, onAsignar }) {
       </div>
 
       <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'20px 24px', marginBottom:20 }}>
+        <SectionHeader title={`Tareas de hoy — ${fechaHoy}`} />
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', borderCollapse:'collapse' }}>
             <thead>
@@ -520,6 +513,7 @@ function Dashboard({ tareas, conductores, vehiculos, eventos, onAsignar }) {
       </div>
 
       <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'20px 24px' }}>
+        <SectionHeader title="Eventos activos" />
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
           {eventos.filter(e => ['en_curso','confirmado'].includes(e.estado)).map(e => {
             const pct = e.tareas > 0 ? Math.round((e.ok / e.tareas) * 100) : 0;
@@ -642,7 +636,7 @@ function NuevoConductorModal({ onClose, onConfirm }) {
   );
 }
 
-function EditarConductorModal({ conductor, onClose, onConfirm, onDelete, canDelete = false }) {
+function EditarConductorModal({ conductor, onClose, onConfirm }) {
   const EMPTY = {
     nombre: conductor?.nombre || '',
     cedula: conductor?.cedula || '',
@@ -738,22 +732,7 @@ function EditarConductorModal({ conductor, onClose, onConfirm, onDelete, canDele
             {error}
           </div>
         )}
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginTop:22 }}>
-          <div>
-            {canDelete && (
-              <button
-                onClick={async () => {
-                  if (!confirm(`¿Eliminar permanentemente a ${conductor.nombre}? Esta acción no se puede deshacer.`)) return;
-                  await onDelete?.(conductor.id);
-                  onClose();
-                }}
-                style={{ width:34, height:34, display:'inline-flex', alignItems:'center', justifyContent:'center',
-                  background:T.redDim, border:`1px solid ${T.RED}33`, borderRadius:8, color:T.RED, cursor:'pointer' }}>
-                <Trash2 size={14} />
-              </button>
-            )}
-          </div>
-          <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+        <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:22 }}>
           <button onClick={onClose}
             style={{ padding:'10px 20px', background:'transparent', border:`1px solid ${T.bdr2}`,
               borderRadius:8, color:T.sub, cursor:'pointer', fontSize:13 }}>
@@ -764,7 +743,6 @@ function EditarConductorModal({ conductor, onClose, onConfirm, onDelete, canDele
               borderRadius:8, color:'#000', cursor:'pointer', fontWeight:600, fontSize:13 }}>
             Guardar cambios
           </button>
-          </div>
         </div>
       </div>
     </div>
@@ -810,40 +788,26 @@ function ConfirmBajaModal({ nombre, tipo, onClose, onConfirm }) {
 
 function VehicleImageInput({ imageUrl, onFileSelect, loading = false }) {
   const inputRef = useRef(null);
-  const previewStyle = {
-    width: '100%',
-    height: 180,
-    borderRadius: 14,
-    border: `1px dashed ${T.bdr2}`,
-    background: `linear-gradient(180deg, ${T.card2}, ${T.card3})`,
-    overflow: 'hidden',
-    cursor: loading ? 'wait' : 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: imageUrl ? 14 : 0,
-    boxSizing: 'border-box',
-  };
 
   return (
     <div>
       <div
         onClick={() => !loading && inputRef.current?.click()}
-        style={previewStyle}
+        style={{
+          width: '100%',
+          height: 180,
+          borderRadius: 14,
+          border: `1px dashed ${T.bdr2}`,
+          background: T.card2,
+          overflow: 'hidden',
+          cursor: loading ? 'wait' : 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
       >
         {imageUrl ? (
-          <img
-            src={imageUrl}
-            alt="Unidad"
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'contain',
-              objectPosition: 'center',
-              display: 'block',
-              borderRadius: 10,
-            }}
-          />
+          <img src={imageUrl} alt="Unidad" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
         ) : (
           <div style={{ textAlign: 'center', color: T.mute, fontSize: 13, padding: 16 }}>
             <div style={{ fontWeight: 700, color: T.sub }}>{loading ? 'Subiendo imagen...' : 'Agregar imagen de la unidad'}</div>
@@ -891,7 +855,7 @@ function AdjuntosList({ adjuntos = [] }) {
 // ─────────────────────────────────────────────────────────────
 // VISTA: CONDUCTORES
 // ─────────────────────────────────────────────────────────────
-function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBaja, onDelete, canDelete = false }) {
+function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBaja }) {
   const [search, setSearch]     = useState('');
   const [filtroEst, setFiltro]  = useState('todos');
   const [expandido, setExpand]  = useState(null);
@@ -1058,8 +1022,6 @@ function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBa
         <EditarConductorModal
           conductor={editTarget}
           onClose={() => setEditTarget(null)}
-          onDelete={onDelete}
-          canDelete={canDelete}
           onConfirm={async (id, datos) => {
             await onUpdate(id, datos);
             setEditTarget(null);
@@ -1082,7 +1044,7 @@ function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBa
 // MODAL NUEVO VEHÍCULO
 // ─────────────────────────────────────────────────────────────
 function NuevoVehiculoModal({ onClose, onConfirm, onUploadImage }) {
-  const EMPTY = { placa:'', marca:'', modelo:'', tipo:'buseta', cap:'', km:'', revTec:'', march:'', foto_url:'', licenciaRequerida:'', combustibleTipo: 'Diésel', rendimiento: 10 };
+  const EMPTY = { placa:'', marca:'', modelo:'', tipo:'Buseta', cap:'', km:'', revTec:'', march:'', foto_url:'', licenciaRequerida:'', combustibleTipo: 'Diésel', rendimiento: 10 };
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -1153,9 +1115,10 @@ function NuevoVehiculoModal({ onClose, onConfirm, onUploadImage }) {
             <div style={{ flex:1 }}>
               <label style={lbl}>TIPO *</label>
               <select value={form.tipo} onChange={e => set('tipo', e.target.value)} style={{ ...inp, cursor:'pointer' }}>
-                {VEHICLE_TYPE_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
+                <option>Automóvil</option>
+                <option>Van</option>
+                <option>Buseta</option>
+                <option>Bus</option>
               </select>
             </div>
           </div>
@@ -1240,7 +1203,7 @@ function NuevoVehiculoModal({ onClose, onConfirm, onUploadImage }) {
 // ─────────────────────────────────────────────────────────────
 // VISTA: VEHÍCULOS
 // ─────────────────────────────────────────────────────────────
-function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gastos = [], onAddGasto, onUploadGastoAdjunto, onDelete, canDelete = false }) {
+function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gastos = [], onAddGasto, onUploadGastoAdjunto }) {
   const [tab, setTab] = useState('general');
   const [form, setForm] = useState({
     km: vehiculo?.km ?? 0,
@@ -1349,7 +1312,7 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
 
         {tab === 'general' && (
           <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-            <div style={{ width:'100%', maxWidth:460, alignSelf:'center' }}>
+            <div>
               <label style={lbl}>IMAGEN DE LA UNIDAD</label>
               <VehicleImageInput imageUrl={form.foto_url} onFileSelect={handleImageSelect} loading={uploading} />
             </div>
@@ -1461,32 +1424,16 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
 
         {error && <div style={{ marginTop:14, padding:'8px 12px', background:T.redDim, borderRadius:8, fontSize:12, color:T.RED, border:`1px solid ${T.RED}33` }}>{error}</div>}
 
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginTop:22 }}>
-          <div>
-            {canDelete && (
-              <button
-                onClick={async () => {
-                  if (!confirm(`¿Eliminar permanentemente el vehículo ${vehiculo.placa}? Esta acción no se puede deshacer.`)) return;
-                  await onDelete?.(vehiculo.id);
-                  onClose();
-                }}
-                style={{ width:34, height:34, display:'inline-flex', alignItems:'center', justifyContent:'center',
-                  background:T.redDim, border:`1px solid ${T.RED}33`, borderRadius:8, color:T.RED, cursor:'pointer' }}>
-                <Trash2 size={14} />
-              </button>
-            )}
-          </div>
-          <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
-            <button onClick={onClose} style={{ padding:'10px 20px', background:'transparent', border:`1px solid ${T.bdr2}`, borderRadius:8, color:T.sub, cursor:'pointer', fontSize:13 }}>Cancelar</button>
-            {tab === 'general' && <button onClick={submit} style={{ padding:'10px 20px', background:T.AMB, border:'none', borderRadius:8, color:'#000', cursor:'pointer', fontWeight:600, fontSize:13 }}>{form.estado === 'disponible' && vehiculo.estado === 'fuera_de_servicio' ? 'Reactivar unidad' : 'Guardar cambios'}</button>}
-          </div>
+        <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:22 }}>
+          <button onClick={onClose} style={{ padding:'10px 20px', background:'transparent', border:`1px solid ${T.bdr2}`, borderRadius:8, color:T.sub, cursor:'pointer', fontSize:13 }}>Cancelar</button>
+          {tab === 'general' && <button onClick={submit} style={{ padding:'10px 20px', background:T.AMB, border:'none', borderRadius:8, color:'#000', cursor:'pointer', fontWeight:600, fontSize:13 }}>{form.estado === 'disponible' && vehiculo.estado === 'fuera_de_servicio' ? 'Reactivar unidad' : 'Guardar cambios'}</button>}
         </div>
       </div>
     </div>
   );
 }
 
-function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUploadImage, gastos, onAddGasto, onUploadGastoAdjunto, onDelete, canDelete = false }) {
+function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUploadImage, gastos, onAddGasto, onUploadGastoAdjunto }) {
   const [filtroEst, setFiltro] = useState('todos');
   const [modalNuevo, setModalNuevo] = useState(false);
   const [bajaTarget, setBajaTarget] = useState(null);
@@ -1561,31 +1508,8 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUplo
             return (
               <div key={v.id} style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:12, padding:'16px', opacity: fuera ? 0.55 : 1 }}>
                 {v.foto_url && (
-                  <div style={{
-                    marginBottom:14,
-                    borderRadius:10,
-                    overflow:'hidden',
-                    border:`1px solid ${T.bdr}`,
-                    background:`linear-gradient(180deg, ${T.card}, ${T.card3})`,
-                    height:170,
-                    display:'flex',
-                    alignItems:'center',
-                    justifyContent:'center',
-                    padding:12,
-                    boxSizing:'border-box',
-                  }}>
-                    <img
-                      src={v.foto_url}
-                      alt={`${v.marca} ${v.modelo}`}
-                      style={{
-                        width:'100%',
-                        height:'100%',
-                        objectFit:'contain',
-                        objectPosition:'center',
-                        display:'block',
-                        borderRadius:8,
-                      }}
-                    />
+                  <div style={{ marginBottom:14, borderRadius:10, overflow:'hidden', border:`1px solid ${T.bdr}` }}>
+                    <img src={v.foto_url} alt={`${v.marca} ${v.modelo}`} style={{ width:'100%', height:140, objectFit:'cover', display:'block' }} />
                   </div>
                 )}
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:14 }}>
@@ -1671,8 +1595,6 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUplo
           gastos={gastos}
           onAddGasto={onAddGasto}
           onUploadGastoAdjunto={onUploadGastoAdjunto}
-          onDelete={onDelete}
-          canDelete={canDelete}
           onConfirm={async (id, datos) => {
             await onUpdate(id, datos);
             setEditTarget(null);
@@ -2108,9 +2030,12 @@ function TareasView({ tareas, conductores, vehiculos, eventos, onAsignar, onAddT
         <StatCard label="Con evento" value={tareas.filter(t => t.eventoId).length} sub={`${grouped.filter(g => g.evento).length} grupos`} icon={CalendarDays} color={T.AMB} />
       </div>
 
-        <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:18, padding:'22px 24px' }}>
-          <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap', alignItems:'center', marginBottom:16 }}>
-          <div style={{ fontSize:12, color:T.mute, textTransform:'capitalize' }}>{formatRangeLabel(selectedDate, scope)} · {tareas.length} operaciones</div>
+      <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:18, padding:'22px 24px' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap', alignItems:'center', marginBottom:16 }}>
+          <div>
+            <div style={{ fontSize:18, fontWeight:800, color:T.txt }}>Tareas</div>
+            <div style={{ fontSize:12, color:T.mute, textTransform:'capitalize', marginTop:4 }}>{formatRangeLabel(selectedDate, scope)} · {tareas.length} operaciones</div>
+          </div>
           <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
             {[['Hoy', todayISO()], ['Mañana', addDaysISO(todayISO(), 1)], ['Ayer', addDaysISO(todayISO(), -1)]].map(([label, date]) => (
               <button key={label} onClick={() => onDateChange(date)} style={{ padding:'7px 11px', borderRadius:999, border:`1px solid ${selectedDate === date ? T.AMB : T.bdr2}`, background:selectedDate === date ? T.AMB : T.card2, color:selectedDate === date ? '#000' : T.sub, fontSize:12, fontWeight:700, cursor:'pointer' }}>{label}</button>
@@ -2276,7 +2201,8 @@ function TareasView({ tareas, conductores, vehiculos, eventos, onAsignar, onAddT
 // ─────────────────────────────────────────────────────────────
 // SIDEBAR
 // ─────────────────────────────────────────────────────────────
-const ROOT_TAB_ITEMS = [
+function Sidebar({ active, setView, user, onLogout }) {
+  const items = [
     { id:'dashboard',   Icon:LayoutDashboard, label:'Dashboard'      },
     { id:'socios',      Icon:User,            label:'Socios'          },
     { id:'cotizaciones',Icon:Calculator,      label:'Proformas'      },
@@ -2289,10 +2215,7 @@ const ROOT_TAB_ITEMS = [
     { id:'reportes',    Icon:BarChart3,       label:'Reportes'       },
     { id:'usuarios',    Icon:Shield,          label:'Seguridad'      , role: 'admin' },
     { id:'config',      Icon:Settings,        label:'Configuración'  , role: 'admin' },
-];
-
-function Sidebar({ active, onOpenView, user, onLogout, token, onVoiceInterpretation, theme, onToggleTheme }) {
-  const items = ROOT_TAB_ITEMS;
+  ];
 
   const filteredItems = items.filter(item => !item.role || item.role === user?.rol);
 
@@ -2316,7 +2239,7 @@ function Sidebar({ active, onOpenView, user, onLogout, token, onVoiceInterpretat
         {filteredItems.map(({ id, Icon: MenuIcon, label }) => {
           const isActive = active === id;
           return (
-            <button key={id} onClick={() => onOpenView(id)}
+            <button key={id} onClick={() => setView(id)}
               style={{ display:'flex', alignItems:'center', gap:10, width:'100%', padding:'9px 12px',
                 borderRadius:8, border:'none', cursor:'pointer', marginBottom:2, textAlign:'left',
                 background: isActive ? T.ambDim : 'transparent',
@@ -2329,25 +2252,6 @@ function Sidebar({ active, onOpenView, user, onLogout, token, onVoiceInterpretat
       </nav>
 
       <div style={{ padding:'16px', borderTop:`1px solid ${T.bdr}`, background:T.card2 }}>
-        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:12 }}>
-          <VoiceAssistantButton token={token} onInterpretation={onVoiceInterpretation} />
-          <button onClick={onToggleTheme}
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: 12,
-              border: `1px solid ${T.AMB}44`,
-              background: `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
-              color: T.AMB,
-              cursor:'pointer',
-              display:'flex',
-              alignItems:'center',
-              justifyContent:'center',
-              boxShadow: '0 10px 30px rgba(15,23,42,0.12)',
-            }}>
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </div>
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
           <img
             src={user?.foto_url || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png'}
@@ -2475,6 +2379,7 @@ function GanttTooltip({ tooltip }) {
 function GastosView({ gastos, vehiculos }) {
   return (
     <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'20px 24px' }}>
+      <SectionHeader title="Gastos de unidades" />
       {gastos.length === 0 ? (
         <div style={{ padding:30, textAlign:'center', color:T.mute, fontSize:13 }}>Aun no hay gastos registrados.</div>
       ) : (
@@ -2499,11 +2404,12 @@ function GastosView({ gastos, vehiculos }) {
   );
 }
 
-function PlaceholderView({ icono: PlaceholderIcon }) {
+function PlaceholderView({ titulo, icono: PlaceholderIcon }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
       height:400, gap:16 }}>
       {createElement(PlaceholderIcon, { size: 48, color: T.mute })}
+      <div style={{ fontSize:18, fontWeight:600, color:T.sub }}>{titulo}</div>
       <div style={{ fontSize:13, color:T.mute }}>Módulo en desarrollo — próxima sesión</div>
     </div>
   );
@@ -2514,7 +2420,7 @@ function PlaceholderView({ icono: PlaceholderIcon }) {
 // ─────────────────────────────────────────────────────────────
 function AppContent() {
   const { isAuthenticated, user, token, logout } = useAuth();
-  const { tabs, activeTabId, openTab, closeTab, updateTabData, getTabData } = useTabs();
+  const [view,        setView]      = useState('dashboard');
   const [selectedTaskDate, setSelectedTaskDate] = useState(todayISO());
   const [taskScope, setTaskScope] = useState('day');
   const [tareas,      setTareas]    = useState([]);
@@ -2531,27 +2437,10 @@ function AppContent() {
   const [focusedTaskId, setFocusedTaskId] = useState(null);
   const [focusedEventId, setFocusedEventId] = useState(null);
   const [cotizadorHeaderMeta, setCotizadorHeaderMeta] = useState({ tc: null });
-  const rootTabs = useMemo(() => tabs.filter(tab => tab.scope === 'root'), [tabs]);
-  const activeTab = useMemo(() => tabs.find(tab => tab.id === activeTabId) || null, [activeTabId, tabs]);
-  const activeRootTab = useMemo(() => rootTabs.find(tab => tab.id === activeTabId) || rootTabs[0] || null, [activeTabId, rootTabs]);
-  const view = activeTab?.scope === 'root' ? activeTab?.view : activeTab?.parentView || activeRootTab?.view || null;
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
-
-  const openRootView = useCallback((viewId) => {
-    const item = ROOT_TAB_ITEMS.find(entry => entry.id === viewId);
-    if (!item) return;
-    openTab({
-      id: `root-${viewId}`,
-      scope: 'root',
-      view: viewId,
-      label: item.label,
-      icon: item.Icon,
-      closable: true,
-    });
-  }, [openTab]);
 
   // ── Helper para llamadas autenticadas ──────────────────────
   const apiFetch = useCallback(async (path, opts = {}) => {
@@ -2684,66 +2573,27 @@ function AppContent() {
     const draft = normalizeVoiceInterpretation(interpretation, transcript);
     setVoiceDraft(draft);
     if (draft.route && draft.route !== view) {
-      openRootView(draft.route);
+      setView(draft.route);
     }
-  }, [openRootView, view]);
+  }, [view]);
 
   const handleVoiceDraftApplied = useCallback((draftId) => {
     setVoiceDraft(prev => (prev?.id === draftId ? null : prev));
   }, []);
 
-  const handleOpenSocioTab = useCallback((socio) => {
-    if (!socio?.id) return;
-    const tabId = `socio-${socio.id}`;
-    updateTabData(tabId, { socioId: socio.id });
-    openTab({
-      id: tabId,
-      scope: 'detail',
-      parentView: 'socios',
-      view: 'socio-detalle',
-      label: socio.nombre || `Socio ${socio.id}`,
-      closable: true,
-    });
-  }, [openTab, updateTabData]);
-
-  const handleOpenProformaTab = useCallback((tabConfig, snapshot) => {
-    if (!tabConfig?.id) return;
-    const existingTab = (tabConfig.sourceId || snapshot?.selectedId)
-      ? tabs.find(item => item.view === 'proforma-detalle' && (item.sourceId === tabConfig.sourceId || item.sourceId === snapshot?.selectedId))
-      : null;
-    const targetTabId = existingTab?.id || tabConfig.id;
-    updateTabData(targetTabId, snapshot || {});
-    openTab({
-      id: targetTabId,
-      scope: 'detail',
-      parentView: 'cotizaciones',
-      view: 'proforma-detalle',
-      label: tabConfig.label || 'Nueva proforma',
-      sourceId: tabConfig.sourceId || snapshot?.selectedId || existingTab?.sourceId || null,
-      closable: true,
-    });
-  }, [openTab, tabs, updateTabData]);
-
-  const handleProformaSnapshotChange = useCallback((tabId, snapshot) => {
-    if (!tabId) return;
-    updateTabData(tabId, snapshot || {});
-  }, [updateTabData]);
-
-  const handleProformaTabMetaChange = useCallback((tabId, meta) => {
-    if (!tabId) return;
-    if (meta?.snapshot) {
-      updateTabData(tabId, meta.snapshot);
-    }
-    openTab({
-      id: tabId,
-      scope: 'detail',
-      parentView: 'cotizaciones',
-      view: 'proforma-detalle',
-      label: meta?.label || 'Nueva proforma',
-      sourceId: meta?.sourceId || null,
-      closable: true,
-    });
-  }, [openTab, updateTabData]);
+  if (!isAuthenticated) return <LoginView />;
+  if (loading) {
+    return (
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center',
+        minHeight:'100vh', background:T.bg, flexDirection:'column', gap:16 }}>
+        <div style={{ width:32, height:32, border:`3px solid ${T.bdr2}`,
+          borderTop:`3px solid ${T.AMB}`, borderRadius:'50%',
+          animation:'spin 0.8s linear infinite' }} />
+        <span style={{ color:T.mute, fontSize:13 }}>Cargando datos…</span>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
   // ── Handlers que persisten en la BD ───────────────────────
   function handleAsignar(tarea) { setModal(tarea); }
@@ -2753,7 +2603,7 @@ function AppContent() {
     setFocusedTaskId(task.id);
     setFocusedEventId(task.eventoId || null);
     setSelectedTaskDate(task.fecha || todayISO());
-    openRootView('tareas');
+    setView('tareas');
   }
 
   function handleTaskDateChange(nextDate) {
@@ -2854,7 +2704,7 @@ function AppContent() {
     setFocusedEventId(nuevoEvento.id);
     if (tasksToAssociate[0]) {
       setFocusedTaskId(tasksToAssociate[0].id);
-      openRootView('tareas');
+      setView('tareas');
     }
     return nuevoEvento;
   }
@@ -2893,18 +2743,6 @@ function AppContent() {
     }
   }
 
-  async function handleDeleteConductor(id) {
-    try {
-      await apiFetch(`${API}/conductores/${id}`, { method: 'DELETE' });
-      setConductores(prev => prev.filter(c => c.id !== id));
-      setVehiculos(prev => prev.map(v => v.condId === id ? { ...v, condId: null } : v));
-      setTareas(prev => prev.map(t => t.condId === id ? { ...t, condId: null } : t));
-    } catch (err) {
-      console.error('Error eliminando conductor:', err);
-      alert(err.message || 'No se pudo eliminar el conductor.');
-    }
-  }
-
   async function handleAddVehiculo(datos) {
     try {
       const { id } = await apiFetch(`${API}/vehiculos`, {
@@ -2939,17 +2777,6 @@ function AppContent() {
     }
   }
 
-  async function handleDeleteVehiculo(id) {
-    try {
-      await apiFetch(`${API}/vehiculos/${id}`, { method: 'DELETE' });
-      setVehiculos(prev => prev.filter(v => v.id !== id));
-      setTareas(prev => prev.map(t => t.vehId === id ? { ...t, vehId: null } : t));
-    } catch (err) {
-      console.error('Error eliminando vehículo:', err);
-      alert(err.message || 'No se pudo eliminar el vehículo.');
-    }
-  }
-
   async function handleAddGasto(datos) {
     try {
       const { id } = await apiFetch(`${API}/gastos`, {
@@ -2963,154 +2790,90 @@ function AppContent() {
     }
   }
 
-  const renderTabView = (tab) => {
-    switch (tab.view) {
-      case 'dashboard':
-        return <Dashboard tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} />;
-      case 'socios':
-        return (
-          <SociosView
-            voiceDraft={activeRootTab?.view === 'socios' && voiceDraft?.intent === 'socio' ? voiceDraft : null}
-            onVoiceDraftApplied={handleVoiceDraftApplied}
-            onOpenSocio={handleOpenSocioTab}
-          />
-        );
-      case 'socio-detalle': {
-        const tabData = getTabData(tab.id);
-        return <SocioDetailView socioId={tabData?.socioId} onCloseTab={() => closeTab(tab.id)} />;
-      }
-      case 'cotizaciones':
-        return (
-          <CotizadorView
-            voiceDraft={activeRootTab?.view === 'cotizaciones' && voiceDraft?.intent === 'cotizacion' ? voiceDraft : null}
-            onVoiceDraftApplied={handleVoiceDraftApplied}
-            onHeaderMetaChange={setCotizadorHeaderMeta}
-            onCreateEvento={handleAddEvento}
-            onCreateTarea={handleAddTarea}
-            onFocusTask={focusTaskInPlanner}
-            mode="root"
-            onOpenProforma={handleOpenProformaTab}
-          />
-        );
-      case 'proforma-detalle': {
-        const tabData = getTabData(tab.id);
-        return (
-          <CotizadorView
-            onHeaderMetaChange={setCotizadorHeaderMeta}
-            onCreateEvento={handleAddEvento}
-            onCreateTarea={handleAddTarea}
-            onFocusTask={focusTaskInPlanner}
-            mode="detail"
-            initialTabId={tab.id}
-            initialTabLabel={tab.label}
-            initialSnapshot={tabData}
-            onSnapshotChange={(snapshot) => handleProformaSnapshotChange(tab.id, snapshot)}
-            onTabMetaChange={(meta) => handleProformaTabMetaChange(tab.id, meta)}
-          />
-        );
-      }
-      case 'eventos':
-        return <EventosView eventos={eventos} onAdd={handleAddEvento} />;
-      case 'tareas':
-        return <TareasView key={`${selectedTaskDate}-${taskScope}`} tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} onAddTarea={handleAddTarea} selectedDate={selectedTaskDate} onDateChange={handleTaskDateChange} scope={taskScope} onScopeChange={handleTaskScopeChange} focusedTaskId={focusedTaskId} focusedEventId={focusedEventId} onCreateEventFromTasks={handleCreateEventFromTasks} onUpdateTaskStatus={handleUpdateTaskStatus} />;
-      case 'gantt':
-        return <FlotaGanttView tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onTooltipChange={setGanttTooltip} />;
-      case 'conductores':
-        return <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} onAdd={handleAddConductor} onUpdate={handleUpdateConductor} onBaja={handleBajaConductor} onDelete={handleDeleteConductor} canDelete={user?.rol === 'admin'} />;
-      case 'vehiculos':
-        return <VehiculosView vehiculos={vehiculos} conductores={conductores} onAdd={handleAddVehiculo} onBaja={handleBajaVehiculo} onUpdate={handleUpdateVehiculo} onUploadImage={uploadVehiculoImage} gastos={gastos} onAddGasto={handleAddGasto} onUploadGastoAdjunto={uploadGastoAdjunto} onDelete={handleDeleteVehiculo} canDelete={user?.rol === 'admin'} />;
-      case 'usuarios':
-        return <UsuarioMgmtView />;
-      case 'config':
-        return <ConfiguracionesView />;
-      case 'gastos':
-        return <GastosView gastos={gastos} vehiculos={vehiculos} />;
-      case 'reportes':
-        return <PlaceholderView icono={BarChart3} />;
-      default:
-        return null;
-    }
-  };
+  const pageTitle = {
+    dashboard:   'Dashboard operativo',
+    socios:      'Socios',
+    cotizaciones:'Cotizador de Transporte',
+    eventos:     'Eventos',
+    tareas:      'Tareas',
+    gantt:       'Línea de tiempo de flota',
+    conductores: 'Conductores',
+    vehiculos:   'Vehículos',
+    gastos:      'Gastos',
+    reportes:    'Reportes',
+    usuarios:    'Seguridad y Usuarios',
+    config:      'Configuración del Sistema',
+  }[view];
 
-  if (!isAuthenticated) return <LoginView />;
-  if (loading) {
-    return (
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'center',
-        minHeight:'100vh', background:T.bg, flexDirection:'column', gap:16 }}>
-        <div style={{ width:32, height:32, border:`3px solid ${T.bdr2}`,
-          borderTop:`3px solid ${T.AMB}`, borderRadius:'50%',
-          animation:'spin 0.8s linear infinite' }} />
-        <span style={{ color:T.mute, fontSize:13 }}>Cargando datos…</span>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
+  const fechaHoy = new Date().toLocaleDateString('es-CR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+  const headerSubline = view === 'cotizaciones' && cotizadorHeaderMeta?.tc
+    ? `${fechaHoy} | TC ₡${Number(cotizadorHeaderMeta.tc).toLocaleString('es-CR')}`
+    : view === 'tareas'
+      ? `${formatRangeLabel(selectedTaskDate, taskScope)}${loadingTasks ? ' · actualizando…' : ''}`
+      : fechaHoy;
 
   return (
     <div style={{ display:'flex', minHeight:'100vh', background:T.bg, fontFamily:"system-ui,-apple-system,sans-serif",
       color:T.txt, fontSize:14, lineHeight:1.5 }}>
-      <Sidebar active={view} onOpenView={openRootView} user={user} onLogout={logout} token={token} onVoiceInterpretation={handleVoiceInterpretation} theme={theme} onToggleTheme={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')} />
+      <Sidebar active={view} setView={setView} user={user} onLogout={logout} />
 
       <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
         <AlertBar tareas={tareas} />
-        <GlobalTabs />
+
+        <div style={{ padding:'20px 28px 16px', borderBottom:`1px solid ${T.bdr}`,
+          display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <div>
+            <h1 style={{ margin:0, fontSize:20, fontWeight:700, color:T.txt }}>{pageTitle}</h1>
+            <div style={{ fontSize:12, color:T.mute, marginTop:2, textTransform:'capitalize' }}>{headerSubline}</div>
+          </div>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <VoiceAssistantButton token={token} onInterpretation={handleVoiceInterpretation} />
+            <button onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+              style={{ 
+                width: 42,
+                height: 42,
+                borderRadius: 12,
+                border: `1px solid ${T.AMB}44`,
+                background: `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
+                color: T.AMB, 
+                cursor:'pointer', 
+                display:'flex', 
+                alignItems:'center', 
+                justifyContent:'center',
+                boxShadow: '0 10px 30px rgba(15,23,42,0.12)',
+              }}>
+              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+          </div>
+        </div>
 
         <div style={{ flex:1, padding:28, overflowY:'auto', overflowX:'hidden', scrollbarGutter:'stable' }}>
-          {rootTabs.length === 0 ? (
-            <div style={{
-              minHeight: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              <div style={{
-                maxWidth: 520,
-                width: '100%',
-                padding: 28,
-                borderRadius: 20,
-                border: `1px solid ${T.bdr}`,
-                background: `linear-gradient(180deg, ${T.card}, ${T.card2})`,
-                boxShadow: '0 24px 60px rgba(15,23,42,0.12)',
-              }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: T.txt, marginBottom: 10 }}>
-                  Abre tu primer modulo
-                </div>
-                <div style={{ fontSize: 14, color: T.sub, marginBottom: 18 }}>
-                  Las pestanas superiores apareceran solo cuando abras una opcion del menu. Asi puedes trabajar con varios modulos al mismo tiempo sin llenar la parte superior con vistas que no estas usando.
-                </div>
-                <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-                  {ROOT_TAB_ITEMS.filter(item => !item.role || item.role === user?.rol).slice(0, 4).map(({ id, label, Icon }) => (
-                    <button
-                      key={id}
-                      onClick={() => openRootView(id)}
-                      style={{
-                        display:'inline-flex',
-                        alignItems:'center',
-                        gap:8,
-                        padding:'10px 14px',
-                        borderRadius:12,
-                        border:`1px solid ${T.bdr2}`,
-                        background:T.card,
-                        color:T.txt,
-                        cursor:'pointer',
-                        fontWeight:700,
-                      }}
-                    >
-                      {createElement(Icon, { size: 16 })}
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : tabs.map(tab => (
-            <div
-              key={tab.id}
-              style={{ display: tab.id === activeTabId ? 'block' : 'none', height:'100%' }}
-            >
-              {renderTabView(tab)}
-            </div>
-          ))}
+          {view === 'dashboard'   && <Dashboard   tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} />}
+          {view === 'socios'      && (
+            <SociosView
+              voiceDraft={voiceDraft?.intent === 'socio' ? voiceDraft : null}
+              onVoiceDraftApplied={handleVoiceDraftApplied}
+            />
+          )}
+          {view === 'cotizaciones'&& (
+            <CotizadorView
+              voiceDraft={voiceDraft?.intent === 'cotizacion' ? voiceDraft : null}
+              onVoiceDraftApplied={handleVoiceDraftApplied}
+              onHeaderMetaChange={setCotizadorHeaderMeta}
+              onCreateEvento={handleAddEvento}
+              onCreateTarea={handleAddTarea}
+              onFocusTask={focusTaskInPlanner}
+            />
+          )}
+          {view === 'eventos'     && <EventosView eventos={eventos} onAdd={handleAddEvento} />}
+          {view === 'tareas'      && <TareasView key={`${selectedTaskDate}-${taskScope}`} tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} onAddTarea={handleAddTarea} selectedDate={selectedTaskDate} onDateChange={handleTaskDateChange} scope={taskScope} onScopeChange={handleTaskScopeChange} focusedTaskId={focusedTaskId} focusedEventId={focusedEventId} onCreateEventFromTasks={handleCreateEventFromTasks} onUpdateTaskStatus={handleUpdateTaskStatus} />}
+          {view === 'gantt'       && <FlotaGanttView tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onTooltipChange={setGanttTooltip} />}
+    {view === 'conductores' && <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} onAdd={handleAddConductor} onUpdate={handleUpdateConductor} onBaja={handleBajaConductor} />}
+    {view === 'vehiculos'   && <VehiculosView vehiculos={vehiculos} conductores={conductores} onAdd={handleAddVehiculo} onBaja={handleBajaVehiculo} onUpdate={handleUpdateVehiculo} onUploadImage={uploadVehiculoImage} gastos={gastos} onAddGasto={handleAddGasto} onUploadGastoAdjunto={uploadGastoAdjunto} />}
+          {view === 'usuarios'    && <UsuarioMgmtView />}
+          {view === 'config'      && <ConfiguracionesView />}
+          {view === 'gastos'      && <GastosView gastos={gastos} vehiculos={vehiculos} />}
+          {view === 'reportes'    && <PlaceholderView titulo="Módulo de Reportes" icono={BarChart3} />}
         </div>
       </div>
 
@@ -3137,9 +2900,7 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <TabsProvider>
-        <AppContent />
-      </TabsProvider>
+      <AppContent />
     </AuthProvider>
   );
 }

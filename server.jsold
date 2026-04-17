@@ -876,6 +876,16 @@ async function ensureDatabaseCompatibility() {
         `);
 
         await pgQuery(`
+            ALTER TABLE tareas
+            ALTER COLUMN evento_id DROP NOT NULL
+        `).catch(() => null);
+
+        await pgQuery(`
+            ALTER TABLE tareas
+            ADD COLUMN IF NOT EXISTS notas_operativas TEXT
+        `);
+
+        await pgQuery(`
             CREATE TABLE IF NOT EXISTS tms_gastos (
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
                 vehiculo_id UUID REFERENCES vehiculos(id) ON DELETE SET NULL,
@@ -1229,83 +1239,9 @@ app.get('/api/tms/usuarios', authenticateToken, async (req, res) => {
     if (req.user.rol !== 'admin') return res.sendStatus(403);
     try {
         const result = await pgQuery(
-            `SELECT id, nombre, username, email, rol, activo, foto_url, created_at
-             FROM usuarios
-             WHERE activo = TRUE
-             ORDER BY nombre ASC`
+            'SELECT id, nombre, email, rol, activo, created_at FROM usuarios ORDER BY nombre ASC'
         );
         res.json(result.rows);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.post('/api/tms/usuarios', authenticateToken, requireAdmin, async (req, res) => {
-    const { nombre, username, email, password, rol, foto_url } = req.body || {};
-
-    if (!nombre?.trim() || !username?.trim() || !email?.trim() || !password?.trim()) {
-        return res.status(400).json({ error: 'Nombre, usuario, email y contraseña son obligatorios.' });
-    }
-
-    const allowedRoles = new Set(['admin', 'operador', 'supervisor', 'conductor']);
-    const normalizedRole = allowedRoles.has(rol) ? rol : 'operador';
-
-    try {
-        const passwordHash = await bcrypt.hash(password, 10);
-        const result = await pgQuery(
-            `INSERT INTO usuarios (nombre, username, email, password_hash, rol, foto_url)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING id, nombre, username, email, rol, activo, foto_url, created_at`,
-            [
-                nombre.trim(),
-                username.trim(),
-                email.trim().toLowerCase(),
-                passwordHash,
-                normalizedRole,
-                foto_url?.trim() || null,
-            ]
-        );
-
-        res.status(201).json({ success: true, ...result.rows[0] });
-    } catch (error) {
-        if (error?.code === '23505') {
-            return res.status(409).json({ error: 'El usuario o el correo ya existen.' });
-        }
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.delete('/api/tms/usuarios/:id', authenticateToken, requireAdmin, async (req, res) => {
-    const { id } = req.params;
-
-    try {
-        const currentUser = await pgQuery(
-            'SELECT id, es_root FROM usuarios WHERE id = $1',
-            [id]
-        );
-        const user = currentUser.rows[0];
-
-        if (!user) {
-            return res.status(404).json({ error: 'Usuario no encontrado.' });
-        }
-
-        if (user.es_root) {
-            return res.status(400).json({ error: 'No se puede desactivar el usuario root.' });
-        }
-
-        if (user.id === req.user.id) {
-            return res.status(400).json({ error: 'No puedes desactivar tu propio usuario.' });
-        }
-
-        await pgQuery(
-            `UPDATE usuarios
-             SET activo = FALSE,
-                 updated_at = NOW()
-             WHERE id = $1`,
-            [id]
-        );
-
-        res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -1417,37 +1353,6 @@ app.patch('/api/tms/conductores/:id/baja', authenticateToken, async (req, res) =
     }
 });
 
-app.delete('/api/tms/conductores/:id', authenticateToken, requireAdmin, async (req, res) => {
-    const { id } = req.params;
-    try {
-        await ensureDatabaseCompatibility();
-        await pgQuery(
-            `UPDATE vehiculos
-             SET conductor_asignado_id = NULL
-             WHERE conductor_asignado_id = $1`,
-            [id]
-        );
-        await pgQuery(
-            `UPDATE tareas
-             SET conductor_id = NULL
-             WHERE conductor_id = $1`,
-            [id]
-        );
-        const result = await pgQuery(
-            `DELETE FROM conductores
-             WHERE id = $1
-             RETURNING id`,
-            [id]
-        );
-        if (!result.rowCount) {
-            return res.status(404).json({ error: 'Conductor no encontrado.' });
-        }
-        res.json({ success: true });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
 app.post('/api/tms/uploads/vehiculos', authenticateToken, async (req, res) => {
     const { filename, dataUrl } = req.body || {};
     try {
@@ -1517,15 +1422,15 @@ app.get('/api/tms/vehiculos', authenticateToken, async (req, res) => {
     try {
         await ensureDatabaseCompatibility();
         const result = await pgQuery(
-              `SELECT id, placa, marca, modelo, tipo, capacidad_pasajeros AS cap, estado,
-                      conductor_asignado_id AS "condId", fecha_revision_tecnica AS "revTec", fecha_marchamo AS march, km_actual AS km,
-                      foto_url, licencia_requerida AS "licenciaRequerida",
-                      colaborador, combustible_costo, combustible_tipo, rendimiento, peajes, viaticos, utilidad,
-                      adic_col, adic_viat, tarifa_gam, media_tarifa, t_in_sj, t_out_sj, t_in_ctg, t_out_ctg,
-                      hospedaje, viatico_diario, activo
-               FROM vehiculos
-               WHERE activo = TRUE
-               ORDER BY placa ASC`
+            `SELECT id, placa, marca, modelo, tipo, capacidad_pasajeros AS cap, estado,
+                    conductor_asignado_id AS "condId", fecha_revision_tecnica AS "revTec", fecha_marchamo AS march, km_actual AS km,
+                    foto_url, licencia_requerida AS "licenciaRequerida",
+                    colaborador, combustible_costo, combustible_tipo, peajes, viaticos, utilidad,
+                    adic_col, adic_viat, tarifa_gam, media_tarifa, t_in_sj, t_out_sj, t_in_ctg, t_out_ctg,
+                    hospedaje, viatico_diario, activo
+             FROM vehiculos
+             WHERE activo = TRUE
+             ORDER BY placa ASC`
         );
         res.json(result.rows);
     } catch (error) {
@@ -1610,34 +1515,13 @@ app.patch('/api/tms/vehiculos/:id/baja', authenticateToken, async (req, res) => 
     const { id } = req.params;
     try {
         await pgQuery(
-            `UPDATE vehiculos SET estado = 'fuera_de_servicio', cond_id = NULL, updated_at = NOW() WHERE id = $1`,
+            `UPDATE vehiculos
+             SET estado = 'fuera_de_servicio',
+                 conductor_asignado_id = NULL,
+                 updated_at = NOW()
+             WHERE id = $1`,
             [id]
         );
-        res.json({ success: true });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.delete('/api/tms/vehiculos/:id', authenticateToken, requireAdmin, async (req, res) => {
-    const { id } = req.params;
-    try {
-        await ensureDatabaseCompatibility();
-        await pgQuery(
-            `UPDATE tareas
-             SET vehiculo_id = NULL
-             WHERE vehiculo_id = $1`,
-            [id]
-        );
-        const result = await pgQuery(
-            `DELETE FROM vehiculos
-             WHERE id = $1
-             RETURNING id`,
-            [id]
-        );
-        if (!result.rowCount) {
-            return res.status(404).json({ error: 'Vehículo no encontrado.' });
-        }
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -2641,13 +2525,6 @@ ensureTipoCambioTable().then(async () => {
     } catch (e) {
         console.warn('No se pudo inicializar tipo de cambio:', e.message);
     }
-});
-
-// ─────────────────────────────────────────────────────────────
-// STATIC FILES
-// ─────────────────────────────────────────────────────────────
-app.get('/designroute.html', (req, res) => {
-    res.sendFile(path.join(__dirname, 'designroute.html'));
 });
 
 // ─────────────────────────────────────────────────────────────

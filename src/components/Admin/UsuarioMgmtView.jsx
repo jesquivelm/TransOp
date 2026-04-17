@@ -89,10 +89,7 @@ export default function UsuarioMgmtView() {
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: T.txt }}>Gestión de Usuarios</h2>
-          <p style={{ margin: '4px 0 0', color: T.mute, fontSize: 13 }}>Administra el personal que tiene acceso al sistema</p>
-        </div>
+        <div />
         <button 
           onClick={() => setShowModal(true)}
           style={{ 
