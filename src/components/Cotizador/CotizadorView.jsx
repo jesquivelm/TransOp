@@ -9,13 +9,20 @@ import {
   Eye,
   FileText,
   Link,
+  LoaderCircle,
   Map,
+  MessageSquare,
+  Mic,
+  MicOff,
+  Pause,
   Pencil,
+  Play,
   Plus,
   RefreshCcw,
   Save,
   Search,
   Trash2,
+  Upload,
   User,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -118,6 +125,113 @@ const mapIconButtonStyle = {
 };
 
 const DEFAULT_MAP_CENTER = { lat: 9.7489, lng: -83.7534 };
+const PROFORMA_ATTACHMENT_CLASSIFICATIONS = [
+  { value: 'general', label: 'General' },
+  { value: 'documento', label: 'Documento' },
+  { value: 'foto', label: 'Foto' },
+  { value: 'audio', label: 'Audio' },
+  { value: 'video', label: 'Video' },
+  { value: 'contrato', label: 'Contrato' },
+  { value: 'respaldo', label: 'Respaldo' },
+];
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error(`No se pudo leer el archivo ${file?.name || ''}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatBytes(bytes = 0) {
+  const value = Number(bytes || 0);
+  if (!value) return '0 B';
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function inferAttachmentKind(mimeType = '', filename = '') {
+  const lowerMime = String(mimeType || '').toLowerCase();
+  const lowerName = String(filename || '').toLowerCase();
+  if (lowerMime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|heic)$/i.test(lowerName)) return 'foto';
+  if (lowerMime.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|webm)$/i.test(lowerName)) return 'audio';
+  if (lowerMime.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm)$/i.test(lowerName)) return 'video';
+  return 'documento';
+}
+
+function normalizeConversationLog(log = []) {
+  if (!Array.isArray(log)) return [];
+  return log
+    .map((item, index) => ({
+      id: item?.id || `conv-${index}-${String(item?.role || 'message')}`,
+      role: item?.role === 'assistant' ? 'assistant' : 'user',
+      text: String(item?.text || '').trim(),
+      createdAt: item?.createdAt || item?.timestamp || '',
+    }))
+    .filter(item => item.text);
+}
+
+function normalizeVoiceFeedback(feedback = null) {
+  if (!feedback || typeof feedback !== 'object') return null;
+  return {
+    message: String(feedback.message || '').trim(),
+    missingFields: Array.isArray(feedback.missingFields) ? feedback.missingFields : [],
+    interpretationNotes: Array.isArray(feedback.interpretationNotes) ? feedback.interpretationNotes : [],
+    conversationLog: normalizeConversationLog(feedback.conversationLog),
+    routePreview: feedback.routePreview || null,
+  };
+}
+
+function normalizeProformaAttachment(item = {}, fallbackIndex = 0) {
+  const mimeType = String(item.mimeType || item.tipoMime || '').trim();
+  const nombreOriginal = String(item.nombreOriginal || item.nombre || item.filename || `Adjunto ${fallbackIndex + 1}`).trim();
+  return {
+    id: item.id || `adj-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    numero: Number(item.numero || fallbackIndex + 1) || (fallbackIndex + 1),
+    descripcion: String(item.descripcion || '').trim(),
+    clasificacion: String(item.clasificacion || inferAttachmentKind(mimeType, nombreOriginal) || 'general').trim() || 'general',
+    fechaEntrada: item.fechaEntrada || item.fecha_entrada || todayISO(),
+    guardadoPor: String(item.guardadoPor || item.guardado_por || '').trim(),
+    guardadoPorId: item.guardadoPorId || item.guardado_por_id || null,
+    nombreOriginal,
+    archivoPath: String(item.archivoPath || item.path || '').trim(),
+    mimeType,
+    sizeBytes: Number(item.sizeBytes || item.size || 0) || 0,
+    tipoArchivo: String(item.tipoArchivo || inferAttachmentKind(mimeType, nombreOriginal)).trim() || 'documento',
+    createdAt: item.createdAt || item.created_at || '',
+  };
+}
+
+function normalizeProformaAttachments(items = []) {
+  if (!Array.isArray(items)) return [];
+  return items.map((item, index) => normalizeProformaAttachment(item, index));
+}
+
+function beautifyPlaceLabel(value = '') {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const parts = text.split(',').map(part => part.trim()).filter(Boolean);
+  if (!parts.length) return text;
+  const filtered = parts.filter((part, index) => {
+    if (index === 0) return true;
+    return !/^\d+[a-zA-Z-]*$/.test(part);
+  });
+  const compact = filtered.slice(0, 3).join(', ');
+  return compact || parts.slice(0, 3).join(', ');
+}
+
+function guessAudioExtension(mimeType = '') {
+  const normalized = String(mimeType || '').toLowerCase();
+  if (normalized.includes('mp4')) return 'm4a';
+  if (normalized.includes('mpeg') || normalized.includes('mp3')) return 'mp3';
+  if (normalized.includes('ogg')) return 'ogg';
+  if (normalized.includes('wav')) return 'wav';
+  if (normalized.includes('webm')) return 'webm';
+  return 'webm';
+}
 const COSTA_RICA_BOUNDS = [
   [8.0, -86.2],
   [11.4, -82.3],
@@ -212,7 +326,7 @@ function MapLocationPicker({
         },
       });
       const result = await response.json().catch(() => ({}));
-      const nextLabel = result?.display_name || `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`;
+      const nextLabel = beautifyPlaceLabel(result?.display_name || '') || `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`;
       setResolvedLabel(nextLabel);
       setQuery(nextLabel);
       setStatus('Ubicacion lista para guardar.');
@@ -255,8 +369,9 @@ function MapLocationPicker({
       const nextPoint = { lat: Number(result.lat), lng: Number(result.lon) };
       placeMarker(nextPoint);
       setSelectedPoint(nextPoint);
-      setResolvedLabel(result.display_name || trimmed);
-      setQuery(result.display_name || trimmed);
+      const nextLabel = beautifyPlaceLabel(result.display_name || '') || trimmed;
+      setResolvedLabel(nextLabel);
+      setQuery(nextLabel);
       setStatus('Ubicacion encontrada. Puedes ajustar el pin si hace falta.');
       if (mapRef.current) {
         mapRef.current.setZoom(Math.max(mapRef.current.getZoom() || 0, 16));
@@ -565,6 +680,10 @@ function toIsoDate(dateStr) {
   return '';
 }
 
+function todayISO() {
+  return new Date().toISOString().split('T')[0];
+}
+
 function newSocio() {
   return {
     cfNumero: '',
@@ -597,7 +716,7 @@ function newSocio() {
 
 function buildAutoDescription(socio) {
   const parts = [];
-  const route = [socio.sOrigen, socio.sDestino].filter(Boolean).join(' -> ');
+  const route = [beautifyPlaceLabel(socio.sOrigen), beautifyPlaceLabel(socio.sDestino)].filter(Boolean).join(' -> ');
   const when = [socio.sFecha, socio.sHora].filter(Boolean).join(' ');
 
   if (route) parts.push(`Servicio de transporte ${route}.`);
@@ -1046,6 +1165,61 @@ function hydrateProformaUnits({ savedUnits = [], socioData = {}, paramsData = {}
     ferry: paramsData.ferry,
     vehiculoId,
   }, vehiculos, vehiculoId, fuelPrices, paramsData.tc || PARAMS_DEFAULT.tc)];
+}
+
+function buildCotizadorStateFromSnapshot(snapshot, options = {}) {
+  if (!snapshot) return null;
+
+  const fallbackTc = Number(snapshot.params?.tc) || options.fallbackTc || DEFAULT_CRC_PER_USD;
+  const fallbackEmpresaData = options.empresaData || {};
+  const vehiculos = options.vehiculos || [];
+  const fuelPrices = options.fuelPrices || null;
+
+  const safeUnits = (snapshot.units || []).map(u => ({
+    ...normalizeUnitMoney(u, fallbackTc),
+    id: u.id || `unit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    km: Number(u.km) || 0,
+    sPax: Number(u.sPax) || 1,
+  }));
+
+  const safeParams = snapshot.params ? {
+    ...normalizeStoredParams(snapshot.params, { fallbackTc, empresaData: fallbackEmpresaData }),
+    adicCol: Number(snapshot.params.adicCol) || 0,
+    adicViat: Number(snapshot.params.adicViat) || 0,
+    hospedaje: Number(snapshot.params.hospedaje) || 0,
+    noches: Number(snapshot.params.noches) || 0,
+    persHosp: Number(snapshot.params.persHosp) || 0,
+    persViat: Number(snapshot.params.persViat) || 0,
+    hospedajeTotalManual: Number(snapshot.params.hospedajeTotalManual) || 0,
+  } : { ...buildDefaultParams({ tc: fallbackTc, empresaData: fallbackEmpresaData }) };
+
+  const nextUnits = safeUnits.length
+    ? safeUnits
+    : [createProformaUnit({}, vehiculos, null, fuelPrices, safeParams.tc)];
+
+  return {
+    selectedId: snapshot.selectedId || null,
+    params: safeParams,
+    socio: snapshot.socio ? { ...newSocio(), ...snapshot.socio } : newSocio(),
+    units: nextUnits,
+    itineraryRows: sanitizeItineraryRows(snapshot.itineraryRows || []),
+    proformaComments: String(snapshot.proformaComments || ''),
+    proformaAttachments: normalizeProformaAttachments(snapshot.proformaAttachments || []),
+    vehiculoActivo: snapshot.vehiculoActivo || (vehiculos[0]?.id || null),
+    activeUnitId: snapshot.activeUnitId || (nextUnits.length ? nextUnits[0].id : null),
+    activeUnitTab: snapshot.activeUnitTab || 'operacion',
+    voiceFeedback: normalizeVoiceFeedback(snapshot.voiceFeedback),
+    clienteFromBD: Boolean(snapshot.clienteFromBD),
+    autoSaveEnabled: Boolean(snapshot.autoSaveEnabled),
+    openSection: snapshot.openSection || '',
+    socioSearch: snapshot.socioSearch || '',
+    showSocioSuggestions: Boolean(snapshot.showSocioSuggestions),
+    showStatusMenu: Boolean(snapshot.showStatusMenu),
+    mapPickerField: snapshot.mapPickerField || '',
+    distanceStatus: snapshot.distanceStatus || '',
+    savedMsg: snapshot.savedMsg || '',
+    operationMsg: snapshot.operationMsg || '',
+  };
 }
 
 function createItineraryRow(base = {}) {
@@ -1597,6 +1771,18 @@ export default function CotizadorView({
       ? { [detailTabId]: initialSnapshot }
       : {}
   ));
+  const initialDetailState = useMemo(
+    () => (isExternalDetailMode && initialSnapshot
+      ? buildCotizadorStateFromSnapshot(initialSnapshot)
+      : null),
+    [initialSnapshot, isExternalDetailMode]
+  );
+  const initialDetailHydrationKey = useMemo(
+    () => (isExternalDetailMode && initialSnapshot
+      ? `${detailTabId}:${initialSnapshot.selectedId || initialSnapshot.socio?.cfNumero || 'new'}`
+      : ''),
+    [detailTabId, initialSnapshot, isExternalDetailMode]
+  );
 
   // Persistencia de pestañas en localStorage para evitar pérdida de datos al cambiar de módulo
   useEffect(() => {
@@ -1622,29 +1808,29 @@ export default function CotizadorView({
       localStorage.setItem('tms_cotizador_tabs_data', JSON.stringify(tabsData));
     }
   }, [tabs, tabsData]);
-  const [openSection, setOpenSection] = useState('');
-  const [vehiculoActivo, setVehiculoActivo] = useState(null);
-  const [units, setUnits] = useState([createProformaUnit()]);
-  const [activeUnitId, setActiveUnitId] = useState(null);
-  const [activeUnitTab, setActiveUnitTab] = useState('operacion');
-  const [params, setParams] = useState(() => buildDefaultParams());
+  const [openSection, setOpenSection] = useState(() => initialDetailState?.openSection || '');
+  const [vehiculoActivo, setVehiculoActivo] = useState(() => initialDetailState?.vehiculoActivo || null);
+  const [units, setUnits] = useState(() => initialDetailState?.units || [createProformaUnit()]);
+  const [activeUnitId, setActiveUnitId] = useState(() => initialDetailState?.activeUnitId || null);
+  const [activeUnitTab, setActiveUnitTab] = useState(() => initialDetailState?.activeUnitTab || 'operacion');
+  const [params, setParams] = useState(() => initialDetailState?.params || buildDefaultParams());
   const [draftDefaults, setDraftDefaults] = useState(() => buildDefaultParams());
-  const [socio, setSocio] = useState(newSocio());
+  const [socio, setSocio] = useState(() => initialDetailState?.socio || newSocio());
   const [resData, setResData] = useState({});
   const [historial, setHistorial] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const [savedMsg, setSavedMsg] = useState('');
-  const [voiceFeedback, setVoiceFeedback] = useState(null);
-  const [distanceStatus, setDistanceStatus] = useState('');
+  const [selectedId, setSelectedId] = useState(() => initialDetailState?.selectedId || null);
+  const [savedMsg, setSavedMsg] = useState(() => initialDetailState?.savedMsg || '');
+  const [voiceFeedback, setVoiceFeedback] = useState(() => initialDetailState?.voiceFeedback || null);
+  const [distanceStatus, setDistanceStatus] = useState(() => initialDetailState?.distanceStatus || '');
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [socioSearch, setSocioSearch] = useState('');
-  const [showSocioSuggestions, setShowSocioSuggestions] = useState(false);
-  const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
-  const [showStatusMenu, setShowStatusMenu] = useState(false);
-  const [mapPickerField, setMapPickerField] = useState('');
-  const [clienteFromBD, setClienteFromBD] = useState(false);
+  const [socioSearch, setSocioSearch] = useState(() => initialDetailState?.socioSearch || '');
+  const [showSocioSuggestions, setShowSocioSuggestions] = useState(() => initialDetailState?.showSocioSuggestions || false);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(() => initialDetailState?.autoSaveEnabled || false);
+  const [showStatusMenu, setShowStatusMenu] = useState(() => initialDetailState?.showStatusMenu || false);
+  const [mapPickerField, setMapPickerField] = useState(() => initialDetailState?.mapPickerField || '');
+  const [clienteFromBD, setClienteFromBD] = useState(() => initialDetailState?.clienteFromBD || false);
   const [scheduledTasksByDate, setScheduledTasksByDate] = useState({});
   const [conductores, setConductores] = useState([]);
   const [showConductorPicker, setShowConductorPicker] = useState(false);
@@ -1655,8 +1841,15 @@ export default function CotizadorView({
     monedaDefault: BASE_CURRENCY,
     transfers: createDefaultTransferCatalog(DEFAULT_CRC_PER_USD),
   }));
-  const [itineraryRows, setItineraryRows] = useState([]);
-  const [operationMsg, setOperationMsg] = useState('');
+  const [itineraryRows, setItineraryRows] = useState(() => initialDetailState?.itineraryRows || []);
+  const [proformaComments, setProformaComments] = useState(() => initialDetailState?.proformaComments || '');
+  const [proformaAttachments, setProformaAttachments] = useState(() => initialDetailState?.proformaAttachments || []);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const [attachmentRecording, setAttachmentRecording] = useState(false);
+  const [attachmentPaused, setAttachmentPaused] = useState(false);
+  const [attachmentAudioBusy, setAttachmentAudioBusy] = useState(false);
+  const [playingAttachmentId, setPlayingAttachmentId] = useState(null);
+  const [operationMsg, setOperationMsg] = useState(() => initialDetailState?.operationMsg || '');
   const [showRouteDesigner, setShowRouteDesigner] = useState(false);
   const [routeDesignerUnitId, setRouteDesignerUnitId] = useState(null);
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState('');
@@ -1665,8 +1858,12 @@ export default function CotizadorView({
   const lastSavedSignature = useRef('');
   const savingRef = useRef(false);
   const guardarRef = useRef(null);
+  const attachmentRecorderRef = useRef(null);
+  const attachmentChunksRef = useRef([]);
+  const attachmentStreamRef = useRef(null);
+  const attachmentAudioRefs = useRef({});
   const isHydratingTabRef = useRef(false);
-  const hydratedExternalDetailRef = useRef('');
+  const hydratedExternalDetailRef = useRef(initialDetailHydrationKey);
   const pendingRestoreTabIdRef = useRef('lista');
   const draftDefaultsRef = useRef(draftDefaults);
   const empresaDataRef = useRef(empresaData);
@@ -1680,7 +1877,10 @@ export default function CotizadorView({
   const isListTab = activeTab?.type === 'list';
   const isDetailTab = !isListTab;
   const activeUnit = units.find(unit => unit.id === activeUnitId) || units[0] || null;
-  const effectiveProformaNumber = socio.cfNumero || (activeTab?.type === 'proforma' ? activeTab?.label || '' : '');
+  const effectiveProformaNumber = socio.cfNumero
+    || initialSnapshot?.socio?.cfNumero
+    || (activeTab?.label || '')
+    || (activeTab?.type === 'proforma' ? activeTab?.label || '' : '');
   const displayCurrency = socio.cfMoneda || cotizacionesConfig.monedaDefault || BASE_CURRENCY;
   const moneyExchange = useMemo(() => ({ tc: params.tc, eurRate: params.eurRate }), [params.eurRate, params.tc]);
   const transferCatalog = useMemo(
@@ -1726,7 +1926,7 @@ export default function CotizadorView({
       if (vRes.ok) {
         const vData = await vRes.json();
         setVehiculos(vData);
-        if (vData.length > 0 && !vehiculoActivo) setVehiculoActivo(vData[0].id);
+        setVehiculoActivo(prev => (prev || !vData.length ? prev : vData[0].id));
       }
 
       if (hRes.ok) setHistorial(await hRes.json());
@@ -1804,7 +2004,7 @@ export default function CotizadorView({
     } finally {
       setLoading(false);
     }
-  }, [authH, vehiculoActivo]);
+  }, [authH]);
 
   useEffect(() => {
     if (token) cargarDatos();
@@ -1819,10 +2019,6 @@ export default function CotizadorView({
       setActiveUnitId(units[0].id);
     }
   }, [activeUnitId, units]);
-
-  useEffect(() => {
-    setItineraryRows(sanitizeItineraryRows(activeUnit?.itineraryRows || []));
-  }, [activeUnit]);
 
   const relevantServiceDates = useMemo(
     () => Array.from(new Set(
@@ -1962,10 +2158,14 @@ export default function CotizadorView({
 
   const currentStatus = socio._estado || 'borrador';
   const selectedVehiculo = vehiculos.find(item => item.id === (activeUnit?.vehiculoId || units[0]?.vehiculoId || vehiculoActivo));
-  const itineraryRowsView = useMemo(() => sanitizeItineraryRows(itineraryRows), [itineraryRows]);
+  const currentItineraryRows = useMemo(
+    () => sanitizeItineraryRows(activeUnit?.itineraryRows || itineraryRows),
+    [activeUnit, itineraryRows]
+  );
+  const itineraryRowsView = useMemo(() => currentItineraryRows, [currentItineraryRows]);
   const itineraryRowsComplete = useMemo(() => {
-    return sanitizeItineraryRows(itineraryRows).filter(row => itineraryRowComplete(row));
-  }, [itineraryRows]);
+    return currentItineraryRows.filter(row => itineraryRowComplete(row));
+  }, [currentItineraryRows]);
   const operationRowsComplete = useMemo(() => (
     units.flatMap((unit, unitIndex) => sanitizeItineraryRows(unit.itineraryRows).filter(row => itineraryRowComplete(row)).map(row => ({
       ...row,
@@ -1993,33 +2193,42 @@ export default function CotizadorView({
     setSocio(prev => ({ ...prev, cfDescripcion: autoDescription }));
   }, [autoDescription, socio.cfDescripcion, socio.cfDescripcionMode]);
 
-  const buildCurrentTabSnapshot = useCallback(() => ({
-    selectedId,
-    params: { ...params },
-    socio: { ...socio },
-    units: units.map(unit => ({ ...unit })),
-    itineraryRows: itineraryRows.map(row => ({ ...row })),
-    activeUnitId,
-    activeUnitTab,
-    vehiculoActivo,
-    openSection,
-    socioSearch,
-    showSocioSuggestions,
-    showStatusMenu,
-    mapPickerField,
-    voiceFeedback,
-    clienteFromBD,
+  const buildCurrentTabSnapshot = useCallback((options = {}) => {
+    const includeUiState = options.includeUiState !== false;
+    return {
+      selectedId,
+      params: { ...params },
+      socio: { ...socio },
+      units: units.map(unit => ({ ...unit })),
+      itineraryRows: currentItineraryRows.map(row => ({ ...row })),
+      proformaComments,
+      proformaAttachments: proformaAttachments.map(item => ({ ...item })),
+      activeUnitId,
+      activeUnitTab,
+      vehiculoActivo,
+      voiceFeedback,
+      clienteFromBD,
+      autoSaveEnabled,
+      ...(includeUiState ? {
+        openSection,
+        socioSearch,
+        showSocioSuggestions,
+        showStatusMenu,
+        mapPickerField,
+        distanceStatus,
+        savedMsg,
+        operationMsg,
+      } : {}),
+    };
+  }, [
     autoSaveEnabled,
-    distanceStatus,
-    savedMsg,
-    operationMsg,
-  }), [
-    autoSaveEnabled,
     clienteFromBD,
+    currentItineraryRows,
     distanceStatus,
-    itineraryRows,
     mapPickerField,
     openSection,
+    proformaAttachments,
+    proformaComments,
     operationMsg,
     params,
     savedMsg,
@@ -2035,62 +2244,61 @@ export default function CotizadorView({
     voiceFeedback,
   ]);
 
-  const restoreTabSnapshot = useCallback((snapshot) => {
+  const restoreTabSnapshot = useCallback((snapshot, options = {}) => {
     if (!snapshot) {
       // Evita que un tab existente parpadee como "nueva" mientras llega su snapshot.
       return;
     }
+    const restoreUiState = options.restoreUiState !== false;
+    const nextState = buildCotizadorStateFromSnapshot(snapshot, {
+      fallbackTc: draftDefaultsRef.current?.tc || DEFAULT_CRC_PER_USD,
+      empresaData: empresaDataRef.current || {},
+      vehiculos: vehiculosRef.current || [],
+      fuelPrices: fuelPricesRef.current,
+    });
+    if (!nextState) return;
 
-    const fallbackTc = Number(snapshot.params?.tc) || draftDefaultsRef.current?.tc || DEFAULT_CRC_PER_USD;
-    const fallbackEmpresaData = empresaDataRef.current || {};
-
-    // Sanitize units data to prevent NaN errors
-    const safeUnits = (snapshot.units || []).map(u => ({
-      ...normalizeUnitMoney(u, fallbackTc),
-      id: u.id || `unit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      km: Number(u.km) || 0,
-      sPax: Number(u.sPax) || 1,
-    }));
-
-    // Sanitize params to avoid unparsed numeric values
-    const safeParams = snapshot.params ? {
-      ...normalizeStoredParams(snapshot.params, { fallbackTc, empresaData: fallbackEmpresaData }),
-      adicCol: Number(snapshot.params.adicCol) || 0,
-      adicViat: Number(snapshot.params.adicViat) || 0,
-      hospedaje: Number(snapshot.params.hospedaje) || 0,
-      noches: Number(snapshot.params.noches) || 0,
-      persHosp: Number(snapshot.params.persHosp) || 0,
-      persViat: Number(snapshot.params.persViat) || 0,
-      hospedajeTotalManual: Number(snapshot.params.hospedajeTotalManual) || 0,
-    } : { ...draftDefaultsRef.current };
-
-    setSelectedId(snapshot.selectedId || null);
-    setParams(safeParams);
-    setSocio(snapshot.socio ? { ...newSocio(), ...snapshot.socio } : newSocio());
-    setUnits(safeUnits.length ? safeUnits : [createProformaUnit({}, vehiculosRef.current, null, fuelPricesRef.current, safeParams.tc)]);
-    setItineraryRows(sanitizeItineraryRows(snapshot.itineraryRows || []));
-    setVehiculoActivo(snapshot.vehiculoActivo || (vehiculosRef.current[0]?.id || null));
-    setActiveUnitId(snapshot.activeUnitId || (safeUnits.length ? safeUnits[0].id : null));
-    setActiveUnitTab(snapshot.activeUnitTab || 'operacion');
-    setOpenSection(snapshot.openSection || '');
-    setSocioSearch(snapshot.socioSearch || '');
-    setShowSocioSuggestions(Boolean(snapshot.showSocioSuggestions));
-    setShowStatusMenu(Boolean(snapshot.showStatusMenu));
-    setMapPickerField(snapshot.mapPickerField || '');
-    setVoiceFeedback(snapshot.voiceFeedback || null);
-    setClienteFromBD(Boolean(snapshot.clienteFromBD));
-    setAutoSaveEnabled(Boolean(snapshot.autoSaveEnabled));
-    setDistanceStatus(snapshot.distanceStatus || '');
-    setSavedMsg(snapshot.savedMsg || '');
-    setOperationMsg(snapshot.operationMsg || '');
+    setSelectedId(nextState.selectedId);
+    setParams(nextState.params);
+    setSocio(nextState.socio);
+    setUnits(nextState.units);
+    setItineraryRows(nextState.itineraryRows);
+    setProformaComments(nextState.proformaComments);
+    setProformaAttachments(nextState.proformaAttachments);
+    setVehiculoActivo(nextState.vehiculoActivo);
+    setActiveUnitId(nextState.activeUnitId);
+    setActiveUnitTab(nextState.activeUnitTab);
+    setVoiceFeedback(nextState.voiceFeedback);
+    setClienteFromBD(nextState.clienteFromBD);
+    setAutoSaveEnabled(nextState.autoSaveEnabled);
+    if (restoreUiState) {
+      setOpenSection(nextState.openSection);
+      setSocioSearch(nextState.socioSearch);
+      setShowSocioSuggestions(nextState.showSocioSuggestions);
+      setShowStatusMenu(nextState.showStatusMenu);
+      setMapPickerField(nextState.mapPickerField);
+      setDistanceStatus(nextState.distanceStatus);
+      setSavedMsg(nextState.savedMsg);
+      setOperationMsg(nextState.operationMsg);
+    }
   }, []);
 
   useEffect(() => {
     if (!isExternalDetailMode || !initialSnapshot) return;
-    if (hydratedExternalDetailRef.current === detailTabId) return;
-    restoreTabSnapshot(initialSnapshot);
-    hydratedExternalDetailRef.current = detailTabId;
+    const hydrationKey = `${detailTabId}:${initialSnapshot.selectedId || initialSnapshot.socio?.cfNumero || 'new'}`;
+    if (hydratedExternalDetailRef.current === hydrationKey) return;
+    restoreTabSnapshot(initialSnapshot, { restoreUiState: false });
+    hydratedExternalDetailRef.current = hydrationKey;
   }, [detailTabId, initialSnapshot, isExternalDetailMode, restoreTabSnapshot]);
+
+  useEffect(() => () => {
+    const recorder = attachmentRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
+    }
+    attachmentStreamRef.current?.getTracks?.().forEach(track => track.stop());
+    attachmentStreamRef.current = null;
+  }, []);
 
   const payloadSignature = useMemo(() => JSON.stringify({
     numero: socio.cfNumero,
@@ -2101,7 +2309,10 @@ export default function CotizadorView({
       params,
       socio,
       units,
-      itineraryRows,
+      itineraryRows: currentItineraryRows,
+      proformaComments,
+      proformaAttachments,
+      voiceFeedback,
       vehiculoId: units[0]?.vehiculoId || vehiculoActivo,
       estado: currentStatus,
       financialSummary: {
@@ -2110,7 +2321,7 @@ export default function CotizadorView({
         totalDisplay: convertCrcToDisplay(resData.total, displayCurrency, moneyExchange),
       },
     },
-  }), [currentStatus, displayCurrency, itineraryRows, moneyExchange, params, resData.total, socio, units, vehiculoActivo]);
+  }), [currentStatus, currentItineraryRows, displayCurrency, moneyExchange, params, proformaAttachments, proformaComments, resData.total, socio, units, vehiculoActivo, voiceFeedback]);
 
   const guardar = useCallback(async (estadoOverride, forceCreate = false) => {
     if (savingRef.current) return null;
@@ -2133,7 +2344,10 @@ export default function CotizadorView({
         params: { ...params, moneySchema: MONEY_SCHEMA_VERSION },
         socio: { ...socio, _estado: estado },
         units: units.map(unit => ({ ...unit, moneySchema: MONEY_SCHEMA_VERSION })),
-        itineraryRows,
+        itineraryRows: currentItineraryRows,
+        proformaComments,
+        proformaAttachments,
+        voiceFeedback,
         vehiculoId: units[0]?.vehiculoId || vehiculoActivo,
         estado,
         financialSummary: {
@@ -2164,6 +2378,8 @@ export default function CotizadorView({
         socio: nextSocio,
         units: units.map(unit => ({ ...unit })),
         itineraryRows: itineraryRows.map(row => ({ ...row })),
+        proformaComments,
+        proformaAttachments: proformaAttachments.map(item => ({ ...item })),
         activeUnitId,
         vehiculoActivo,
         openSection,
@@ -2178,6 +2394,13 @@ export default function CotizadorView({
         savedMsg: 'Guardado ✓',
         operationMsg,
       };
+      const persistedSnapshot = isExternalDetailMode
+        ? buildCurrentTabSnapshot({ includeUiState: false })
+        : nextSnapshot;
+      if (isExternalDetailMode) {
+        persistedSnapshot.selectedId = resolvedId || null;
+        persistedSnapshot.socio = nextSocio;
+      }
 
       setSocio(nextSocio);
       setSelectedId(resolvedId || null);
@@ -2185,7 +2408,7 @@ export default function CotizadorView({
       onTabMetaChange?.({
         label: resolvedNumero || 'Nueva proforma',
         sourceId: resolvedId || null,
-        snapshot: nextSnapshot,
+        snapshot: persistedSnapshot,
       });
       if (activeTabId !== 'lista' && !isExternalDetailMode) {
         setTabs(prev => prev.map(tab => (
@@ -2213,13 +2436,32 @@ export default function CotizadorView({
       lastSavedSignature.current = JSON.stringify({
         ...payload,
         numero: resolvedNumero,
-        data_json: { ...payload.data_json, socio: nextSocio, estado },
+      data_json: { ...payload.data_json, socio: nextSocio, estado },
       });
       setSavedMsg('Guardado ✓');
       setTimeout(() => setSavedMsg(''), 1800);
-      // Solo refrescamos el historial, no params — para no pisar km ni otros campos
-      const hRes = await fetch('/api/tms/proformas', { headers: authH });
-      if (hRes.ok) setHistorial(await hRes.json());
+      const historialItem = {
+        id: resolvedId || selectedId || `local-${resolvedNumero}`,
+        numero: resolvedNumero,
+        cliente_nombre: payload.cliente_nombre,
+        cliente_empresa: payload.cliente_empresa,
+        total_usd: payload.total_usd,
+        data_json: {
+          ...payload.data_json,
+          socio: nextSocio,
+          estado,
+        },
+      };
+      setHistorial(prev => {
+        const next = Array.isArray(prev) ? [...prev] : [];
+        const index = next.findIndex(item => item.id === historialItem.id || item.numero === historialItem.numero);
+        if (index >= 0) {
+          next[index] = { ...next[index], ...historialItem };
+        } else {
+          next.unshift(historialItem);
+        }
+        return next;
+      });
       return { numero: resolvedNumero, id: resolvedId, estado };
     } catch (error) {
       console.error('Error guardando proforma:', error);
@@ -2234,12 +2476,14 @@ export default function CotizadorView({
     activeUnitId,
     authH,
     clienteFromBD,
+    currentItineraryRows,
     distanceStatus,
-    itineraryRows,
     displayCurrency,
     mapPickerField,
     moneyExchange,
     openSection,
+    proformaAttachments,
+    proformaComments,
     operationMsg,
     params,
     resData.total,
@@ -2251,6 +2495,7 @@ export default function CotizadorView({
     units,
     vehiculoActivo,
     voiceFeedback,
+    buildCurrentTabSnapshot,
     onTabMetaChange,
   ]);
 
@@ -2264,7 +2509,7 @@ export default function CotizadorView({
 
     clearTimeout(autosaveTimer.current);
     autosaveTimer.current = setTimeout(() => {
-      guardarRef.current?.();
+      guardarRef.current?.().catch(() => {});
     }, 1400);
 
     return () => clearTimeout(autosaveTimer.current);
@@ -2287,8 +2532,9 @@ export default function CotizadorView({
 
   useEffect(() => {
     if (!isExternalDetailMode || !onSnapshotChange) return;
-    onSnapshotChange(buildCurrentTabSnapshot());
-  }, [activeTabId, autoSaveEnabled, buildCurrentTabSnapshot, clienteFromBD, distanceStatus, isExternalDetailMode, mapPickerField, onSnapshotChange, openSection, operationMsg, params, savedMsg, selectedId, showSocioSuggestions, showStatusMenu, socio, socioSearch, units, activeUnitId, vehiculoActivo, voiceFeedback, itineraryRows]);
+    const snapshot = buildCurrentTabSnapshot({ includeUiState: false });
+    onSnapshotChange(snapshot);
+  }, [activeTabId, autoSaveEnabled, buildCurrentTabSnapshot, clienteFromBD, isExternalDetailMode, onSnapshotChange, params, selectedId, socio, units, activeUnitId, vehiculoActivo, voiceFeedback, currentItineraryRows, proformaComments, proformaAttachments]);
 
   useEffect(() => {
     clearTimeout(autosaveTimer.current);
@@ -2300,6 +2546,8 @@ export default function CotizadorView({
       setShowStatusMenu(false);
       setMapPickerField('');
       setVoiceFeedback(null);
+      setProformaComments('');
+      setProformaAttachments([]);
       setAutoSaveEnabled(false);
       setSavedMsg('');
       return;
@@ -2377,8 +2625,8 @@ export default function CotizadorView({
       sCedula: data.sCedula || data.identificacion || data.id || '',
       sDireccion: data.sDireccion || data.direccion || '',
       sNotas: data.sNotas || data.notas || '',
-      sOrigen: data.sOrigen || data.origen || '',
-      sDestino: data.sDestino || data.destino || '',
+      sOrigen: beautifyPlaceLabel(data.sOrigen || data.origen || ''),
+      sDestino: beautifyPlaceLabel(data.sDestino || data.destino || ''),
       sFecha: toIsoDate(data.sFecha || data.fechaServicio || ''),
       sHora: to24HourFormat(data.sHora || data.horaServicio || ''),
       sPax: nextPax,
@@ -2422,7 +2670,47 @@ export default function CotizadorView({
       message: draft.assistantMessage || '',
       missingFields: Array.isArray(draft.missingFields) ? draft.missingFields : [],
       interpretationNotes: Array.isArray(draft.interpretationNotes) ? draft.interpretationNotes : [],
+      conversationLog: normalizeConversationLog(draft.conversationLog),
+      routePreview: draft.routePreview || null,
     };
+    const nextUnits = [createProformaUnit({
+      sFecha: draftSocio.sFecha,
+      sHora: draftSocio.sHora,
+      sPax: draftSocio.sPax,
+      sOrigen: beautifyPlaceLabel(draftSocio.sOrigen),
+      sDestino: beautifyPlaceLabel(draftSocio.sDestino),
+      km: nextParams.km || 0,
+      combustible: nextParams.combustible,
+      precioCombustibleLitro: nextParams.precioCombustibleLitro,
+      rendimiento: nextParams.rendimiento,
+      tipoCombustible: nextParams.tipoCombustible,
+      colaborador: nextParams.colaborador,
+      peajes: nextParams.peajes,
+      carga: nextParams.carga,
+      ferry: nextParams.ferry,
+    }, vehiculos, null, fuelPrices, nextParams.tc || draftDefaults.tc, { allowSuggestedVehicle: false })];
+    const previewRoute = draft.routePreview || null;
+    const previewRows = previewRoute
+      ? buildItineraryRowsFromRouteResults([previewRoute], {
+          initialTime: draftSocio.sHora || '',
+          defaultVehiculoId: nextUnits[0]?.vehiculoId || null,
+          defaultVehiculoLabel: '',
+        })
+      : [];
+    if (previewRoute && nextUnits[0]) {
+      nextUnits[0] = {
+        ...nextUnits[0],
+        itinerary: {
+          unitId: nextUnits[0].id,
+          importedRoutes: [previewRoute],
+          totals: {
+            distance_m: Number(previewRoute?.result?.totalDistance || 0),
+            duration_s: Number(previewRoute?.result?.totalTime || 0),
+          },
+        },
+        itineraryRows: previewRows,
+      };
+    }
     const draftTabId = `voice-${draft.id}`;
 
     clearTimeout(autosaveTimer.current);
@@ -2432,23 +2720,10 @@ export default function CotizadorView({
         selectedId: null,
         params: nextParams,
         socio: draftSocio,
-        units: [createProformaUnit({
-          sFecha: draftSocio.sFecha,
-          sHora: draftSocio.sHora,
-          sPax: draftSocio.sPax,
-          sOrigen: draftSocio.sOrigen,
-          sDestino: draftSocio.sDestino,
-          km: nextParams.km || 0,
-          combustible: nextParams.combustible,
-          precioCombustibleLitro: nextParams.precioCombustibleLitro,
-          rendimiento: nextParams.rendimiento,
-          tipoCombustible: nextParams.tipoCombustible,
-          colaborador: nextParams.colaborador,
-          peajes: nextParams.peajes,
-          carga: nextParams.carga,
-          ferry: nextParams.ferry,
-        }, vehiculos, null, fuelPrices, nextParams.tc || draftDefaults.tc, { allowSuggestedVehicle: false })],
-        itineraryRows: [],
+        units: nextUnits,
+        itineraryRows: previewRows,
+        proformaComments: '',
+        proformaAttachments: [],
         activeUnitTab: 'operacion',
         vehiculoActivo: null,
         openSection: data.sOrigen || data.origen || data.sDestino || data.destino ? 'servicio' : 'cliente',
@@ -2491,6 +2766,8 @@ export default function CotizadorView({
           ferry: draftDefaults.ferry,
         }, vehiculos, null, fuelPrices, draftDefaults.tc, { allowSuggestedVehicle: false })],
         itineraryRows: [],
+        proformaComments: '',
+        proformaAttachments: [],
         activeUnitTab: 'operacion',
         vehiculoActivo: null,
         openSection: 'cliente',
@@ -2498,7 +2775,7 @@ export default function CotizadorView({
         showSocioSuggestions: false,
         showStatusMenu: false,
         mapPickerField: '',
-        voiceFeedback: { message: '', missingFields: [], interpretationNotes: [] },
+        voiceFeedback: normalizeVoiceFeedback({ message: '', missingFields: [], interpretationNotes: [], conversationLog: [] }),
         clienteFromBD: false,
         autoSaveEnabled: false,
         distanceStatus: '',
@@ -2526,6 +2803,9 @@ export default function CotizadorView({
     const socioData = data.socio || {};
     const paramsData = data.params || {};
     const nextItineraryRows = sanitizeItineraryRows(data.itineraryRows || []);
+    const nextComments = String(data.proformaComments || '');
+    const nextAttachments = normalizeProformaAttachments(data.proformaAttachments || []);
+    const nextVoiceFeedback = normalizeVoiceFeedback(data.voiceFeedback);
     const nextUnits = hydrateProformaUnits({
       savedUnits: data.units,
       socioData,
@@ -2549,7 +2829,17 @@ export default function CotizadorView({
       cliente_nombre: proforma.cliente_nombre,
       cliente_empresa: proforma.cliente_empresa,
       total_usd: proforma.total_usd,
-      data_json: { params: paramsData, socio: socioTransformado, units: nextUnits, itineraryRows: nextItineraryRows, vehiculoId: data.vehiculoId, estado: data.estado || socioData._estado || 'borrador' },
+      data_json: {
+        params: paramsData,
+        socio: socioTransformado,
+        units: nextUnits,
+        itineraryRows: nextItineraryRows,
+        proformaComments: nextComments,
+        proformaAttachments: nextAttachments,
+        voiceFeedback: nextVoiceFeedback,
+        vehiculoId: data.vehiculoId,
+        estado: data.estado || socioData._estado || 'borrador',
+      },
     });
     upsertDetailTab(
       { id: tabId, type: 'proforma', sourceId: proforma.id, label: proforma.numero },
@@ -2559,13 +2849,15 @@ export default function CotizadorView({
         socio: socioTransformado,
         units: nextUnits,
         itineraryRows: nextItineraryRows,
+        proformaComments: nextComments,
+        proformaAttachments: nextAttachments,
         vehiculoActivo: data.vehiculoId || nextUnits[0]?.vehiculoId || vehiculoActivo,
         openSection: '',
         socioSearch: '',
         showSocioSuggestions: false,
         showStatusMenu: false,
         mapPickerField: '',
-        voiceFeedback: null,
+        voiceFeedback: nextVoiceFeedback,
         clienteFromBD: false,
         autoSaveEnabled: true,
         distanceStatus: '',
@@ -2616,6 +2908,222 @@ export default function CotizadorView({
   const handleGuardarManual = () => {
     guardar(null, true);
   };
+
+  const handleCommentsChange = (value) => {
+    setProformaComments(value);
+    setAutoSaveEnabled(true);
+  };
+
+  const stopAttachmentRecorderTracks = useCallback(() => {
+    attachmentStreamRef.current?.getTracks?.().forEach(track => track.stop());
+    attachmentStreamRef.current = null;
+  }, []);
+
+  const updateAttachmentField = (attachmentId, field, value) => {
+    setProformaAttachments(prev => prev.map((item, index) => (
+      item.id === attachmentId
+        ? normalizeProformaAttachment({ ...item, [field]: value, numero: index + 1 }, index)
+        : normalizeProformaAttachment({ ...item, numero: index + 1 }, index)
+    )));
+    setAutoSaveEnabled(true);
+  };
+
+  const removeAttachment = (attachmentId) => {
+    const audio = attachmentAudioRefs.current[attachmentId];
+    if (audio) {
+      audio.pause();
+      delete attachmentAudioRefs.current[attachmentId];
+    }
+    if (playingAttachmentId === attachmentId) {
+      setPlayingAttachmentId(null);
+    }
+    setProformaAttachments(prev => prev
+      .filter(item => item.id !== attachmentId)
+      .map((item, index) => normalizeProformaAttachment({ ...item, numero: index + 1 }, index)));
+    setAutoSaveEnabled(true);
+  };
+
+  const toggleAttachmentPlayback = useCallback((attachment) => {
+    const attachmentId = attachment?.id;
+    const audio = attachmentId ? attachmentAudioRefs.current[attachmentId] : null;
+    if (!attachmentId || !audio) return;
+
+    if (playingAttachmentId === attachmentId) {
+      audio.pause();
+      audio.currentTime = 0;
+      setPlayingAttachmentId(null);
+      return;
+    }
+
+    Object.entries(attachmentAudioRefs.current).forEach(([key, element]) => {
+      if (key !== attachmentId && element) {
+        element.pause();
+        element.currentTime = 0;
+      }
+    });
+
+    audio.play().then(() => {
+      setPlayingAttachmentId(attachmentId);
+    }).catch(() => {
+      setPlayingAttachmentId(null);
+    });
+  }, [playingAttachmentId]);
+
+  const uploadProformaAttachments = async (fileList) => {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length) return;
+
+    setUploadingAttachments(true);
+    try {
+      const uploaded = [];
+      for (const file of files) {
+        const dataUrl = await fileToDataUrl(file);
+        const res = await fetch('/api/tms/uploads/proformas', {
+          method: 'POST',
+          headers: authH,
+          body: JSON.stringify({ filename: file.name, dataUrl }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok || !payload?.path) {
+          throw new Error(payload.error || `No se pudo subir ${file.name}.`);
+        }
+        uploaded.push(normalizeProformaAttachment({
+          descripcion: '',
+          clasificacion: inferAttachmentKind(payload.mimeType || file.type, file.name),
+          fechaEntrada: todayISO(),
+          guardadoPor: user?.nombre || user?.username || 'Usuario actual',
+          guardadoPorId: user?.id || null,
+          nombreOriginal: file.name,
+          archivoPath: payload.path,
+          mimeType: payload.mimeType || file.type || '',
+          sizeBytes: payload.sizeBytes || file.size || 0,
+          tipoArchivo: inferAttachmentKind(payload.mimeType || file.type, file.name),
+          createdAt: new Date().toISOString(),
+        }));
+      }
+
+      setProformaAttachments(prev => {
+        const next = [...prev, ...uploaded];
+        return next.map((item, index) => normalizeProformaAttachment({ ...item, numero: index + 1 }, index));
+      });
+      setAutoSaveEnabled(true);
+      setSavedMsg('Adjuntos cargados ✓');
+      setTimeout(() => setSavedMsg(''), 1800);
+    } catch (error) {
+      console.error('Error cargando adjuntos de proforma:', error);
+      setSavedMsg('Error cargando adjuntos');
+      setTimeout(() => setSavedMsg(''), 2500);
+    } finally {
+      setUploadingAttachments(false);
+    }
+  };
+
+  const uploadRecordedAudio = useCallback(async (audioBlob, mimeType = 'audio/webm') => {
+    if (!audioBlob?.size) return;
+    setAttachmentAudioBusy(true);
+    try {
+      const safeMimeType = String(mimeType || 'audio/webm').split(';')[0] || 'audio/webm';
+      const extension = guessAudioExtension(safeMimeType);
+      const file = new File([audioBlob], `audio-proforma-${Date.now()}.${extension}`, { type: safeMimeType });
+      await uploadProformaAttachments([file]);
+    } finally {
+      setAttachmentAudioBusy(false);
+    }
+  }, [uploadProformaAttachments]);
+
+  const finishAttachmentRecording = useCallback(() => {
+    const recorder = attachmentRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
+    }
+    setAttachmentRecording(false);
+    setAttachmentPaused(false);
+  }, []);
+
+  const ensureAttachmentAudioStream = useCallback(async () => {
+    const currentStream = attachmentStreamRef.current;
+    const activeTrack = currentStream?.getAudioTracks?.().find(track => track.readyState === 'live');
+    if (activeTrack) return currentStream;
+    const nextStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    attachmentStreamRef.current = nextStream;
+    return nextStream;
+  }, []);
+
+  const toggleAttachmentRecording = useCallback(async () => {
+    if (attachmentAudioBusy) return;
+
+    if (attachmentRecording) {
+      finishAttachmentRecording();
+      return;
+    }
+
+    if (typeof window === 'undefined' || !window.MediaRecorder || !navigator?.mediaDevices?.getUserMedia) {
+      setSavedMsg('Grabación no disponible');
+      setTimeout(() => setSavedMsg(''), 2200);
+      return;
+    }
+
+    try {
+      const stream = await ensureAttachmentAudioStream();
+      attachmentChunksRef.current = [];
+      const preferredMimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
+      const recorder = new MediaRecorder(stream, preferredMimeType ? { mimeType: preferredMimeType } : undefined);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          attachmentChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const nextMimeType = recorder.mimeType || 'audio/webm';
+        const audioBlob = new Blob(attachmentChunksRef.current, { type: nextMimeType });
+        attachmentChunksRef.current = [];
+        attachmentRecorderRef.current = null;
+        stopAttachmentRecorderTracks();
+        if (audioBlob.size > 0) {
+          await uploadRecordedAudio(audioBlob, nextMimeType);
+        }
+      };
+
+      recorder.onerror = () => {
+        setAttachmentRecording(false);
+        setAttachmentPaused(false);
+        attachmentRecorderRef.current = null;
+        stopAttachmentRecorderTracks();
+        setSavedMsg('Error grabando audio');
+        setTimeout(() => setSavedMsg(''), 2200);
+      };
+
+      attachmentRecorderRef.current = recorder;
+      recorder.start();
+      setAttachmentRecording(true);
+      setAttachmentPaused(false);
+    } catch (error) {
+      console.error('No se pudo iniciar la grabación del adjunto:', error);
+      stopAttachmentRecorderTracks();
+      setAttachmentRecording(false);
+      setAttachmentPaused(false);
+      setSavedMsg('No se pudo usar el micrófono');
+      setTimeout(() => setSavedMsg(''), 2200);
+    }
+  }, [attachmentAudioBusy, attachmentRecording, ensureAttachmentAudioStream, finishAttachmentRecording, stopAttachmentRecorderTracks, uploadRecordedAudio]);
+
+  const toggleAttachmentPause = useCallback(() => {
+    const recorder = attachmentRecorderRef.current;
+    if (!recorder || !attachmentRecording) return;
+    if (recorder.state === 'recording') {
+      recorder.pause();
+      setAttachmentPaused(true);
+      return;
+    }
+    if (recorder.state === 'paused') {
+      recorder.resume();
+      setAttachmentPaused(false);
+    }
+  }, [attachmentRecording]);
 
   const pChange = ({ target: { name, value, type, checked } }) => {
     setParams(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : name === 'km' ? value : Number(value) }));
@@ -2767,7 +3275,6 @@ export default function CotizadorView({
         ? syncUnitFromItineraryRows(unit, nextRows)
         : unit
     )));
-    setItineraryRows(nextRows);
     setAutoSaveEnabled(true);
   };
 
@@ -2808,7 +3315,6 @@ export default function CotizadorView({
         ? syncUnitFromItineraryRows({ ...unit, itinerary: null }, [])
         : unit
     )));
-    setItineraryRows([]);
     setAutoSaveEnabled(true);
   };
 
@@ -3051,7 +3557,7 @@ export default function CotizadorView({
 
   const servicioResumen = [
     socio.sFecha && `${socio.sFecha}${socio.sHora ? ` ${socio.sHora}` : ''}`,
-    [socio.sOrigen, socio.sDestino].filter(Boolean).join(' → '),
+    [beautifyPlaceLabel(socio.sOrigen), beautifyPlaceLabel(socio.sDestino)].filter(Boolean).join(' → '),
     socio.sPax ? `${socio.sPax} pax` : '',
     socio.sDireccion,
   ].filter(Boolean).join(' | ');
@@ -3078,6 +3584,22 @@ export default function CotizadorView({
     params.viatDiario ? `Viatico diario ${formatMoney(params.viatDiario, displayCurrency, moneyExchange)}` : '',
     resData.subtotalExtras > 0 ? `Subtotal ${formatMoney(resData.subtotalExtras, displayCurrency, moneyExchange)}` : '',
   ].filter(Boolean).join(' | ');
+
+  const commentsResumen = proformaComments.trim()
+    ? `${proformaComments.trim().slice(0, 110)}${proformaComments.trim().length > 110 ? '…' : ''}`
+    : 'Sin comentarios internos';
+
+  const attachmentsResumen = proformaAttachments.length
+    ? `${proformaAttachments.length} adjunto${proformaAttachments.length > 1 ? 's' : ''} · ${proformaAttachments.map(item => item.clasificacion || item.tipoArchivo).slice(0, 3).join(', ')}`
+    : 'Sin adjuntos';
+
+  const aiConversationCount = normalizeConversationLog(voiceFeedback?.conversationLog).length;
+  const aiResumen = [
+    voiceFeedback?.message ? 'Interpretación disponible' : '',
+    aiConversationCount ? `${aiConversationCount} mensaje${aiConversationCount > 1 ? 's' : ''}` : '',
+    voiceFeedback?.missingFields?.length ? `${voiceFeedback.missingFields.length} pendiente${voiceFeedback.missingFields.length > 1 ? 's' : ''}` : '',
+    voiceFeedback?.routePreview ? 'Ruta inicial calculada' : '',
+  ].filter(Boolean).join(' | ') || 'Sin trazabilidad IA todavía';
 
   useEffect(() => {
     onHeaderMetaChange?.({ tc: params.tc, moneda: displayCurrency });
@@ -3209,7 +3731,15 @@ export default function CotizadorView({
 
         {isDetailTab && (
             <div style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 12, overflowX: 'hidden' }}>
-              {voiceFeedback && voiceFeedback.message && (
+              {Boolean(
+                voiceFeedback && (
+                  voiceFeedback.message
+                  || voiceFeedback.missingFields?.length
+                  || voiceFeedback.interpretationNotes?.length
+                  || voiceFeedback.routePreview
+                  || normalizeConversationLog(voiceFeedback.conversationLog).length
+                )
+              ) && (
                 <div style={{ background: T.card2, border: `1px solid ${T.AMB}44`, borderRadius: 12, padding: 14 }}>
                   <div style={{ fontSize: 11, fontWeight: 800, color: T.AMB, letterSpacing: 0.3, marginBottom: 8 }}>INTERPRETACION ASISTIDA</div>
                   {voiceFeedback.message && (
@@ -3263,6 +3793,221 @@ export default function CotizadorView({
                   <Field label="Direccion" style={{ gridColumn: 'span 6' }}>
                     <input name="sDireccion" value={socio.sDireccion} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Direccion" />
                   </Field>
+                </div>
+              </AccordionSection>
+
+              <AccordionSection
+                id="ia"
+                label="Trazabilidad IA"
+                summary={aiResumen}
+                open={openSection === 'ia'}
+                onToggle={toggleSection}
+                actions={voiceFeedback?.routePreview ? <div style={{ padding: '6px 10px', borderRadius: 999, background: T.grnDim, color: T.GRN, fontSize: 11, fontWeight: 800 }}>Ruta lista</div> : null}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 16 }}>
+                  <div style={{ padding: 12, borderRadius: 12, background: T.card, border: `1px solid ${T.bdr}` }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <MessageSquare size={14} color={T.AMB} />
+                      <div style={{ fontSize: 12, fontWeight: 800, color: T.AMB }}>Lectura actual de la IA</div>
+                    </div>
+                    <div style={{ fontSize: 13, color: T.txt, lineHeight: 1.6 }}>
+                      {voiceFeedback?.message || 'Todavía no hay una interpretación registrada para esta proforma.'}
+                    </div>
+                    {voiceFeedback?.missingFields?.length > 0 && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: T.sub }}>
+                        Pendientes: {voiceFeedback.missingFields.join(', ')}.
+                      </div>
+                    )}
+                    {voiceFeedback?.interpretationNotes?.length > 0 && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: T.mute }}>
+                        {voiceFeedback.interpretationNotes.join(' ')}
+                      </div>
+                    )}
+                    {voiceFeedback?.routePreview && (
+                      <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, background: T.grnDim, border: `1px solid ${T.GRN}33`, fontSize: 12, color: T.GRN }}>
+                        Ruta inicial: {beautifyPlaceLabel(voiceFeedback.routePreview.originDesc || voiceFeedback.routePreview.origin)} → {beautifyPlaceLabel(voiceFeedback.routePreview.destinationDesc || voiceFeedback.routePreview.destination)}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ padding: 12, borderRadius: 12, background: T.card, border: `1px solid ${T.bdr}` }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: T.sub, marginBottom: 10 }}>Conversación almacenada</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
+                      {normalizeConversationLog(voiceFeedback?.conversationLog).map(message => {
+                        const isAssistant = message.role === 'assistant';
+                        return (
+                          <div
+                            key={message.id}
+                            style={{
+                              alignSelf: isAssistant ? 'stretch' : 'flex-end',
+                              background: isAssistant ? T.card2 : T.ambDim,
+                              border: `1px solid ${isAssistant ? T.bdr : `${T.AMB}33`}`,
+                              borderRadius: 12,
+                              padding: '10px 12px',
+                            }}
+                          >
+                            <div style={{ fontSize: 11, fontWeight: 800, color: isAssistant ? T.AMB : T.sub, marginBottom: 4 }}>
+                              {isAssistant ? 'GROQ' : 'USUARIO'}
+                            </div>
+                            <div style={{ fontSize: 12, color: isAssistant ? T.sub : T.txt, lineHeight: 1.55 }}>{message.text}</div>
+                          </div>
+                        );
+                      })}
+                      {!normalizeConversationLog(voiceFeedback?.conversationLog).length && (
+                        <div style={{ fontSize: 12, color: T.mute }}>Cuando uses el asistente, aquí quedará el historial completo de mensajes.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </AccordionSection>
+
+              <AccordionSection id="comentarios" label="Comentarios" summary={commentsResumen} open={openSection === 'comentarios'} onToggle={toggleSection}>
+                <div style={{ marginTop: 16 }}>
+                  <textarea
+                    value={proformaComments}
+                    onChange={e => handleCommentsChange(e.target.value)}
+                    onBlur={handleGuardar}
+                    style={{ ...areaStyle, minHeight: 120 }}
+                    placeholder="Observaciones internas, acuerdos, alertas o cualquier comentario de la proforma."
+                  />
+                  <div style={{ marginTop: 8, fontSize: 11, color: T.mute }}>
+                    Este espacio es interno y sirve para trazabilidad operativa y comercial.
+                  </div>
+                </div>
+              </AccordionSection>
+
+              <AccordionSection
+                id="adjuntos"
+                label="Adjuntos"
+                summary={attachmentsResumen}
+                open={openSection === 'adjuntos'}
+                onToggle={toggleSection}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 12px', borderRadius: 10, background: uploadingAttachments ? T.card3 : T.ambDim, color: uploadingAttachments ? T.mute : T.AMB, fontSize: 12, fontWeight: 800, cursor: uploadingAttachments ? 'wait' : 'pointer' }}>
+                      <Upload size={14} />
+                      {uploadingAttachments ? 'Subiendo adjuntos...' : 'Agregar adjuntos'}
+                      <input
+                        type="file"
+                        multiple
+                        disabled={uploadingAttachments || attachmentAudioBusy}
+                        onChange={async (event) => {
+                          const files = event.target.files;
+                          await uploadProformaAttachments(files);
+                          event.target.value = '';
+                        }}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={toggleAttachmentRecording}
+                      disabled={attachmentAudioBusy || uploadingAttachments}
+                      title={attachmentRecording ? 'Detener grabación' : 'Grabar audio'}
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 12,
+                        border: `1px solid ${attachmentRecording ? `${T.RED}55` : `${T.AMB}44`}`,
+                        background: attachmentRecording ? T.redDim : `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
+                        color: attachmentRecording ? T.RED : T.AMB,
+                        cursor: attachmentAudioBusy || uploadingAttachments ? 'wait' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: attachmentRecording ? '0 0 0 4px rgba(239,68,68,0.12)' : '0 10px 24px rgba(15,23,42,0.10)',
+                        animation: attachmentRecording ? 'pulse 1.4s ease-in-out infinite' : 'none',
+                      }}
+                    >
+                      {attachmentAudioBusy
+                        ? <LoaderCircle size={16} style={{ animation: 'spin 0.9s linear infinite' }} />
+                        : attachmentRecording
+                          ? <MicOff size={16} />
+                          : <Mic size={16} />}
+                    </button>
+                  </div>
+                  {!proformaAttachments.length && (
+                    <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px dashed ${T.bdr2}`, color: T.mute, fontSize: 12 }}>
+                      No hay adjuntos todavía.
+                    </div>
+                  )}
+                  {proformaAttachments.map((attachment, index) => (
+                    <div key={attachment.id} style={{ padding: 12, borderRadius: 12, background: T.card, border: `1px solid ${T.bdr}` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                          {attachment.tipoArchivo === 'audio' && (
+                            <button
+                              type="button"
+                              onClick={() => toggleAttachmentPlayback(attachment)}
+                              style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: 999,
+                                border: `1px solid ${playingAttachmentId === attachment.id ? `${T.GRN}55` : `${T.AMB}44`}`,
+                                background: playingAttachmentId === attachment.id ? T.grnDim : T.ambDim,
+                                color: playingAttachmentId === attachment.id ? T.GRN : T.AMB,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {playingAttachmentId === attachment.id ? <Pause size={13} /> : <Play size={13} style={{ marginLeft: 1 }} />}
+                            </button>
+                          )}
+                          <div style={{ width: 28, height: 28, borderRadius: 999, background: T.ambDim, color: T.AMB, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, flexShrink: 0 }}>
+                            {index + 1}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <a href={attachment.archivoPath} target="_blank" rel="noreferrer" style={{ color: T.txt, fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
+                              {attachment.nombreOriginal}
+                            </a>
+                            <div style={{ fontSize: 11, color: T.mute, marginTop: 2 }}>
+                              {attachment.mimeType || attachment.tipoArchivo} · {formatBytes(attachment.sizeBytes)}
+                            </div>
+                            {attachment.tipoArchivo === 'audio' && (
+                              <audio
+                                ref={(node) => {
+                                  if (!node) {
+                                    delete attachmentAudioRefs.current[attachment.id];
+                                    return;
+                                  }
+                                  attachmentAudioRefs.current[attachment.id] = node;
+                                }}
+                                src={attachment.archivoPath}
+                                preload="metadata"
+                                onEnded={() => setPlayingAttachmentId(current => (current === attachment.id ? null : current))}
+                                style={{ display: 'none' }}
+                              />
+                            )}
+                          </div>
+                        </div>
+                        <button type="button" onClick={() => removeAttachment(attachment.id)} style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${T.RED}33`, background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                          Quitar
+                        </button>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 12 }}>
+                        <Field label="Descripción" style={{ gridColumn: 'span 5' }}>
+                          <input value={attachment.descripcion} onChange={e => updateAttachmentField(attachment.id, 'descripcion', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Qué contiene este archivo" />
+                        </Field>
+                        <Field label="Clasificación" style={{ gridColumn: 'span 3' }}>
+                          <select value={attachment.clasificacion} onChange={e => updateAttachmentField(attachment.id, 'clasificacion', e.target.value)} onBlur={handleGuardar} style={{ ...inputStyle, cursor: 'pointer' }}>
+                            {PROFORMA_ATTACHMENT_CLASSIFICATIONS.map(option => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="Fecha entrada" style={{ gridColumn: 'span 2' }}>
+                          <input type="date" value={attachment.fechaEntrada} onChange={e => updateAttachmentField(attachment.id, 'fechaEntrada', e.target.value)} onBlur={handleGuardar} style={inputStyle} />
+                        </Field>
+                        <Field label="Guardado por" style={{ gridColumn: 'span 2' }}>
+                          <input value={attachment.guardadoPor} onChange={e => updateAttachmentField(attachment.id, 'guardadoPor', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Usuario" />
+                        </Field>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </AccordionSection>
 
@@ -4011,7 +4756,6 @@ export default function CotizadorView({
                 return unit;
               }));
               setActiveUnitId(routeDesignerUnitId);
-              setItineraryRows(routeRows);
               setActiveUnitTab('operacion');
               setOpenSection('costos');
               setSavedMsg('Itinerario cargado desde mapas ✓');

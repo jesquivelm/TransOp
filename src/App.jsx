@@ -2,7 +2,7 @@ import { createElement, useState, useMemo, useEffect, useCallback, useRef } from
 import {
   LayoutDashboard, CalendarDays, CheckSquare, Users, Bus, Receipt,
   BarChart3, AlertTriangle, CheckCircle, XCircle, Clock, MapPin,
-  Phone, Plus, Search, ChevronRight, Shield, Wrench, X, User,
+  Phone, Plus, Search, ChevronRight, ChevronLeft, Shield, Wrench, X, User,
   MessageSquare, Zap, Eye, RefreshCcw, ChevronDown, Moon, Sun, Calculator, Settings, Trash2
 } from "lucide-react";
 
@@ -31,6 +31,7 @@ const API = '/api/tms';
 
 // Fecha de hoy en YYYY-MM-DD (dinámica)
 const todayISO = () => new Date().toISOString().slice(0, 10);
+const currentMonthKey = () => new Date().toISOString().slice(0, 7);
 const addDaysISO = (dateStr, days) => {
   const base = new Date(`${dateStr}T00:00:00`);
   base.setDate(base.getDate() + days);
@@ -61,6 +62,38 @@ const endOfMonthISO = (dateStr) => {
   const date = new Date(`${dateStr}T00:00:00`);
   date.setMonth(date.getMonth() + 1, 0);
   return date.toISOString().slice(0, 10);
+};
+const addMonthsKey = (monthKey, diff) => {
+  const [year, month] = String(monthKey || currentMonthKey()).split('-').map(Number);
+  const next = new Date(year, (month - 1) + diff, 1);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
+};
+const formatMonthLabel = (monthKey) => (
+  new Date(`${monthKey || currentMonthKey()}-01T00:00:00`).toLocaleDateString('es-CR', {
+    month: 'long',
+    year: 'numeric',
+  })
+);
+const buildMonthGrid = (monthKey) => {
+  const [year, month] = String(monthKey || currentMonthKey()).split('-').map(Number);
+  const firstDay = new Date(year, month - 1, 1);
+  const firstWeekday = (firstDay.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const cells = [];
+
+  for (let index = 0; index < firstWeekday; index += 1) {
+    cells.push(null);
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push(null);
+  }
+
+  return cells;
 };
 const VEHICLE_TYPE_OPTIONS = [
   { value: 'sedan', label: 'Automóvil' },
@@ -154,6 +187,77 @@ function daysUntil(dateStr) {
     d = new Date(`${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}T00:00:00`);
   }
   return Math.round((d - new Date()) / 86400000);
+}
+
+function nextAnnualOccurrence(dateStr, fallbackMonth = null, fallbackDay = null) {
+  const raw = String(dateStr || '').trim();
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  let month = fallbackMonth;
+  let day = fallbackDay;
+
+  if (raw) {
+    if (raw.includes('-')) {
+      const parts = raw.split('-').map(Number);
+      if (parts.length === 3) {
+        month = parts[1];
+        day = parts[2];
+      } else if (parts.length === 2) {
+        month = parts[0];
+        day = parts[1];
+      }
+    } else if (raw.includes('/')) {
+      const parts = raw.split('/').map(Number);
+      if (parts.length === 3) {
+        day = parts[0];
+        month = parts[1];
+      } else if (parts.length === 2) {
+        day = parts[0];
+        month = parts[1];
+      }
+    }
+  }
+
+  if (!month || !day) return '';
+
+  let candidate = new Date(currentYear, month - 1, day);
+  candidate.setHours(0, 0, 0, 0);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (candidate < today) {
+    candidate = new Date(currentYear + 1, month - 1, day);
+    candidate.setHours(0, 0, 0, 0);
+  }
+  return candidate.toISOString().slice(0, 10);
+}
+
+function formatRecurringDate(dateStr) {
+  if (!dateStr) return '—';
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString('es-CR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function formatRecurringDayMonth(dateStr) {
+  if (!dateStr) return '—';
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString('es-CR', {
+    day: 'numeric',
+    month: 'long',
+  });
+}
+
+function getVehicleRegulatoryDates(vehiculo = {}) {
+  const revTecPrimary = nextAnnualOccurrence(vehiculo.revTec);
+  const revTecSecondary = nextAnnualOccurrence(vehiculo.revTec2);
+  const technicalDates = [revTecPrimary, revTecSecondary].filter(Boolean).sort();
+  const nextRevision = technicalDates[0] || '';
+  const marchamoLimit = nextAnnualOccurrence(vehiculo.march, 12, 31);
+  return {
+    revTecPrimary,
+    revTecSecondary,
+    nextRevision,
+  };
 }
 
 function toDate(dateISO, timeStr) {
@@ -891,13 +995,14 @@ function AdjuntosList({ adjuntos = [] }) {
 // ─────────────────────────────────────────────────────────────
 // VISTA: CONDUCTORES
 // ─────────────────────────────────────────────────────────────
-function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBaja, onDelete, canDelete = false }) {
+function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBaja, onDelete, canDelete = false, apiFetch, onFocusTask }) {
   const [search, setSearch]     = useState('');
   const [filtroEst, setFiltro]  = useState('todos');
   const [expandido, setExpand]  = useState(null);
   const [modalNuevo, setModalNuevo] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [bajaTarget, setBajaTarget] = useState(null);
+  const [reportTarget, setReportTarget] = useState(null);
 
   const filtrados = useMemo(() => conductores.filter(c => {
     const matchS = c.nombre.toLowerCase().includes(search.toLowerCase()) ||
@@ -1002,6 +1107,14 @@ function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBa
                   </div>
                   <div style={{ width:110 }}><Badge estado={c.estado} /></div>
                   <button
+                    onClick={e => { e.stopPropagation(); setReportTarget(c); }}
+                    style={{ padding:'5px 10px', background:T.bluDim,
+                      border:`1px solid ${T.BLU}44`,
+                      borderRadius:6, color:T.BLU,
+                      cursor:'pointer', fontSize:11, fontWeight:600, whiteSpace:'nowrap' }}>
+                    Reporte
+                  </button>
+                  <button
                     disabled={inactivo}
                     onClick={e => { e.stopPropagation(); setEditTarget(c); }}
                     style={{ padding:'5px 10px', background: inactivo ? 'transparent' : T.ambDim,
@@ -1025,6 +1138,14 @@ function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBa
                   <div style={{ margin:'0 10px 8px', padding:'14px 16px', background:T.card3,
                     borderRadius:'0 0 10px 10px', border:`1px solid ${T.bdr}`, borderTop:'none' }}>
                     <div style={{ fontSize:12, fontWeight:600, color:T.mute, marginBottom:10 }}>AGENDA HOY</div>
+                    <div style={{ display:'flex', justifyContent:'space-between', gap:10, alignItems:'center', marginBottom:12, flexWrap:'wrap' }}>
+                      <div style={{ fontSize:12, color:T.sub }}>
+                        Vista rápida del día. El reporte mensual abre calendario, carga operativa y detalle histórico confiable.
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); setReportTarget(c); }} style={{ padding:'8px 12px', background:T.bluDim, border:`1px solid ${T.BLU}44`, borderRadius:8, color:T.BLU, cursor:'pointer', fontSize:12, fontWeight:700 }}>
+                        Abrir reporte mensual
+                      </button>
+                    </div>
                     {tareasHoy.length === 0 ? (
                       <div style={{ fontSize:13, color:T.mute }}>Sin tareas asignadas para hoy.</div>
                     ) : (
@@ -1074,6 +1195,7 @@ function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBa
           onConfirm={() => { onBaja(bajaTarget.id); setBajaTarget(null); }}
         />
       )}
+      {reportTarget && <MonthlyReportModal apiFetch={apiFetch} type="conductor" target={reportTarget} onClose={() => setReportTarget(null)} onFocusTask={onFocusTask} />}
     </div>
   );
 }
@@ -1082,7 +1204,7 @@ function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBa
 // MODAL NUEVO VEHÍCULO
 // ─────────────────────────────────────────────────────────────
 function NuevoVehiculoModal({ onClose, onConfirm, onUploadImage }) {
-  const EMPTY = { placa:'', marca:'', modelo:'', tipo:'buseta', cap:'', km:'', revTec:'', march:'', foto_url:'', licenciaRequerida:'', combustibleTipo: 'Diésel', rendimiento: 10 };
+  const EMPTY = { placa:'', marca:'', modelo:'', tipo:'buseta', cap:'', km:'', revTec:'', revTec2:'', foto_url:'', licenciaRequerida:'', combustibleTipo: 'Diésel', rendimiento: 10 };
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -1109,8 +1231,8 @@ function NuevoVehiculoModal({ onClose, onConfirm, onUploadImage }) {
     if (!form.marca.trim())  return setError('La marca es requerida.');
     if (!form.modelo.trim()) return setError('El modelo es requerido.');
     if (!form.cap || isNaN(+form.cap) || +form.cap < 1) return setError('Capacidad inválida.');
-    if (!form.revTec) return setError('La fecha de revisión técnica es requerida.');
-    if (!form.march)  return setError('La fecha de marchamo es requerida.');
+    if (!form.revTec) return setError('La primera fecha de revisión técnica es requerida.');
+    if (!form.revTec2) return setError('La segunda fecha de revisión técnica es requerida.');
     setError('');
     onConfirm({
       placa:  form.placa.trim().toUpperCase(),
@@ -1120,7 +1242,8 @@ function NuevoVehiculoModal({ onClose, onConfirm, onUploadImage }) {
       cap:    +form.cap,
       km:     +form.km || 0,
       revTec: form.revTec,
-      march:  form.march,
+      revTec2: form.revTec2,
+      march:  null,
       licenciaRequerida: form.licenciaRequerida || null,
       foto_url: form.foto_url.trim() || null,
       combustibleTipo: form.combustibleTipo,
@@ -1205,12 +1328,12 @@ function NuevoVehiculoModal({ onClose, onConfirm, onUploadImage }) {
           </div>
           <div style={{ display:'flex', gap:12 }}>
             <div style={{ flex:1 }}>
-              <label style={lbl}>REVISIÓN TÉCNICA (vence) *</label>
+              <label style={lbl}>REV. TÉCNICA 1 *</label>
               <input style={inp} type="date" value={form.revTec} onChange={e => set('revTec', e.target.value)} />
             </div>
             <div style={{ flex:1 }}>
-              <label style={lbl}>MARCHAMO (vence) *</label>
-              <input style={inp} type="date" value={form.march} onChange={e => set('march', e.target.value)} />
+              <label style={lbl}>REV. TÉCNICA 2 *</label>
+              <input style={inp} type="date" value={form.revTec2} onChange={e => set('revTec2', e.target.value)} />
             </div>
           </div>
         </div>
@@ -1245,7 +1368,7 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
   const [form, setForm] = useState({
     km: vehiculo?.km ?? 0,
     revTec: (vehiculo?.revTec || '').split('T')[0],
-    march: (vehiculo?.march || '').split('T')[0],
+    revTec2: (vehiculo?.revTec2 || '').split('T')[0],
     foto_url: vehiculo?.foto_url || '',
     licenciaRequerida: vehiculo?.licenciaRequerida || '',
     estado: vehiculo?.estado || 'disponible',
@@ -1315,7 +1438,8 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
     onConfirm(vehiculo.id, {
       km: Number(form.km),
       revTec: form.revTec || null,
-      march: form.march || null,
+      revTec2: form.revTec2 || null,
+      march: null,
       licenciaRequerida: form.licenciaRequerida || null,
       estado: form.estado,
       foto_url: form.foto_url.trim() || null,
@@ -1390,12 +1514,12 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
                 <input style={inp} type="number" step="0.1" value={form.rendimiento} onChange={e => set('rendimiento', e.target.value)} />
               </div>
               <div style={{ gridColumn:'span 4' }}>
-                <label style={lbl}>REVISIÓN TÉCNICA</label>
+                <label style={lbl}>REV. TÉCNICA 1</label>
                 <input style={inp} type="date" value={form.revTec} onChange={e => set('revTec', e.target.value)} />
               </div>
               <div style={{ gridColumn:'span 4' }}>
-                <label style={lbl}>MARCHAMO</label>
-                <input style={inp} type="date" value={form.march} onChange={e => set('march', e.target.value)} />
+                <label style={lbl}>REV. TÉCNICA 2</label>
+                <input style={inp} type="date" value={form.revTec2} onChange={e => set('revTec2', e.target.value)} />
               </div>
             </div>
           </div>
@@ -1486,11 +1610,12 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
   );
 }
 
-function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUploadImage, gastos, onAddGasto, onUploadGastoAdjunto, onDelete, canDelete = false }) {
+function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUploadImage, gastos, onAddGasto, onUploadGastoAdjunto, onDelete, canDelete = false, apiFetch, onFocusTask }) {
   const [filtroEst, setFiltro] = useState('todos');
   const [modalNuevo, setModalNuevo] = useState(false);
   const [bajaTarget, setBajaTarget] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
+  const [reportTarget, setReportTarget] = useState(null);
 
   const filtrados = filtroEst === 'todos' ? vehiculos : vehiculos.filter(v => v.estado === filtroEst);
 
@@ -1555,8 +1680,8 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUplo
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:12 }}>
           {filtrados.map(v => {
             const cond = conductores.find(c => c.id === v.condId);
-            const [rcol, rbg, rdias] = alertLevel(v.revTec);
-            const [mcol, mbg, mdias] = alertLevel(v.march);
+            const regulatoryDates = getVehicleRegulatoryDates(v);
+            const [rcol, rbg, rdias] = alertLevel(regulatoryDates.nextRevision);
             const fuera = v.estado === 'fuera_de_servicio';
             return (
               <div key={v.id} style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:12, padding:'16px', opacity: fuera ? 0.55 : 1 }}>
@@ -1617,20 +1742,30 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUplo
                     background:rbg, borderRadius:6, border:`1px solid ${rcol}22` }}>
                     <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                       <Shield size={12} color={rcol} />
-                      <span style={{ fontSize:11, color:T.sub }}>Rev. técnica · {fmtDate(v.revTec)}</span>
+                      <span style={{ fontSize:11, color:T.sub }}>
+                        Rev. técnica · {regulatoryDates.nextRevision ? fmtDate(regulatoryDates.nextRevision) : 'Sin fechas'}
+                      </span>
                     </div>
                     <span style={{ fontSize:11, fontWeight:600, color:rcol }}>{rdias === 'Vencida' ? '⚠ VENCIDA' : rdias}</span>
                   </div>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 10px',
-                    background:mbg, borderRadius:6, border:`1px solid ${mcol}22` }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <Receipt size={12} color={mcol} />
-                      <span style={{ fontSize:11, color:T.sub }}>Marchamo · {fmtDate(v.march)}</span>
+                  {(regulatoryDates.revTecPrimary || regulatoryDates.revTecSecondary) && (
+                    <div style={{ fontSize:11, color:T.mute, padding:'0 2px' }}>
+                      Rev. técnica anual: {[
+                        regulatoryDates.revTecPrimary ? formatRecurringDayMonth(regulatoryDates.revTecPrimary) : null,
+                        regulatoryDates.revTecSecondary ? formatRecurringDayMonth(regulatoryDates.revTecSecondary) : null,
+                      ].filter(Boolean).join(' · ')}
                     </div>
-                    <span style={{ fontSize:11, fontWeight:600, color:mcol }}>{mdias}</span>
-                  </div>
+                  )}
                 </div>
-                <div style={{ display:'flex', gap:8 }}>
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                  <button
+                    onClick={() => setReportTarget(v)}
+                    style={{ flex:'1 1 100%', padding:'7px 0', background:T.bluDim,
+                      border:`1px solid ${T.BLU}44`,
+                      borderRadius:7, color:T.BLU,
+                      cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                    Ver reporte mensual
+                  </button>
                   <button
                     disabled={false}
                     onClick={() => setEditTarget(v)}
@@ -1687,6 +1822,7 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUplo
           onConfirm={() => { onBaja(bajaTarget.id); setBajaTarget(null); }}
         />
       )}
+      {reportTarget && <MonthlyReportModal apiFetch={apiFetch} type="vehiculo" target={reportTarget} onClose={() => setReportTarget(null)} onFocusTask={onFocusTask} />}
     </div>
   );
 }
@@ -2273,6 +2409,447 @@ function TareasView({ tareas, conductores, vehiculos, eventos, onAsignar, onAddT
   );
 }
 
+function ReportMetricCard({ label, value, sub, color = T.txt }) {
+  return (
+    <div style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'14px 16px', minWidth:140 }}>
+      <div style={{ fontSize:11, color:T.mute, fontWeight:700, letterSpacing:.35 }}>{label}</div>
+      <div style={{ fontSize:24, fontWeight:800, color, marginTop:6, lineHeight:1 }}>{value}</div>
+      {sub && <div style={{ fontSize:12, color:T.sub, marginTop:6 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function MonthCalendarCard({ month, calendar, selectedDay, onSelectDay }) {
+  const cells = buildMonthGrid(month);
+  const statsByDay = useMemo(() => {
+    const map = new Map();
+    (calendar || []).forEach(item => map.set(item.fecha, item));
+    return map;
+  }, [calendar]);
+
+  return (
+    <div style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:16, padding:16 }}>
+      <div style={{ fontSize:12, color:T.mute, fontWeight:700, marginBottom:12 }}>CALENDARIO DEL MES</div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(7, minmax(0, 1fr))', gap:8 }}>
+        {['Lun','Mar','Mie','Jue','Vie','Sab','Dom'].map(day => (
+          <div key={day} style={{ fontSize:11, color:T.mute, textAlign:'center', fontWeight:700 }}>{day}</div>
+        ))}
+        {cells.map((dateValue, index) => {
+          if (!dateValue) {
+            return <div key={`empty-${index}`} style={{ minHeight:72, borderRadius:12, background:'rgba(148,163,184,0.05)' }} />;
+          }
+          const dayStats = statsByDay.get(dateValue);
+          const dayNumber = Number(dateValue.slice(-2));
+          const selected = selectedDay === dateValue;
+          return (
+            <button
+              type="button"
+              key={dateValue}
+              onClick={() => onSelectDay?.(dateValue)}
+              style={{ minHeight:72, borderRadius:12, padding:'10px 8px', border:`1px solid ${selected ? T.BLU : dayStats ? T.AMB+'33' : T.bdr}`, background:selected ? T.bluDim : dayStats ? T.ambDim : T.card3, textAlign:'left', cursor:'pointer' }}>
+              <div style={{ fontSize:13, fontWeight:800, color:T.txt }}>{dayNumber}</div>
+              <div style={{ fontSize:11, color:dayStats ? T.sub : T.mute, marginTop:6 }}>
+                {dayStats ? `${dayStats.tareas} tareas` : 'Sin carga'}
+              </div>
+              {dayStats && (
+                <div style={{ fontSize:10, color:T.mute, marginTop:4 }}>
+                  {dayStats.completadas} ok · {dayStats.eventos} eventos
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MonthlyReportModal({ apiFetch, type, target, onClose, onFocusTask }) {
+  const [month, setMonth] = useState(currentMonthKey());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [report, setReport] = useState(null);
+  const [selectedDay, setSelectedDay] = useState('');
+  const autoMonthAdjustedRef = useRef(false);
+
+  useEffect(() => {
+    autoMonthAdjustedRef.current = false;
+    setMonth(currentMonthKey());
+    setSelectedDay('');
+  }, [target?.id, type]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadReport() {
+      if (!target?.id) return;
+      setLoading(true);
+      setError('');
+      try {
+        const basePath = type === 'vehiculo' ? `${API}/reportes/vehiculos/${target.id}` : `${API}/reportes/conductores/${target.id}`;
+        const payload = await apiFetch(`${basePath}?month=${encodeURIComponent(month)}`);
+        if (!cancelled) setReport(payload);
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'No se pudo cargar el reporte.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadReport();
+    return () => { cancelled = true; };
+  }, [apiFetch, month, target?.id, type]);
+
+  useEffect(() => {
+    if (autoMonthAdjustedRef.current) return;
+    if (!report?.latestMonth) return;
+    if ((report?.tasks?.length || 0) > 0) return;
+    if (report.latestMonth === month) return;
+    autoMonthAdjustedRef.current = true;
+    setMonth(report.latestMonth);
+  }, [month, report]);
+
+  const meta = type === 'vehiculo'
+    ? {
+      title: report?.vehiculo ? `${report.vehiculo.placa} · ${report.vehiculo.marca} ${report.vehiculo.modelo}` : (target?.placa || 'Vehículo'),
+      subtitle: report?.vehiculo ? `${report.vehiculo.tipo} · ${report.vehiculo.cap} plazas` : 'Detalle operativo mensual',
+    }
+    : {
+      title: report?.conductor?.nombre || target?.nombre || 'Conductor',
+      subtitle: report?.conductor?.alias ? `Alias: ${report.conductor.alias}` : 'Detalle operativo mensual',
+    };
+
+  const summary = report?.summary || {};
+  const tasks = report?.tasks || [];
+  const events = report?.events || [];
+  const availableDays = useMemo(() => {
+    const values = new Set();
+    tasks.forEach(task => {
+      if (task?.fecha) values.add(task.fecha);
+    });
+    (report?.calendar || []).forEach(item => {
+      if (item?.fecha) values.add(item.fecha);
+    });
+    return Array.from(values).sort();
+  }, [report?.calendar, tasks]);
+
+  useEffect(() => {
+    if (!availableDays.length) {
+      if (selectedDay) setSelectedDay('');
+      return;
+    }
+    if (!selectedDay || !availableDays.includes(selectedDay)) {
+      setSelectedDay(availableDays[0]);
+    }
+  }, [availableDays, selectedDay]);
+
+  const filteredTasks = selectedDay
+    ? tasks.filter(task => task.fecha === selectedDay)
+    : tasks;
+  const filteredEvents = selectedDay
+    ? events.filter(eventItem => Array.isArray(eventItem.fechas) && eventItem.fechas.includes(selectedDay))
+    : events;
+  const selectedDayLabel = selectedDay ? formatLongDate(selectedDay, { month: 'long' }) : 'Todo el mes';
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.76)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1200, padding:20 }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ width:'min(1200px, 100%)', maxHeight:'92vh', overflow:'auto', background:`linear-gradient(180deg, ${T.card}, ${T.card2})`, border:`1px solid ${T.bdr}`, borderRadius:24, padding:24, boxShadow:'0 30px 80px rgba(15,23,42,0.45)' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', gap:12, alignItems:'flex-start', marginBottom:18, flexWrap:'wrap' }}>
+          <div>
+            <div style={{ fontSize:22, fontWeight:900, color:T.txt }}>{meta.title}</div>
+            <div style={{ fontSize:13, color:T.sub, marginTop:6 }}>{meta.subtitle}</div>
+            <div style={{ fontSize:12, color:T.mute, marginTop:6 }}>
+              Reporte mensual operativo. Los kilómetros todavía no se calculan aquí porque la tarea no persiste una distancia confiable por servicio.
+            </div>
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <button onClick={() => setMonth(prev => addMonthsKey(prev, -1))} style={{ width:36, height:36, borderRadius:10, border:`1px solid ${T.bdr2}`, background:T.card2, color:T.txt, cursor:'pointer', display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
+              <ChevronLeft size={16} />
+            </button>
+            <div style={{ minWidth:190, textAlign:'center', padding:'8px 12px', borderRadius:10, border:`1px solid ${T.bdr2}`, background:T.card2, color:T.txt, fontWeight:800, textTransform:'capitalize' }}>
+              {formatMonthLabel(month)}
+            </div>
+            <button onClick={() => setMonth(prev => addMonthsKey(prev, 1))} style={{ width:36, height:36, borderRadius:10, border:`1px solid ${T.bdr2}`, background:T.card2, color:T.txt, cursor:'pointer', display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
+              <ChevronRight size={16} />
+            </button>
+            <button onClick={onClose} style={{ width:40, height:40, borderRadius:12, border:`1px solid ${T.bdr2}`, background:'transparent', color:T.mute, cursor:'pointer', display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {loading && <div style={{ padding:'28px 0', color:T.mute, fontSize:13 }}>Cargando reporte mensual…</div>}
+        {!loading && error && <div style={{ padding:'14px 16px', borderRadius:14, background:T.redDim, border:`1px solid ${T.RED}33`, color:T.RED, fontSize:13 }}>{error}</div>}
+        {!loading && !error && report && (
+          <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
+            <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+              <ReportMetricCard label="Tareas del mes" value={summary.totalTareas || 0} />
+              <ReportMetricCard label="Completadas" value={summary.completadas || 0} color={T.GRN} />
+              <ReportMetricCard label="Eventos asociados" value={summary.eventosAsociados || 0} color={T.BLU} />
+              <ReportMetricCard label="Dias activos" value={summary.diasActivos || 0} color={T.AMB} />
+              <ReportMetricCard label="Pasajeros" value={summary.pasajeros || 0} />
+              <ReportMetricCard
+                label="Kilometros"
+                value="Pendiente"
+                sub="Falta distancia persistida por tarea"
+                color={T.mute}
+              />
+            </div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'minmax(0, 1.1fr) minmax(320px, .9fr)', gap:18, alignItems:'start' }}>
+              <MonthCalendarCard month={month} calendar={report.calendar} selectedDay={selectedDay} onSelectDay={setSelectedDay} />
+              <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                <div style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:16, padding:16 }}>
+                  <div style={{ fontSize:12, color:T.mute, fontWeight:700, marginBottom:10 }}>RESUMEN CONFIABLE</div>
+                  <div style={{ fontSize:13, color:T.sub }}>Pendientes: <strong style={{ color:T.txt }}>{summary.pendientes || 0}</strong></div>
+                  <div style={{ fontSize:13, color:T.sub, marginTop:6 }}>Asignadas: <strong style={{ color:T.txt }}>{summary.asignadas || 0}</strong></div>
+                  <div style={{ fontSize:13, color:T.sub, marginTop:6 }}>En ruta: <strong style={{ color:T.txt }}>{summary.enRuta || 0}</strong></div>
+                  <div style={{ fontSize:13, color:T.sub, marginTop:6 }}>Incidencias: <strong style={{ color:T.txt }}>{summary.incidencias || 0}</strong></div>
+                  <div style={{ fontSize:13, color:T.sub, marginTop:6 }}>Sin evento: <strong style={{ color:T.txt }}>{summary.tareasSinEvento || 0}</strong></div>
+                  {type === 'vehiculo' && (
+                    <div style={{ fontSize:13, color:T.sub, marginTop:10 }}>
+                      Kilometraje actual unidad: <strong style={{ color:T.txt }}>{Number(report?.vehiculo?.km_actual || 0).toLocaleString()} km</strong>
+                    </div>
+                  )}
+                  {type === 'conductor' && report?.conductor?.vehiculoAsignadoPlaca && (
+                    <div style={{ fontSize:13, color:T.sub, marginTop:10 }}>
+                      Unidad base: <strong style={{ color:T.txt }}>{report.conductor.vehiculoAsignadoPlaca}</strong>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:16, padding:16 }}>
+                  <div style={{ fontSize:12, color:T.mute, fontWeight:700, marginBottom:10 }}>ACLARACION</div>
+                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.6 }}>
+                    Este reporte separa solo relaciones operativas confiables.
+                    No suma kilómetros mensuales todavía porque la estructura actual no guarda una distancia persistida en cada tarea ejecutada.
+                  </div>
+                  {!!report?.activityMonths?.length && (
+                    <div style={{ fontSize:12, color:T.mute, marginTop:10 }}>
+                      Meses con actividad: {report.activityMonths.join(', ')}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:16, padding:16 }}>
+                  <div style={{ fontSize:12, color:T.mute, fontWeight:700, marginBottom:10 }}>DETALLE DEL DIA</div>
+                  <div style={{ fontSize:14, fontWeight:800, color:T.txt, textTransform:'capitalize' }}>{selectedDayLabel}</div>
+                  <div style={{ fontSize:12, color:T.sub, marginTop:6 }}>
+                    {selectedDay
+                      ? `${filteredTasks.length} tarea${filteredTasks.length === 1 ? '' : 's'} y ${filteredEvents.length} evento${filteredEvents.length === 1 ? '' : 's'} en la fecha seleccionada.`
+                      : 'Selecciona un día en el calendario para revisar la carga puntual.'}
+                  </div>
+                  {selectedDay && filteredTasks.length === 0 && (
+                    <div style={{ fontSize:12, color:T.mute, marginTop:10 }}>
+                      Ese día no tiene tareas asociadas para este registro.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:18, padding:18 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:14 }}>
+                <div style={{ fontSize:14, fontWeight:800, color:T.txt }}>{selectedDay ? 'Eventos del día seleccionado' : 'Eventos programados del mes'}</div>
+                <div style={{ fontSize:12, color:T.mute }}>{filteredEvents.length} eventos</div>
+              </div>
+              {filteredEvents.length === 0 ? (
+                <div style={{ padding:'10px 0', color:T.mute, fontSize:13 }}>
+                  {selectedDay ? 'No hay eventos asociados en ese día.' : 'No hay eventos asociados en este mes para este registro.'}
+                </div>
+              ) : (
+                <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                  {filteredEvents.map(eventItem => (
+                    <div key={eventItem.id} style={{ border:`1px solid ${T.bdr}`, borderRadius:14, padding:'14px 16px', background:T.card3 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', gap:12, alignItems:'flex-start', flexWrap:'wrap' }}>
+                        <div>
+                          <div style={{ fontSize:14, fontWeight:800, color:T.txt }}>{eventItem.nombre}</div>
+                          <div style={{ fontSize:12, color:T.sub, marginTop:5 }}>{eventItem.cliente || 'Sin cliente identificado'}</div>
+                          <div style={{ fontSize:11, color:T.mute, marginTop:5 }}>
+                            {eventItem.tareas} tareas vinculadas · {eventItem.fechas.join(', ')}
+                          </div>
+                        </div>
+                        <Badge estado={eventItem.estado} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:18, padding:18 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:14 }}>
+                <div style={{ fontSize:14, fontWeight:800, color:T.txt }}>{selectedDay ? 'Tareas del día seleccionado' : 'Detalle de tareas del mes'}</div>
+                <div style={{ fontSize:12, color:T.mute }}>{filteredTasks.length} registros</div>
+              </div>
+              {filteredTasks.length === 0 ? (
+                <div style={{ padding:'18px 0', color:T.mute, fontSize:13 }}>
+                  {selectedDay ? 'No hay tareas asociadas en ese día.' : 'No hay tareas asociadas en este mes.'}
+                </div>
+              ) : (
+                <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                  {filteredTasks.map(task => (
+                    <div key={task.id} style={{ border:`1px solid ${T.bdr}`, borderRadius:14, padding:'14px 16px', background:T.card3 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap' }}>
+                        <div>
+                          <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                            <span style={{ fontFamily:'monospace', fontSize:12, color:T.AMB, fontWeight:800 }}>{task.fecha} · {task.hora}</span>
+                            <span style={{ fontSize:14, fontWeight:700, color:T.txt }}>{task.nombre}</span>
+                          </div>
+                          <div style={{ fontSize:12, color:T.sub, marginTop:6 }}>{task.origen || 'Sin origen'} {task.origen && task.destino ? '→' : ''} {task.destino || 'Sin destino'}</div>
+                          <div style={{ fontSize:11, color:T.mute, marginTop:6 }}>
+                            {task.eventoNombre ? `${task.eventoNombre} · ${task.cliente || 'Sin cliente'}` : 'Sin evento asociado'} · {task.pax || 0} pax
+                          </div>
+                          <div style={{ fontSize:11, color:T.mute, marginTop:4 }}>
+                            {type === 'vehiculo'
+                              ? (task.conductorNombre ? `Conductor: ${task.conductorNombre}` : 'Sin conductor asignado')
+                              : (task.vehiculoPlaca ? `Vehiculo: ${task.vehiculoPlaca}${task.vehiculoNombre ? ` · ${task.vehiculoNombre}` : ''}` : 'Sin vehículo asignado')}
+                          </div>
+                          {task.notas && <div style={{ fontSize:11, color:T.sub, marginTop:6 }}>Notas: {task.notas}</div>}
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8 }}>
+                          <Badge estado={task.estado} />
+                          <button
+                            type="button"
+                            onClick={() => onFocusTask?.(task)}
+                            style={{ padding:'8px 10px', background:T.bluDim, border:`1px solid ${T.BLU}44`, borderRadius:8, color:T.BLU, cursor:'pointer', fontSize:11, fontWeight:700 }}>
+                            Abrir tarea
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReportesView({ apiFetch }) {
+  const [month, setMonth] = useState(currentMonthKey());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [report, setReport] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSummary() {
+      setLoading(true);
+      setError('');
+      try {
+        const payload = await apiFetch(`${API}/reportes/resumen?month=${encodeURIComponent(month)}`);
+        if (!cancelled) setReport(payload);
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'No se pudo cargar el tablero de reportes.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadSummary();
+    return () => { cancelled = true; };
+  }, [apiFetch, month]);
+
+  const totals = report?.totals || {};
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, marginBottom:20, flexWrap:'wrap' }}>
+        <div>
+          <div style={{ fontSize:24, fontWeight:900, color:T.txt }}>Reportes operativos</div>
+          <div style={{ fontSize:13, color:T.sub, marginTop:6 }}>
+            Tablero mensual de carga por unidad y por conductor, usando solo relaciones confiables del sistema actual.
+          </div>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <button onClick={() => setMonth(prev => addMonthsKey(prev, -1))} style={{ width:38, height:38, borderRadius:10, border:`1px solid ${T.bdr2}`, background:T.card2, color:T.txt, cursor:'pointer', display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
+            <ChevronLeft size={16} />
+          </button>
+          <div style={{ minWidth:200, textAlign:'center', padding:'9px 12px', borderRadius:10, border:`1px solid ${T.bdr2}`, background:T.card2, color:T.txt, fontWeight:800, textTransform:'capitalize' }}>
+            {formatMonthLabel(month)}
+          </div>
+          <button onClick={() => setMonth(prev => addMonthsKey(prev, 1))} style={{ width:38, height:38, borderRadius:10, border:`1px solid ${T.bdr2}`, background:T.card2, color:T.txt, cursor:'pointer', display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+
+      {loading && <div style={{ color:T.mute, fontSize:13 }}>Cargando tablero mensual…</div>}
+      {!loading && error && <div style={{ padding:'14px 16px', borderRadius:14, background:T.redDim, border:`1px solid ${T.RED}33`, color:T.RED, fontSize:13 }}>{error}</div>}
+      {!loading && !error && report && (
+        <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
+          <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+            <StatCard label="Tareas del mes" value={totals.totalTareas || 0} icon={CheckSquare} color={T.txt} />
+            <StatCard label="Completadas" value={totals.completadas || 0} icon={CheckCircle} color={T.GRN} />
+            <StatCard label="En ruta" value={totals.enRuta || 0} icon={Zap} color={T.BLU} />
+            <StatCard label="Eventos" value={totals.eventos || 0} icon={CalendarDays} color={T.AMB} />
+            <StatCard label="Pasajeros" value={totals.pasajeros || 0} icon={Users} color={T.txt} />
+          </div>
+
+          <div style={{ padding:'12px 14px', borderRadius:14, background:T.card2, border:`1px solid ${T.bdr}` }}>
+            <div style={{ fontSize:12, color:T.mute }}>
+              Kilómetros mensuales: pendientes de consolidación estructural. La tarea todavía no persiste una distancia verificable por servicio.
+            </div>
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:18 }}>
+            <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:18, padding:18 }}>
+              <div style={{ fontSize:16, fontWeight:800, color:T.txt, marginBottom:14 }}>Carga por vehículo</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                {(report.vehiculos || []).map(item => (
+                  <div key={item.id} style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'14px 16px' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', gap:12, alignItems:'flex-start' }}>
+                      <div>
+                        <div style={{ fontFamily:'monospace', fontSize:15, fontWeight:800, color:T.AMB }}>{item.placa}</div>
+                        <div style={{ fontSize:12, color:T.sub, marginTop:4 }}>{item.marca} {item.modelo}</div>
+                      </div>
+                      <Badge estado={item.estado} />
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns:'repeat(4, minmax(0,1fr))', gap:10, marginTop:12 }}>
+                      <div><div style={{ fontSize:10, color:T.mute }}>Tareas</div><div style={{ fontSize:16, fontWeight:800, color:T.txt }}>{item.tareas}</div></div>
+                      <div><div style={{ fontSize:10, color:T.mute }}>OK</div><div style={{ fontSize:16, fontWeight:800, color:T.GRN }}>{item.completadas}</div></div>
+                      <div><div style={{ fontSize:10, color:T.mute }}>Eventos</div><div style={{ fontSize:16, fontWeight:800, color:T.BLU }}>{item.eventos}</div></div>
+                      <div><div style={{ fontSize:10, color:T.mute }}>Dias</div><div style={{ fontSize:16, fontWeight:800, color:T.AMB }}>{item.diasActivos}</div></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:18, padding:18 }}>
+              <div style={{ fontSize:16, fontWeight:800, color:T.txt, marginBottom:14 }}>Carga por conductor</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                {(report.conductores || []).map(item => (
+                  <div key={item.id} style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'14px 16px' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', gap:12, alignItems:'flex-start' }}>
+                      <div>
+                        <div style={{ fontSize:15, fontWeight:800, color:T.txt }}>{item.nombre}</div>
+                        <div style={{ fontSize:12, color:T.sub, marginTop:4 }}>{item.alias || 'Sin alias'}</div>
+                      </div>
+                      <Badge estado={item.estado} />
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns:'repeat(4, minmax(0,1fr))', gap:10, marginTop:12 }}>
+                      <div><div style={{ fontSize:10, color:T.mute }}>Tareas</div><div style={{ fontSize:16, fontWeight:800, color:T.txt }}>{item.tareas}</div></div>
+                      <div><div style={{ fontSize:10, color:T.mute }}>OK</div><div style={{ fontSize:16, fontWeight:800, color:T.GRN }}>{item.completadas}</div></div>
+                      <div><div style={{ fontSize:10, color:T.mute }}>Eventos</div><div style={{ fontSize:16, fontWeight:800, color:T.BLU }}>{item.eventos}</div></div>
+                      <div><div style={{ fontSize:10, color:T.mute }}>Dias</div><div style={{ fontSize:16, fontWeight:800, color:T.AMB }}>{item.diasActivos}</div></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // SIDEBAR
 // ─────────────────────────────────────────────────────────────
@@ -2291,7 +2868,7 @@ const ROOT_TAB_ITEMS = [
     { id:'config',      Icon:Settings,        label:'Configuración'  , role: 'admin' },
 ];
 
-function Sidebar({ active, onOpenView, user, onLogout, token, onVoiceInterpretation, theme, onToggleTheme }) {
+function Sidebar({ active, onOpenView, user, onLogout }) {
   const items = ROOT_TAB_ITEMS;
 
   const filteredItems = items.filter(item => !item.role || item.role === user?.rol);
@@ -2329,25 +2906,6 @@ function Sidebar({ active, onOpenView, user, onLogout, token, onVoiceInterpretat
       </nav>
 
       <div style={{ padding:'16px', borderTop:`1px solid ${T.bdr}`, background:T.card2 }}>
-        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:12 }}>
-          <VoiceAssistantButton token={token} onInterpretation={onVoiceInterpretation} />
-          <button onClick={onToggleTheme}
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: 12,
-              border: `1px solid ${T.AMB}44`,
-              background: `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
-              color: T.AMB,
-              cursor:'pointer',
-              display:'flex',
-              alignItems:'center',
-              justifyContent:'center',
-              boxShadow: '0 10px 30px rgba(15,23,42,0.12)',
-            }}>
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </div>
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
           <img
             src={user?.foto_url || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png'}
@@ -3014,11 +3572,11 @@ function AppContent() {
       case 'tareas':
         return <TareasView key={`${selectedTaskDate}-${taskScope}`} tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} onAddTarea={handleAddTarea} selectedDate={selectedTaskDate} onDateChange={handleTaskDateChange} scope={taskScope} onScopeChange={handleTaskScopeChange} focusedTaskId={focusedTaskId} focusedEventId={focusedEventId} onCreateEventFromTasks={handleCreateEventFromTasks} onUpdateTaskStatus={handleUpdateTaskStatus} />;
       case 'gantt':
-        return <FlotaGanttView tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onTooltipChange={setGanttTooltip} />;
+        return <FlotaGanttView apiFetch={apiFetch} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onTooltipChange={setGanttTooltip} onFocusTask={focusTaskInPlanner} />;
       case 'conductores':
-        return <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} onAdd={handleAddConductor} onUpdate={handleUpdateConductor} onBaja={handleBajaConductor} onDelete={handleDeleteConductor} canDelete={user?.rol === 'admin'} />;
+        return <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} onAdd={handleAddConductor} onUpdate={handleUpdateConductor} onBaja={handleBajaConductor} onDelete={handleDeleteConductor} canDelete={user?.rol === 'admin'} apiFetch={apiFetch} onFocusTask={focusTaskInPlanner} />;
       case 'vehiculos':
-        return <VehiculosView vehiculos={vehiculos} conductores={conductores} onAdd={handleAddVehiculo} onBaja={handleBajaVehiculo} onUpdate={handleUpdateVehiculo} onUploadImage={uploadVehiculoImage} gastos={gastos} onAddGasto={handleAddGasto} onUploadGastoAdjunto={uploadGastoAdjunto} onDelete={handleDeleteVehiculo} canDelete={user?.rol === 'admin'} />;
+        return <VehiculosView vehiculos={vehiculos} conductores={conductores} onAdd={handleAddVehiculo} onBaja={handleBajaVehiculo} onUpdate={handleUpdateVehiculo} onUploadImage={uploadVehiculoImage} gastos={gastos} onAddGasto={handleAddGasto} onUploadGastoAdjunto={uploadGastoAdjunto} onDelete={handleDeleteVehiculo} canDelete={user?.rol === 'admin'} apiFetch={apiFetch} onFocusTask={focusTaskInPlanner} />;
       case 'usuarios':
         return <UsuarioMgmtView />;
       case 'config':
@@ -3026,7 +3584,7 @@ function AppContent() {
       case 'gastos':
         return <GastosView gastos={gastos} vehiculos={vehiculos} />;
       case 'reportes':
-        return <PlaceholderView icono={BarChart3} />;
+        return <ReportesView apiFetch={apiFetch} />;
       default:
         return null;
     }
@@ -3049,11 +3607,44 @@ function AppContent() {
   return (
     <div style={{ display:'flex', minHeight:'100vh', background:T.bg, fontFamily:"system-ui,-apple-system,sans-serif",
       color:T.txt, fontSize:14, lineHeight:1.5 }}>
-      <Sidebar active={view} onOpenView={openRootView} user={user} onLogout={logout} token={token} onVoiceInterpretation={handleVoiceInterpretation} theme={theme} onToggleTheme={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')} />
+      <Sidebar active={view} onOpenView={openRootView} user={user} onLogout={logout} />
 
       <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
         <AlertBar tareas={tareas} />
         <GlobalTabs />
+
+        <div
+          style={{
+            position: 'fixed',
+            top: 18,
+            right: 22,
+            zIndex: 80,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <VoiceAssistantButton token={token} onInterpretation={handleVoiceInterpretation} />
+          <button
+            onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: 12,
+              border: `1px solid ${T.AMB}44`,
+              background: `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
+              color: T.AMB,
+              cursor:'pointer',
+              display:'flex',
+              alignItems:'center',
+              justifyContent:'center',
+              boxShadow: '0 10px 30px rgba(15,23,42,0.12)',
+            }}
+            title={theme === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'}
+          >
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        </div>
 
         <div style={{ flex:1, padding:28, overflowY:'auto', overflowX:'hidden', scrollbarGutter:'stable' }}>
           {rootTabs.length === 0 ? (

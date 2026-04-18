@@ -22,10 +22,12 @@ const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const VEHICLE_UPLOADS_DIR = path.join(UPLOADS_DIR, 'vehiculos');
 const GASTOS_UPLOADS_DIR = path.join(UPLOADS_DIR, 'gastos');
 const EMPRESA_UPLOADS_DIR = path.join(UPLOADS_DIR, 'empresa');
+const PROFORMA_UPLOADS_DIR = path.join(UPLOADS_DIR, 'proformas');
 
 fs.mkdirSync(VEHICLE_UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(GASTOS_UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(EMPRESA_UPLOADS_DIR, { recursive: true });
+fs.mkdirSync(PROFORMA_UPLOADS_DIR, { recursive: true });
 
 const app = express();
 const PORT = process.env.PORT || 3020;
@@ -69,6 +71,130 @@ function formatDbError(error) {
     }
 
     return error?.message || 'Error interno del servidor';
+}
+
+function getCurrentMonthKey() {
+    return new Date().toISOString().slice(0, 7);
+}
+
+function parseMonthKey(monthKey) {
+    const normalized = String(monthKey || '').trim();
+    const match = normalized.match(/^(\d{4})-(\d{2})$/);
+    if (!match) {
+        throw new Error('El parámetro month debe tener formato YYYY-MM.');
+    }
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (!year || month < 1 || month > 12) {
+        throw new Error('El parámetro month no es válido.');
+    }
+
+    return { year, month };
+}
+
+function getMonthRange(monthKey) {
+    const { year, month } = parseMonthKey(monthKey || getCurrentMonthKey());
+    const from = `${year}-${String(month).padStart(2, '0')}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const to = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    return {
+        month: `${year}-${String(month).padStart(2, '0')}`,
+        from,
+        to,
+    };
+}
+
+function buildReportSummary(tasks = []) {
+    const eventIds = new Set();
+    const activeDays = new Set();
+    const statusCounts = {};
+    let completed = 0;
+    let totalPassengers = 0;
+    let sinEvento = 0;
+
+    tasks.forEach((task) => {
+        if (task?.eventoId) eventIds.add(task.eventoId);
+        else sinEvento += 1;
+
+        if (task?.fecha) activeDays.add(task.fecha);
+        if (task?.estado) statusCounts[task.estado] = (statusCounts[task.estado] || 0) + 1;
+        if (task?.estado === 'completada') completed += 1;
+        totalPassengers += Number(task?.pax || 0);
+    });
+
+    return {
+        totalTareas: tasks.length,
+        completadas: completed,
+        pendientes: statusCounts.pendiente || 0,
+        enRuta: statusCounts.en_ruta || 0,
+        asignadas: statusCounts.asignada || 0,
+        incidencias: statusCounts.incidencia || 0,
+        eventosAsociados: eventIds.size,
+        tareasSinEvento: sinEvento,
+        pasajeros: totalPassengers,
+        diasActivos: activeDays.size,
+        kilometrosConfiables: null,
+        kilometrosModo: 'pendiente_consolidacion',
+        kilometrosNota: 'Las tareas no guardan todavía una distancia persistida y verificable por servicio.',
+    };
+}
+
+function buildCalendarDays(tasks = []) {
+    const dayMap = new Map();
+
+    tasks.forEach((task) => {
+        const key = task?.fecha;
+        if (!key) return;
+        if (!dayMap.has(key)) {
+            dayMap.set(key, { fecha: key, tareas: 0, completadas: 0, eventos: new Set() });
+        }
+        const current = dayMap.get(key);
+        current.tareas += 1;
+        if (task?.estado === 'completada') current.completadas += 1;
+        if (task?.eventoId) current.eventos.add(task.eventoId);
+    });
+
+    return [...dayMap.values()]
+        .map((entry) => ({
+            fecha: entry.fecha,
+            tareas: entry.tareas,
+            completadas: entry.completadas,
+            eventos: entry.eventos.size,
+        }))
+        .sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
+function buildEventsFromTasks(tasks = []) {
+    const eventMap = new Map();
+
+    tasks.forEach((task) => {
+        if (!task?.eventoId) return;
+        if (!eventMap.has(task.eventoId)) {
+            eventMap.set(task.eventoId, {
+                id: task.eventoId,
+                nombre: task.eventoNombre || 'Evento',
+                estado: task.eventoEstado || 'planificado',
+                cliente: task.cliente || '',
+                tareas: 0,
+                fechas: new Set(),
+            });
+        }
+        const current = eventMap.get(task.eventoId);
+        current.tareas += 1;
+        if (task?.fecha) current.fechas.add(task.fecha);
+    });
+
+    return [...eventMap.values()]
+        .map((item) => ({
+            id: item.id,
+            nombre: item.nombre,
+            estado: item.estado,
+            cliente: item.cliente,
+            tareas: item.tareas,
+            fechas: [...item.fechas].sort(),
+        }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre));
 }
 
 async function getSystemConfigValue(clave) {
@@ -563,8 +689,59 @@ function ensureCountryContext(place = '') {
     return `${value}, Costa Rica`;
 }
 
+function uniqueText(values = []) {
+    return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
+}
+
+function cleanHumanPlaceLabel(value = '') {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    return text
+        .replace(/\s+/g, ' ')
+        .replace(/\s+,/g, ',')
+        .replace(/,\s*Costa Rica$/i, '')
+        .trim();
+}
+
+function buildHumanPlaceLabel(hit = {}, fallback = '') {
+    const address = hit?.address && typeof hit.address === 'object' ? hit.address : {};
+    const primary = cleanHumanPlaceLabel(
+        address.amenity
+        || address.tourism
+        || address.attraction
+        || address.building
+        || address.shop
+        || address.office
+        || address.leisure
+        || address.aeroway
+        || address.house
+        || address.house_number
+        || address.road
+        || address.pedestrian
+        || address.neighbourhood
+        || address.suburb
+        || address.hamlet
+        || address.village
+        || address.town
+        || address.city
+        || hit?.name
+        || fallback
+    );
+    const areaParts = uniqueText([
+        address.suburb,
+        address.city_district,
+        address.town,
+        address.village,
+        address.city,
+        address.county,
+        address.state,
+    ]).filter(part => part && part !== primary).slice(0, 2);
+    const compact = cleanHumanPlaceLabel([primary, ...areaParts].filter(Boolean).join(', '));
+    return compact || cleanHumanPlaceLabel(hit?.display_name || fallback);
+}
+
 async function geocodePlace(query) {
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=cr&q=${encodeURIComponent(ensureCountryContext(query))}`;
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&countrycodes=cr&q=${encodeURIComponent(ensureCountryContext(query))}`;
     const response = await fetch(url, {
         headers: {
             'User-Agent': 'TransOP/1.0 (route-estimation)',
@@ -585,7 +762,8 @@ async function geocodePlace(query) {
     return {
         lat: Number(hit.lat),
         lon: Number(hit.lon),
-        label: hit.display_name || query,
+        label: buildHumanPlaceLabel(hit, query),
+        rawLabel: hit.display_name || query,
     };
 }
 
@@ -634,6 +812,65 @@ async function estimateRouteDistanceKm(origin, destination, options = {}) {
     if (!Number.isFinite(meters)) return null;
 
     return Math.max(1, Math.round(meters / 1000));
+}
+
+async function buildRoutePreview(origin, destination, options = {}) {
+    const [from, to] = await Promise.all([
+        resolveRoutePoint(origin, options.originCoords),
+        resolveRoutePoint(destination, options.destinationCoords),
+    ]);
+
+    if (!from || !to) return null;
+
+    const routeUrl = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=false`;
+    const response = await fetch(routeUrl, {
+        headers: {
+            'User-Agent': 'TransOP/1.0 (route-preview)',
+            Accept: 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        throw new Error('No se pudo calcular la ruta inicial entre origen y destino.');
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const route = payload?.routes?.[0];
+    const meters = Number(route?.distance || 0);
+    const seconds = Number(route?.duration || 0);
+
+    if (!Number.isFinite(meters) || !Number.isFinite(seconds) || meters <= 0) {
+        return null;
+    }
+
+    const leg = {
+        distance: meters,
+        duration: seconds,
+        from: ensureCountryContext(origin),
+        to: ensureCountryContext(destination),
+        fromDesc: from.label || origin,
+        toDesc: to.label || destination,
+    };
+
+    return {
+        id: `ai-route-${Date.now()}`,
+        origin: ensureCountryContext(origin),
+        destination: ensureCountryContext(destination),
+        originDesc: from.label || origin,
+        destinationDesc: to.label || destination,
+        originRawLabel: from.rawLabel || from.label || origin,
+        destinationRawLabel: to.rawLabel || to.label || destination,
+        waypoints: [],
+        waypointsDesc: [],
+        dates: options.date ? [options.date] : [],
+        date: options.date || '',
+        source: 'ai',
+        result: {
+            totalDistance: meters,
+            totalTime: seconds,
+            legs: [leg],
+        },
+    };
 }
 
 const REQUIRED_QUOTE_FIELDS = ['contacto', 'telefono', 'origen', 'destino', 'fechaServicio', 'pasajeros'];
@@ -873,6 +1110,8 @@ async function ensureDatabaseCompatibility() {
             ADD COLUMN IF NOT EXISTS licencia_requerida VARCHAR(10);
             ALTER TABLE vehiculos
             ADD COLUMN IF NOT EXISTS rendimiento DECIMAL(10,2) DEFAULT 0;
+            ALTER TABLE vehiculos
+            ADD COLUMN IF NOT EXISTS fecha_revision_tecnica_2 DATE;
         `);
 
         await pgQuery(`
@@ -909,8 +1148,38 @@ function sanitizeUploadName(filename = '') {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${safeExt}`;
 }
 
+function sanitizeGenericUploadName(filename = '', mimeType = '') {
+    const originalExt = path.extname(String(filename || '')).toLowerCase();
+    const mimeExtMap = {
+        'image/jpeg': '.jpg',
+        'image/png': '.png',
+        'image/webp': '.webp',
+        'image/gif': '.gif',
+        'image/heic': '.heic',
+        'application/pdf': '.pdf',
+        'application/msword': '.doc',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+        'application/vnd.ms-excel': '.xls',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+        'application/vnd.ms-powerpoint': '.ppt',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+        'text/plain': '.txt',
+        'audio/mpeg': '.mp3',
+        'audio/mp4': '.m4a',
+        'audio/wav': '.wav',
+        'audio/x-wav': '.wav',
+        'audio/ogg': '.ogg',
+        'audio/webm': '.webm',
+        'video/mp4': '.mp4',
+        'video/quicktime': '.mov',
+        'video/webm': '.webm',
+    };
+    const safeExt = originalExt || mimeExtMap[String(mimeType || '').toLowerCase()] || '.bin';
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${safeExt}`;
+}
+
 function parseDataUrlImage(dataUrl = '') {
-    const match = String(dataUrl || '').match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+    const match = String(dataUrl || '').match(/^data:(image\/[a-zA-Z0-9+.-]+)(?:;[^,]+)?;base64,(.+)$/);
     if (!match) {
         throw new Error('La imagen no tiene un formato valido.');
     }
@@ -921,7 +1190,7 @@ function parseDataUrlImage(dataUrl = '') {
 }
 
 function parseDataUrlFile(dataUrl = '') {
-    const match = String(dataUrl || '').match(/^data:([a-zA-Z0-9/+.-]+);base64,(.+)$/);
+    const match = String(dataUrl || '').match(/^data:([^;,]+(?:\/[^;,]+)?)(?:;[^,]+)?;base64,(.+)$/);
     if (!match) {
         throw new Error('El archivo no tiene un formato valido.');
     }
@@ -1474,6 +1743,19 @@ app.post('/api/tms/uploads/gastos', authenticateToken, async (req, res) => {
     }
 });
 
+app.post('/api/tms/uploads/proformas', async (req, res) => {
+    const { filename, dataUrl } = req.body || {};
+    try {
+        const { mimeType, buffer } = parseDataUrlFile(dataUrl);
+        const finalName = sanitizeGenericUploadName(filename, mimeType);
+        const finalPath = path.join(PROFORMA_UPLOADS_DIR, finalName);
+        fs.writeFileSync(finalPath, buffer);
+        res.json({ success: true, path: `/uploads/proformas/${finalName}`, mimeType, sizeBytes: buffer.byteLength || 0 });
+    } catch (error) {
+        res.status(400).json({ error: error.message || 'No se pudo guardar el adjunto de la proforma.' });
+    }
+});
+
 app.post('/api/tms/uploads/logo', authenticateToken, async (req, res) => {
     const { filename, dataUrl } = req.body || {};
     try {
@@ -1517,9 +1799,9 @@ app.get('/api/tms/vehiculos', authenticateToken, async (req, res) => {
     try {
         await ensureDatabaseCompatibility();
         const result = await pgQuery(
-              `SELECT id, placa, marca, modelo, tipo, capacidad_pasajeros AS cap, estado,
-                      conductor_asignado_id AS "condId", fecha_revision_tecnica AS "revTec", fecha_marchamo AS march, km_actual AS km,
-                      foto_url, licencia_requerida AS "licenciaRequerida",
+            `SELECT id, placa, marca, modelo, tipo, capacidad_pasajeros AS cap, estado,
+                    conductor_asignado_id AS "condId", fecha_revision_tecnica AS "revTec", fecha_revision_tecnica_2 AS "revTec2", fecha_marchamo AS march, km_actual AS km,
+                    foto_url, licencia_requerida AS "licenciaRequerida",
                       colaborador, combustible_costo, combustible_tipo, rendimiento, peajes, viaticos, utilidad,
                       adic_col, adic_viat, tarifa_gam, media_tarifa, t_in_sj, t_out_sj, t_in_ctg, t_out_ctg,
                       hospedaje, viatico_diario, activo
@@ -1534,14 +1816,14 @@ app.get('/api/tms/vehiculos', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/tms/vehiculos', authenticateToken, async (req, res) => {
-    const { placa, marca, modelo, tipo, cap, revTec, march, km, foto_url, licenciaRequerida, combustibleTipo, rendimiento } = req.body;
+    const { placa, marca, modelo, tipo, cap, revTec, revTec2, march, km, foto_url, licenciaRequerida, combustibleTipo, rendimiento } = req.body;
     try {
         await ensureDatabaseCompatibility();
         const result = await pgQuery(
-            `INSERT INTO vehiculos (placa, marca, modelo, tipo, capacidad_pasajeros, fecha_revision_tecnica, fecha_marchamo, km_actual, foto_url, licencia_requerida, combustible_tipo, rendimiento, estado)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'disponible')
+            `INSERT INTO vehiculos (placa, marca, modelo, tipo, capacidad_pasajeros, fecha_revision_tecnica, fecha_revision_tecnica_2, fecha_marchamo, km_actual, foto_url, licencia_requerida, combustible_tipo, rendimiento, estado)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'disponible')
              RETURNING id`,
-            [placa, marca, modelo, tipo, cap, revTec || null, march || null, km || 0, foto_url || null, licenciaRequerida || null, combustibleTipo || 'Diésel', rendimiento || 0]
+            [placa, marca, modelo, tipo, cap, revTec || null, revTec2 || null, march || null, km || 0, foto_url || null, licenciaRequerida || null, combustibleTipo || 'Diésel', rendimiento || 0]
         );
         res.json({ success: true, id: result.rows[0].id });
     } catch (error) {
@@ -1552,7 +1834,7 @@ app.post('/api/tms/vehiculos', authenticateToken, async (req, res) => {
 app.put('/api/tms/vehiculos/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const {
-        placa, marca, modelo, tipo, cap, revTec, march,
+        placa, marca, modelo, tipo, cap, revTec, revTec2, march,
         colaborador, combustible_costo, combustibleTipo, rendimiento, peajes, viaticos, utilidad, adic_col, adic_viat,
         tarifa_gam, media_tarifa, t_in_sj, t_out_sj, t_in_ctg, t_out_ctg,
         hospedaje, viatico_diario, foto_url, licenciaRequerida,
@@ -1569,32 +1851,33 @@ app.put('/api/tms/vehiculos/:id', authenticateToken, async (req, res) => {
                 tipo = COALESCE($4, tipo),
                 capacidad_pasajeros = COALESCE($5, capacidad_pasajeros),
                 fecha_revision_tecnica = COALESCE($6, fecha_revision_tecnica),
-                fecha_marchamo = COALESCE($7, fecha_marchamo),
-                km_actual = COALESCE($8, km_actual),
-                estado = COALESCE($9, estado),
-                conductor_asignado_id = COALESCE($10, conductor_asignado_id),
-                colaborador = COALESCE($11, colaborador),
-                combustible_costo = COALESCE($12, combustible_costo),
-                combustible_tipo = COALESCE($13, combustible_tipo),
-                peajes = COALESCE($14, peajes),
-                viaticos = COALESCE($15, viaticos),
-                utilidad = COALESCE($16, utilidad),
-                adic_col = COALESCE($17, adic_col),
-                adic_viat = COALESCE($18, adic_viat),
-                tarifa_gam = COALESCE($19, tarifa_gam),
-                media_tarifa = COALESCE($20, media_tarifa),
-                t_in_sj = COALESCE($21, t_in_sj),
-                t_out_sj = COALESCE($22, t_out_sj),
-                t_in_ctg = COALESCE($23, t_in_ctg),
-                t_out_ctg = COALESCE($24, t_out_ctg),
-                hospedaje = COALESCE($25, hospedaje),
-                viatico_diario = COALESCE($26, viatico_diario),
-                foto_url = COALESCE($27, foto_url),
-                licencia_requerida = COALESCE($28, licencia_requerida),
-                rendimiento = COALESCE($29, rendimiento),
+                fecha_revision_tecnica_2 = COALESCE($7, fecha_revision_tecnica_2),
+                fecha_marchamo = COALESCE($8, fecha_marchamo),
+                km_actual = COALESCE($9, km_actual),
+                estado = COALESCE($10, estado),
+                conductor_asignado_id = COALESCE($11, conductor_asignado_id),
+                colaborador = COALESCE($12, colaborador),
+                combustible_costo = COALESCE($13, combustible_costo),
+                combustible_tipo = COALESCE($14, combustible_tipo),
+                peajes = COALESCE($15, peajes),
+                viaticos = COALESCE($16, viaticos),
+                utilidad = COALESCE($17, utilidad),
+                adic_col = COALESCE($18, adic_col),
+                adic_viat = COALESCE($19, adic_viat),
+                tarifa_gam = COALESCE($20, tarifa_gam),
+                media_tarifa = COALESCE($21, media_tarifa),
+                t_in_sj = COALESCE($22, t_in_sj),
+                t_out_sj = COALESCE($23, t_out_sj),
+                t_in_ctg = COALESCE($24, t_in_ctg),
+                t_out_ctg = COALESCE($25, t_out_ctg),
+                hospedaje = COALESCE($26, hospedaje),
+                viatico_diario = COALESCE($27, viatico_diario),
+                foto_url = COALESCE($28, foto_url),
+                licencia_requerida = COALESCE($29, licencia_requerida),
+                rendimiento = COALESCE($30, rendimiento),
                 updated_at = NOW()
-             WHERE id = $30`,
-            [placa, marca, modelo, tipo, cap, revTec || null, march || null, km,
+             WHERE id = $31`,
+            [placa, marca, modelo, tipo, cap, revTec || null, revTec2 || null, march || null, km,
                 estado, condId, colaborador, combustible_costo, combustibleTipo, peajes, viaticos, utilidad, adic_col, adic_viat,
                 tarifa_gam, media_tarifa, t_in_sj, t_out_sj, t_in_ctg, t_out_ctg,
                 hospedaje, viatico_diario, foto_url || null, licenciaRequerida || null, rendimiento, id]
@@ -1919,9 +2202,281 @@ app.patch('/api/tms/tareas/:id/estado', authenticateToken, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// REPORTES MENSUALES
+// ─────────────────────────────────────────────────────────────
+app.get('/api/tms/reportes/vehiculos/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const range = getMonthRange(req.query.month);
+
+        const vehicleResult = await pgQuery(
+            `SELECT
+                v.id,
+                v.placa,
+                v.marca,
+                v.modelo,
+                v.tipo,
+                v.estado,
+                v.capacidad_pasajeros AS cap,
+                v.km_actual AS km_actual,
+                v.licencia_requerida AS "licenciaRequerida",
+                c.id AS "condId",
+                c.nombre AS "condNombre"
+             FROM vehiculos v
+             LEFT JOIN conductores c ON c.id = v.conductor_asignado_id
+             WHERE v.id = $1
+             LIMIT 1`,
+            [id]
+        );
+
+        const vehiculo = vehicleResult.rows[0];
+        if (!vehiculo) {
+            return res.status(404).json({ error: 'Vehículo no encontrado.' });
+        }
+
+        const tasksResult = await pgQuery(
+            `SELECT
+                t.id,
+                t.nombre,
+                t.estado,
+                TO_CHAR(t.fecha_salida, 'YYYY-MM-DD') AS fecha,
+                TO_CHAR(t.fecha_salida, 'HH24:MI') AS hora,
+                TO_CHAR(COALESCE(t.llegada_estimada, t.hora_regreso), 'HH24:MI') AS fin,
+                t.pasajeros AS pax,
+                t.punto_salida AS origen,
+                t.destino,
+                t.notas_operativas AS notas,
+                t.evento_id AS "eventoId",
+                e.nombre AS "eventoNombre",
+                e.estado AS "eventoEstado",
+                COALESCE(NULLIF(TRIM(cli.empresa), ''), cli.nombre) AS cliente,
+                t.conductor_id AS "conductorId",
+                cond.nombre AS "conductorNombre"
+             FROM tareas t
+             LEFT JOIN eventos e ON e.id = t.evento_id
+             LEFT JOIN clientes cli ON cli.id = e.cliente_id
+             LEFT JOIN conductores cond ON cond.id = t.conductor_id
+             WHERE t.vehiculo_id = $1
+               AND t.fecha_salida::date BETWEEN $2::date AND $3::date
+               AND t.estado != 'cancelada'
+             ORDER BY t.fecha_salida ASC`,
+            [id, range.from, range.to]
+        );
+
+        const tasks = tasksResult.rows;
+        const monthsResult = await pgQuery(
+            `SELECT DISTINCT TO_CHAR(fecha_salida, 'YYYY-MM') AS month
+             FROM tareas
+             WHERE vehiculo_id = $1
+               AND estado != 'cancelada'
+             ORDER BY month DESC`,
+            [id]
+        );
+        const activityMonths = monthsResult.rows.map((row) => row.month).filter(Boolean);
+        res.json({
+            month: range.month,
+            range,
+            vehiculo,
+            summary: buildReportSummary(tasks),
+            calendar: buildCalendarDays(tasks),
+            events: buildEventsFromTasks(tasks),
+            activityMonths,
+            latestMonth: activityMonths[0] || range.month,
+            tasks,
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/tms/reportes/conductores/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const range = getMonthRange(req.query.month);
+
+        const conductorResult = await pgQuery(
+            `SELECT
+                c.id,
+                c.nombre,
+                c.alias,
+                c.telefono,
+                c.estado,
+                c.cedula,
+                c.lic,
+                v.id AS "vehiculoAsignadoId",
+                v.placa AS "vehiculoAsignadoPlaca"
+             FROM conductores c
+             LEFT JOIN vehiculos v ON v.conductor_asignado_id = c.id AND v.activo = TRUE
+             WHERE c.id = $1
+             LIMIT 1`,
+            [id]
+        );
+
+        const conductor = conductorResult.rows[0];
+        if (!conductor) {
+            return res.status(404).json({ error: 'Conductor no encontrado.' });
+        }
+
+        const tasksResult = await pgQuery(
+            `SELECT
+                t.id,
+                t.nombre,
+                t.estado,
+                TO_CHAR(t.fecha_salida, 'YYYY-MM-DD') AS fecha,
+                TO_CHAR(t.fecha_salida, 'HH24:MI') AS hora,
+                TO_CHAR(COALESCE(t.llegada_estimada, t.hora_regreso), 'HH24:MI') AS fin,
+                t.pasajeros AS pax,
+                t.punto_salida AS origen,
+                t.destino,
+                t.notas_operativas AS notas,
+                t.evento_id AS "eventoId",
+                e.nombre AS "eventoNombre",
+                e.estado AS "eventoEstado",
+                COALESCE(NULLIF(TRIM(cli.empresa), ''), cli.nombre) AS cliente,
+                t.vehiculo_id AS "vehiculoId",
+                veh.placa AS "vehiculoPlaca",
+                CONCAT_WS(' ', veh.marca, veh.modelo) AS "vehiculoNombre"
+             FROM tareas t
+             LEFT JOIN eventos e ON e.id = t.evento_id
+             LEFT JOIN clientes cli ON cli.id = e.cliente_id
+             LEFT JOIN vehiculos veh ON veh.id = t.vehiculo_id
+             WHERE t.conductor_id = $1
+               AND t.fecha_salida::date BETWEEN $2::date AND $3::date
+               AND t.estado != 'cancelada'
+             ORDER BY t.fecha_salida ASC`,
+            [id, range.from, range.to]
+        );
+
+        const tasks = tasksResult.rows;
+        const monthsResult = await pgQuery(
+            `SELECT DISTINCT TO_CHAR(fecha_salida, 'YYYY-MM') AS month
+             FROM tareas
+             WHERE conductor_id = $1
+               AND estado != 'cancelada'
+             ORDER BY month DESC`,
+            [id]
+        );
+        const activityMonths = monthsResult.rows.map((row) => row.month).filter(Boolean);
+        res.json({
+            month: range.month,
+            range,
+            conductor,
+            summary: buildReportSummary(tasks),
+            calendar: buildCalendarDays(tasks),
+            events: buildEventsFromTasks(tasks),
+            activityMonths,
+            latestMonth: activityMonths[0] || range.month,
+            tasks,
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/tms/reportes/resumen', authenticateToken, async (req, res) => {
+    try {
+        const range = getMonthRange(req.query.month);
+
+        const overallResult = await pgQuery(
+            `SELECT
+                COUNT(*) AS total_tareas,
+                COUNT(*) FILTER (WHERE estado = 'completada') AS completadas,
+                COUNT(*) FILTER (WHERE estado = 'en_ruta') AS en_ruta,
+                COUNT(*) FILTER (WHERE estado = 'pendiente') AS pendientes,
+                COUNT(DISTINCT evento_id) FILTER (WHERE evento_id IS NOT NULL) AS eventos,
+                COALESCE(SUM(pasajeros), 0) AS pasajeros
+             FROM tareas
+             WHERE fecha_salida::date BETWEEN $1::date AND $2::date
+               AND estado != 'cancelada'`,
+            [range.from, range.to]
+        );
+
+        const vehiculosResult = await pgQuery(
+            `SELECT
+                v.id,
+                v.placa,
+                v.marca,
+                v.modelo,
+                v.estado,
+                COUNT(t.id) AS tareas,
+                COUNT(t.id) FILTER (WHERE t.estado = 'completada') AS completadas,
+                COUNT(DISTINCT t.evento_id) FILTER (WHERE t.evento_id IS NOT NULL) AS eventos,
+                COUNT(DISTINCT TO_CHAR(t.fecha_salida, 'YYYY-MM-DD')) AS dias_activos,
+                COALESCE(SUM(t.pasajeros), 0) AS pasajeros
+             FROM vehiculos v
+             LEFT JOIN tareas t
+               ON t.vehiculo_id = v.id
+              AND t.fecha_salida::date BETWEEN $1::date AND $2::date
+              AND t.estado != 'cancelada'
+             WHERE v.activo = TRUE
+             GROUP BY v.id
+             ORDER BY COUNT(t.id) DESC, v.placa ASC`,
+            [range.from, range.to]
+        );
+
+        const conductoresResult = await pgQuery(
+            `SELECT
+                c.id,
+                c.nombre,
+                c.alias,
+                c.estado,
+                COUNT(t.id) AS tareas,
+                COUNT(t.id) FILTER (WHERE t.estado = 'completada') AS completadas,
+                COUNT(DISTINCT t.evento_id) FILTER (WHERE t.evento_id IS NOT NULL) AS eventos,
+                COUNT(DISTINCT TO_CHAR(t.fecha_salida, 'YYYY-MM-DD')) AS dias_activos,
+                COALESCE(SUM(t.pasajeros), 0) AS pasajeros
+             FROM conductores c
+             LEFT JOIN tareas t
+               ON t.conductor_id = c.id
+              AND t.fecha_salida::date BETWEEN $1::date AND $2::date
+              AND t.estado != 'cancelada'
+             GROUP BY c.id
+             ORDER BY COUNT(t.id) DESC, c.nombre ASC`,
+            [range.from, range.to]
+        );
+
+        res.json({
+            month: range.month,
+            range,
+            totals: {
+                totalTareas: Number(overallResult.rows[0]?.total_tareas || 0),
+                completadas: Number(overallResult.rows[0]?.completadas || 0),
+                enRuta: Number(overallResult.rows[0]?.en_ruta || 0),
+                pendientes: Number(overallResult.rows[0]?.pendientes || 0),
+                eventos: Number(overallResult.rows[0]?.eventos || 0),
+                pasajeros: Number(overallResult.rows[0]?.pasajeros || 0),
+                kilometrosConfiables: null,
+                kilometrosModo: 'pendiente_consolidacion',
+            },
+            vehiculos: vehiculosResult.rows.map((row) => ({
+                ...row,
+                tareas: Number(row.tareas || 0),
+                completadas: Number(row.completadas || 0),
+                eventos: Number(row.eventos || 0),
+                diasActivos: Number(row.dias_activos || 0),
+                pasajeros: Number(row.pasajeros || 0),
+            })),
+            conductores: conductoresResult.rows.map((row) => ({
+                ...row,
+                tareas: Number(row.tareas || 0),
+                completadas: Number(row.completadas || 0),
+                eventos: Number(row.eventos || 0),
+                diasActivos: Number(row.dias_activos || 0),
+                pasajeros: Number(row.pasajeros || 0),
+            })),
+            note: 'Los kilómetros mensuales todavía no se consolidan por tarea en la estructura actual.',
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
 // PROFORMAS / COTIZACIONES
 // ─────────────────────────────────────────────────────────────
-app.get('/api/tms/proformas', authenticateToken, async (req, res) => {
+app.get('/api/tms/proformas', async (req, res) => {
     try {
         const result = await pgQuery('SELECT * FROM tms_cotizaciones ORDER BY fecha_emision DESC');
         res.json(result.rows);
@@ -1930,7 +2485,7 @@ app.get('/api/tms/proformas', authenticateToken, async (req, res) => {
     }
 });
 
-app.post('/api/tms/proformas', authenticateToken, async (req, res) => {
+app.post('/api/tms/proformas', async (req, res) => {
     const { numero, cliente_nombre, cliente_empresa, total_usd, data_json } = req.body;
     try {
         await ensureDatabaseCompatibility();
@@ -1955,7 +2510,7 @@ app.post('/api/tms/proformas', authenticateToken, async (req, res) => {
     }
 });
 
-app.delete('/api/tms/proformas/:id', authenticateToken, async (req, res) => {
+app.delete('/api/tms/proformas/:id', async (req, res) => {
     const { id } = req.params;
     try {
         await pgQuery('DELETE FROM tms_cotizaciones WHERE id = $1 OR numero = $1', [id]);
@@ -2197,6 +2752,26 @@ app.post('/api/tms/routes/estimate-distance', authenticateToken, async (req, res
     }
 });
 
+app.post('/api/tms/routes/preview', authenticateToken, async (req, res) => {
+    const { origin, destination, originCoords, destinationCoords, date } = req.body || {};
+
+    try {
+        if (!String(origin || '').trim() || !String(destination || '').trim()) {
+            return res.status(400).json({ success: false, error: 'Origen y destino son requeridos.' });
+        }
+
+        const route = await buildRoutePreview(origin, destination, { originCoords, destinationCoords, date });
+        if (!route) {
+            return res.status(404).json({ success: false, error: 'No se pudo generar una ruta inicial para esos puntos.' });
+        }
+
+        res.json({ success: true, route });
+    } catch (error) {
+        console.error('Error generando vista previa de ruta:', error);
+        res.status(500).json({ success: false, error: error.message || 'No se pudo generar la ruta inicial.' });
+    }
+});
+
 app.post('/api/tms/voice/interpret', authenticateToken, async (req, res) => {
     const { audioBase64, mimeType, conversationHistory } = req.body || {};
 
@@ -2231,6 +2806,35 @@ app.post('/api/tms/voice/interpret', authenticateToken, async (req, res) => {
                 }
             } catch (distanceError) {
                 console.error('No se pudo estimar km desde la interpretación de voz:', distanceError);
+            }
+        }
+
+        const normalizedHistory = Array.isArray(conversationHistory)
+            ? conversationHistory
+                .filter(item => item?.role && item?.text)
+                .map(item => ({ role: item.role, text: String(item.text || '').trim() }))
+                .filter(item => item.text)
+            : [];
+        const conversationLog = [
+            ...normalizedHistory,
+            { role: 'user', text: transcript },
+            ...(interpretation?.assistantMessage ? [{ role: 'assistant', text: interpretation.assistantMessage }] : []),
+        ];
+        interpretation.conversationLog = conversationLog;
+
+        if (
+            interpretation?.intent === 'cotizacion' &&
+            interpretation?.quoteData?.origen &&
+            interpretation?.quoteData?.destino
+        ) {
+            try {
+                interpretation.routePreview = await buildRoutePreview(
+                    interpretation.quoteData.origen,
+                    interpretation.quoteData.destino,
+                    { date: interpretation.quoteData.fechaServicio || '' }
+                );
+            } catch (routeError) {
+                console.error('No se pudo generar la ruta inicial desde la interpretación de voz:', routeError);
             }
         }
 

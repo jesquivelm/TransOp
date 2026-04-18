@@ -109,6 +109,8 @@ export function normalizeVoiceInterpretation(interpretation, transcript = '') {
     missingFields: Array.isArray(interpretation?.missingFields) ? interpretation.missingFields : [],
     assistantMessage: interpretation?.assistantMessage || '',
     interpretationNotes: Array.isArray(interpretation?.interpretationNotes) ? interpretation.interpretationNotes : [],
+    conversationLog: Array.isArray(interpretation?.conversationLog) ? interpretation.conversationLog : [],
+    routePreview: interpretation?.routePreview || null,
     transcript,
     quoteData,
     taskData,
