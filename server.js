@@ -1106,6 +1106,23 @@ async function ensureDatabaseCompatibility() {
         `);
 
         await pgQuery(`
+            CREATE TABLE IF NOT EXISTS tms_conductor_ausencias (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                conductor_id UUID NOT NULL REFERENCES conductores(id) ON DELETE CASCADE,
+                tipo VARCHAR(20) NOT NULL DEFAULT 'vacaciones',
+                fecha_inicio DATE NOT NULL,
+                fecha_fin DATE NOT NULL,
+                motivo TEXT,
+                estado VARCHAR(20) NOT NULL DEFAULT 'programada',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                CHECK (tipo IN ('vacaciones', 'incapacidad', 'permiso', 'otro')),
+                CHECK (estado IN ('programada', 'activa', 'cerrada', 'cancelada')),
+                CHECK (fecha_fin >= fecha_inicio)
+            )
+        `);
+
+        await pgQuery(`
             ALTER TABLE vehiculos
             ADD COLUMN IF NOT EXISTS licencia_requerida VARCHAR(10);
             ALTER TABLE vehiculos
@@ -1717,6 +1734,127 @@ app.delete('/api/tms/conductores/:id', authenticateToken, requireAdmin, async (r
     }
 });
 
+app.get('/api/tms/conductor-ausencias', authenticateToken, async (req, res) => {
+    const { conductorId, desde, hasta } = req.query;
+    try {
+        await ensureDatabaseCompatibility();
+        const params = [];
+        const where = [`a.estado != 'cancelada'`];
+
+        if (conductorId) {
+            params.push(conductorId);
+            where.push(`a.conductor_id = $${params.length}`);
+        }
+        if (desde) {
+            params.push(desde);
+            where.push(`a.fecha_fin >= $${params.length}::date`);
+        }
+        if (hasta) {
+            params.push(hasta);
+            where.push(`a.fecha_inicio <= $${params.length}::date`);
+        }
+
+        const result = await pgQuery(
+            `SELECT
+                a.id,
+                a.conductor_id AS "conductorId",
+                c.nombre AS "conductorNombre",
+                a.tipo,
+                TO_CHAR(a.fecha_inicio, 'YYYY-MM-DD') AS "fechaInicio",
+                TO_CHAR(a.fecha_fin, 'YYYY-MM-DD') AS "fechaFin",
+                a.motivo,
+                a.estado,
+                a.created_at AS "createdAt",
+                a.updated_at AS "updatedAt"
+             FROM tms_conductor_ausencias a
+             JOIN conductores c ON c.id = a.conductor_id
+             WHERE ${where.join(' AND ')}
+             ORDER BY a.fecha_inicio ASC, c.nombre ASC`,
+            params
+        );
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/tms/conductor-ausencias', authenticateToken, async (req, res) => {
+    const { conductorId, tipo, fechaInicio, fechaFin, motivo, estado } = req.body;
+    if (!conductorId || !fechaInicio || !fechaFin) {
+        return res.status(400).json({ error: 'Conductor, fecha inicial y fecha final son obligatorios.' });
+    }
+
+    try {
+        await ensureDatabaseCompatibility();
+        const overlap = await pgQuery(
+            `SELECT id
+             FROM tms_conductor_ausencias
+             WHERE conductor_id = $1
+               AND estado != 'cancelada'
+               AND fecha_inicio <= $3::date
+               AND fecha_fin >= $2::date
+             LIMIT 1`,
+            [conductorId, fechaInicio, fechaFin]
+        );
+        if (overlap.rowCount) {
+            return res.status(409).json({ error: 'El conductor ya tiene una ausencia registrada en ese rango.' });
+        }
+
+        const result = await pgQuery(
+            `INSERT INTO tms_conductor_ausencias
+                (conductor_id, tipo, fecha_inicio, fecha_fin, motivo, estado)
+             VALUES ($1, $2, $3::date, $4::date, $5, $6)
+             RETURNING id`,
+            [conductorId, tipo || 'vacaciones', fechaInicio, fechaFin, motivo || null, estado || 'programada']
+        );
+        res.json({ success: true, id: result.rows[0].id });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/tms/conductor-ausencias/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { tipo, fechaInicio, fechaFin, motivo, estado } = req.body;
+    try {
+        await ensureDatabaseCompatibility();
+        const result = await pgQuery(
+            `UPDATE tms_conductor_ausencias
+             SET tipo = COALESCE($1, tipo),
+                 fecha_inicio = COALESCE($2::date, fecha_inicio),
+                 fecha_fin = COALESCE($3::date, fecha_fin),
+                 motivo = $4,
+                 estado = COALESCE($5, estado),
+                 updated_at = NOW()
+             WHERE id = $6
+             RETURNING id`,
+            [tipo || null, fechaInicio || null, fechaFin || null, motivo ?? null, estado || null, id]
+        );
+        if (!result.rowCount) return res.status(404).json({ error: 'Ausencia no encontrada.' });
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/api/tms/conductor-ausencias/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        await ensureDatabaseCompatibility();
+        const result = await pgQuery(
+            `UPDATE tms_conductor_ausencias
+             SET estado = 'cancelada', updated_at = NOW()
+             WHERE id = $1
+             RETURNING id`,
+            [id]
+        );
+        if (!result.rowCount) return res.status(404).json({ error: 'Ausencia no encontrada.' });
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.post('/api/tms/uploads/vehiculos', authenticateToken, async (req, res) => {
     const { filename, dataUrl } = req.body || {};
     try {
@@ -2142,6 +2280,24 @@ app.post('/api/tms/tareas', authenticateToken, async (req, res) => {
     const { nombre, hora, fin, eventoId, condId, vehId, pax, origen, destino, fecha } = req.body;
     const diaBase = fecha || new Date().toISOString().slice(0, 10);
     try {
+        await ensureDatabaseCompatibility();
+        if (condId) {
+            const absenceResult = await pgQuery(
+                `SELECT tipo
+                 FROM tms_conductor_ausencias
+                 WHERE conductor_id = $1
+                   AND estado != 'cancelada'
+                   AND $2::date BETWEEN fecha_inicio AND fecha_fin
+                 LIMIT 1`,
+                [condId, diaBase]
+            );
+            if (absenceResult.rowCount) {
+                return res.status(409).json({
+                    error: 'El conductor tiene una ausencia registrada para la fecha de esta tarea.',
+                });
+            }
+        }
+
         const result = await pgQuery(
             `INSERT INTO tareas (nombre, fecha_salida, llegada_estimada, hora_regreso, evento_id, conductor_id, vehiculo_id, pasajeros, punto_salida, destino, estado)
              VALUES ($1, $2::timestamp, $3::timestamp, $4::timestamp, $5, $6, $7, $8, $9, $10, 'pendiente')
@@ -2167,6 +2323,31 @@ app.patch('/api/tms/tareas/:id/asignar', authenticateToken, async (req, res) => 
     const { condId, vehId } = req.body;
     const nextEstado = condId && vehId ? 'asignada' : 'pendiente';
     try {
+        await ensureDatabaseCompatibility();
+        if (condId) {
+            const taskResult = await pgQuery(
+                `SELECT fecha_salida::date AS fecha FROM tareas WHERE id = $1`,
+                [id]
+            );
+            const taskDate = taskResult.rows[0]?.fecha;
+            if (taskDate) {
+                const absenceResult = await pgQuery(
+                    `SELECT tipo
+                     FROM tms_conductor_ausencias
+                     WHERE conductor_id = $1
+                       AND estado != 'cancelada'
+                       AND $2::date BETWEEN fecha_inicio AND fecha_fin
+                     LIMIT 1`,
+                    [condId, taskDate]
+                );
+                if (absenceResult.rowCount) {
+                    return res.status(409).json({
+                        error: 'El conductor tiene una ausencia registrada para la fecha de esta tarea.',
+                    });
+                }
+            }
+        }
+
         await pgQuery(
             `UPDATE tareas
              SET conductor_id = $1,

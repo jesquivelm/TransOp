@@ -1,0 +1,4 @@
+codigo_cliente,nombre_cliente,condicion_pago,moneda,vendedor,contacto_principal,correo,telefono,activo
+C0001,Etiquetas del Norte S.A.,Credito 30 dias,USD,Carlos Mendez,Ana Lopez,compras@etiquetasnorte.com,2222-1111,SI
+C0002,Empaques Centroamericanos,Contado,GTQ,Mariela Ruiz,Jose Perez,cotizaciones@emca.com,2233-4455,SI
+C0003,Alimentos La Colina,Credito 15 dias,USD,Luis Herrera,Sofia Morales,procura@lacolina.com,2244-7788,SI

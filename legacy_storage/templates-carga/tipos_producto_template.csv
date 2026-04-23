@@ -1,0 +1,4 @@
+tipo_producto,familia_producto,aplica_digital,aplica_convencional,requiere_troquel,requiere_plancha,requiere_salida_rollo,unidad_cotizacion,unidad_produccion,activo
+Etiqueta autoadhesiva,Etiquetas,SI,SI,SI,SI,SI,UNIDAD,ROLLO,SI
+Sticker promocional,Promocionales,SI,NO,NO,NO,NO,UNIDAD,HOJA,SI
+Faja termoencogible,Fajas,NO,SI,SI,SI,SI,UNIDAD,ROLLO,SI

@@ -1,0 +1,4 @@
+codigo_insumo,descripcion,clasificacion,subclasificacion,unidad_inventario,unidad_consumo,costo_vigente,moneda,bodega,compatible_digital,compatible_convencional,ancho,gramaje_calibre,color_o_tipo,activo
+MAT-001,BOPP Blanco brillante 13 pulg,Sustrato,Pelicula adhesiva,ROLLO,MSI,3.10,USD,MP-01,SI,NO,13,50 micras,,SI
+TIN-001,Tinta UV Negro proceso,Tinta,UV,KG,KG,18.50,USD,TINT-01,SI,SI,,,Negro,SI
+BAR-001,Barniz UV brillante,Barniz,UV,KG,KG,9.80,USD,BAR-01,NO,SI,,,Brillante,SI

@@ -264,26 +264,45 @@ function toDate(dateISO, timeStr) {
   return new Date(`${dateISO}T${timeStr}:00`);
 }
 
-function checkConductorConflicts(condId, startT, endT, tareas, excludeId = null) {
+function checkConductorConflicts(condId, startT, endT, tareas, excludeId = null, dateISO = todayISO()) {
   if (!condId) return [];
-  const today = todayISO();
-  const s = toDate(today, startT), e = toDate(today, endT);
+  const s = toDate(dateISO, startT), e = toDate(dateISO, endT);
   return tareas.filter(t => {
     if (t.id === excludeId || t.condId !== condId) return false;
     if (['cancelada','completada'].includes(t.estado)) return false;
-    return toDate(today, t.hora) < e && toDate(today, t.fin) > s;
+    if ((t.fecha || dateISO) !== dateISO) return false;
+    return toDate(dateISO, t.hora) < e && toDate(dateISO, t.fin) > s;
   });
 }
 
-function checkVehicleConflicts(vehId, startT, endT, tareas, excludeId = null) {
+function checkVehicleConflicts(vehId, startT, endT, tareas, excludeId = null, dateISO = todayISO()) {
   if (!vehId) return [];
-  const today = todayISO();
-  const s = toDate(today, startT), e = toDate(today, endT);
+  const s = toDate(dateISO, startT), e = toDate(dateISO, endT);
   return tareas.filter(t => {
     if (t.id === excludeId || t.vehId !== vehId) return false;
     if (['cancelada','completada'].includes(t.estado)) return false;
-    return toDate(today, t.hora) < e && toDate(today, t.fin) > s;
+    if ((t.fecha || dateISO) !== dateISO) return false;
+    return toDate(dateISO, t.hora) < e && toDate(dateISO, t.fin) > s;
   });
+}
+
+function isDateWithinRange(dateISO, startISO, endISO) {
+  if (!dateISO || !startISO || !endISO) return false;
+  return dateISO >= startISO && dateISO <= endISO;
+}
+
+function getDriverAbsenceForDate(conductorId, dateISO, ausencias = []) {
+  if (!conductorId || !dateISO) return null;
+  return ausencias.find(item =>
+    item.conductorId === conductorId &&
+    item.estado !== 'cancelada' &&
+    isDateWithinRange(dateISO, item.fechaInicio, item.fechaFin)
+  ) || null;
+}
+
+function formatShortDate(dateStr) {
+  if (!dateStr) return '';
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString('es-CR', { day: 'numeric', month: 'short' });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -293,6 +312,9 @@ const LC = {
   disponible:       ['Disponible',   T.GRN, T.grnDim],
   en_servicio:      ['En servicio',  T.BLU, T.bluDim],
   vacaciones:       ['Vacaciones',   T.PUR, T.purDim],
+  incapacidad:      ['Incapacidad',  T.RED, T.redDim],
+  permiso:          ['Permiso',      T.AMB, T.ambDim],
+  otro:             ['Otro',         T.mute,'rgba(100,116,139,0.14)'],
   enfermo:          ['Enfermo/a',    T.AMB, T.ambDim],
   suspendido:       ['Suspendido',   T.RED, T.redDim],
   inactivo:         ['Inactivo',     T.mute,'rgba(100,116,139,0.14)'],
@@ -430,13 +452,15 @@ function TaskStatusModal({ tarea, onClose, onConfirm }) {
 // ─────────────────────────────────────────────────────────────
 // MODAL DE ASIGNACIÓN (con detección de conflictos)
 // ─────────────────────────────────────────────────────────────
-function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, onClose, onConfirm }) {
+function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, ausencias = [], onClose, onConfirm }) {
   const evento = eventos.find(e => e.id === tarea.eventoId);
   const [selCond, setSelCond] = useState(tarea.condId || '');
   const [selVeh,  setSelVeh]  = useState(tarea.vehId  || '');
+  const tareaFecha = tarea.fecha || todayISO();
 
-  const condConf = useMemo(() => checkConductorConflicts(selCond, tarea.hora, tarea.fin, tareas, tarea.id), [selCond, tarea.hora, tarea.fin, tarea.id, tareas]);
-  const vehConf  = useMemo(() => checkVehicleConflicts(selVeh, tarea.hora, tarea.fin, tareas, tarea.id),  [selVeh, tarea.hora, tarea.fin, tarea.id, tareas]);
+  const condConf = useMemo(() => checkConductorConflicts(selCond, tarea.hora, tarea.fin, tareas, tarea.id, tareaFecha), [selCond, tarea.hora, tarea.fin, tarea.id, tareaFecha, tareas]);
+  const vehConf  = useMemo(() => checkVehicleConflicts(selVeh, tarea.hora, tarea.fin, tareas, tarea.id, tareaFecha),  [selVeh, tarea.hora, tarea.fin, tarea.id, tareaFecha, tareas]);
+  const condAbsence = useMemo(() => getDriverAbsenceForDate(selCond, tareaFecha, ausencias), [ausencias, selCond, tareaFecha]);
   const selVehObj = vehiculos.find(v => v.id === selVeh);
   const licenciaRequerida = selVehObj?.licenciaRequerida || '';
   const conductoresCompatibles = conductores.filter(c => {
@@ -447,7 +471,7 @@ function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, onClo
   const capOk = selVehObj ? selVehObj.cap >= tarea.pax : true;
   const hasAssignment = Boolean(tarea.condId || tarea.vehId);
   const wantsAssignment = Boolean(selCond || selVeh);
-  const canConfirm = wantsAssignment && selCond && selVeh && condConf.length === 0 && vehConf.length === 0 && capOk;
+  const canConfirm = wantsAssignment && selCond && selVeh && condConf.length === 0 && vehConf.length === 0 && !condAbsence && capOk;
   const canClear = hasAssignment;
 
   const overlay = { position:'fixed', inset:0, background:'rgba(0,0,0,.7)', display:'flex', alignItems:'center',
@@ -479,13 +503,26 @@ function AsignacionModal({ tarea, conductores, vehiculos, tareas, eventos, onClo
             style={{ width:'100%', padding:'10px 12px', background:T.card2, border:`1px solid ${T.bdr2}`,
               borderRadius:8, color:T.txt, fontSize:14, cursor:'pointer' }}>
             <option value="">— Seleccionar conductor —</option>
-            {conductoresCompatibles.map(c => (
-              <option key={c.id} value={c.id}>{c.nombre} ({LC[c.estado]?.[0]})</option>
-            ))}
+            {conductoresCompatibles.map(c => {
+              const absence = getDriverAbsenceForDate(c.id, tareaFecha, ausencias);
+              return (
+                <option key={c.id} value={c.id} disabled={Boolean(absence)}>
+                  {c.nombre} ({absence ? `Ausente: ${LC[absence.tipo]?.[0] || absence.tipo}` : LC[c.estado]?.[0]})
+                </option>
+              );
+            })}
           </select>
           {licenciaRequerida && (
             <div style={{ marginTop: 8, fontSize: 12, color: T.mute }}>
               Se muestran solo conductores con licencia <strong style={{ color: T.AMB }}>{licenciaRequerida}</strong>.
+            </div>
+          )}
+          {condAbsence && (
+            <div style={{ display:'flex', gap:8, padding:'10px 14px', background:T.redDim, borderRadius:8, marginTop:8 }}>
+              <AlertTriangle size={16} color={T.RED} />
+              <span style={{ fontSize:13, color:T.RED, fontWeight:500 }}>
+                No disponible por {LC[condAbsence.tipo]?.[0] || condAbsence.tipo} del {formatShortDate(condAbsence.fechaInicio)} al {formatShortDate(condAbsence.fechaFin)}.
+              </span>
             </div>
           )}
           {selCond && <ConflictBlock conflicts={condConf} label="Conductor" />}
@@ -1196,6 +1233,142 @@ function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBa
         />
       )}
       {reportTarget && <MonthlyReportModal apiFetch={apiFetch} type="conductor" target={reportTarget} onClose={() => setReportTarget(null)} onFocusTask={onFocusTask} />}
+    </div>
+  );
+}
+
+function RecursosHumanosView({ conductores, ausencias, onAddAusencia, onCancelAusencia }) {
+  const activeDrivers = conductores.filter(c => c.estado !== 'inactivo');
+  const [form, setForm] = useState({
+    conductorId: activeDrivers[0]?.id || '',
+    tipo: 'vacaciones',
+    fechaInicio: todayISO(),
+    fechaFin: todayISO(),
+    motivo: '',
+  });
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!form.conductorId && activeDrivers[0]?.id) {
+      setForm(prev => ({ ...prev, conductorId: activeDrivers[0].id }));
+    }
+  }, [activeDrivers, form.conductorId]);
+
+  const today = todayISO();
+  const currentAbsences = ausencias.filter(item => isDateWithinRange(today, item.fechaInicio, item.fechaFin));
+  const upcomingAbsences = ausencias.filter(item => item.fechaInicio > today);
+  const totalDays = ausencias.reduce((sum, item) => {
+    const start = new Date(`${item.fechaInicio}T00:00:00`);
+    const end = new Date(`${item.fechaFin}T00:00:00`);
+    return sum + Math.max(1, Math.round((end - start) / 86400000) + 1);
+  }, 0);
+  const inp = { width:'100%', padding:'9px 12px', background:T.card2, border:`1px solid ${T.bdr2}`, borderRadius:8, color:T.txt, fontSize:13, outline:'none', boxSizing:'border-box' };
+  const lbl = { fontSize:12, fontWeight:600, color:T.sub, display:'block', marginBottom:6 };
+
+  async function submit() {
+    setError('');
+    if (!form.conductorId || !form.fechaInicio || !form.fechaFin) {
+      setError('Selecciona conductor y rango de fechas.');
+      return;
+    }
+    if (form.fechaFin < form.fechaInicio) {
+      setError('La fecha final no puede ser anterior a la inicial.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await onAddAusencia(form);
+      setForm(prev => ({ ...prev, fechaInicio: todayISO(), fechaFin: todayISO(), motivo: '' }));
+    } catch (err) {
+      setError(err.message || 'No se pudo guardar la ausencia.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const absenceCard = (item) => (
+    <div key={item.id} style={{ padding:'13px 14px', background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:12 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', gap:12, alignItems:'flex-start' }}>
+        <div>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+            <Badge estado={item.tipo} />
+            <span style={{ fontSize:13, fontWeight:800, color:T.txt }}>{item.conductorNombre}</span>
+          </div>
+          <div style={{ fontSize:12, color:T.sub }}>
+            {formatShortDate(item.fechaInicio)} al {formatShortDate(item.fechaFin)}
+            {item.motivo ? ` · ${item.motivo}` : ''}
+          </div>
+        </div>
+        <button
+          onClick={() => onCancelAusencia(item.id)}
+          style={{ padding:'6px 10px', borderRadius:8, border:`1px solid ${T.RED}44`, background:T.redDim, color:T.RED, cursor:'pointer', fontSize:12, fontWeight:700 }}
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display:'flex', gap:12, marginBottom:24, flexWrap:'wrap' }}>
+        <StatCard label="Ausentes hoy" value={currentAbsences.length} sub="vacaciones/incapacidades" icon={AlertTriangle} color={currentAbsences.length ? T.AMB : T.GRN} />
+        <StatCard label="Próximas ausencias" value={upcomingAbsences.length} sub="programadas" icon={CalendarDays} color={T.BLU} />
+        <StatCard label="Días controlados" value={totalDays} sub="historial activo" icon={Clock} color={T.txt} />
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(300px, 1fr))', gap:18, alignItems:'start' }}>
+        <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:14, padding:20 }}>
+          <SectionHeader title="Registrar ausencia" />
+          <div style={{ display:'grid', gap:12 }}>
+            <label>
+              <span style={lbl}>CONDUCTOR</span>
+              <select value={form.conductorId} onChange={e => setForm(prev => ({ ...prev, conductorId:e.target.value }))} style={inp}>
+                {activeDrivers.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </select>
+            </label>
+            <label>
+              <span style={lbl}>TIPO</span>
+              <select value={form.tipo} onChange={e => setForm(prev => ({ ...prev, tipo:e.target.value }))} style={inp}>
+                <option value="vacaciones">Vacaciones</option>
+                <option value="incapacidad">Incapacidad</option>
+                <option value="permiso">Permiso</option>
+                <option value="otro">Otro</option>
+              </select>
+            </label>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <label>
+                <span style={lbl}>DESDE</span>
+                <input type="date" value={form.fechaInicio} onChange={e => setForm(prev => ({ ...prev, fechaInicio:e.target.value }))} style={inp} />
+              </label>
+              <label>
+                <span style={lbl}>HASTA</span>
+                <input type="date" value={form.fechaFin} onChange={e => setForm(prev => ({ ...prev, fechaFin:e.target.value }))} style={inp} />
+              </label>
+            </div>
+            <label>
+              <span style={lbl}>MOTIVO / NOTA</span>
+              <textarea value={form.motivo} onChange={e => setForm(prev => ({ ...prev, motivo:e.target.value }))} rows={3} style={{ ...inp, resize:'vertical' }} placeholder="Ej. Vacaciones aprobadas, incapacidad médica..." />
+            </label>
+            {error && <div style={{ padding:'10px 12px', borderRadius:10, background:T.redDim, color:T.RED, fontSize:12 }}>{error}</div>}
+            <button onClick={submit} disabled={saving || !activeDrivers.length} style={{ padding:'11px 14px', borderRadius:10, border:'none', background:T.AMB, color:'#111827', cursor:saving ? 'wait' : 'pointer', fontWeight:800 }}>
+              {saving ? 'Guardando...' : 'Guardar ausencia'}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:14, padding:20 }}>
+          <SectionHeader title="Control de ausencias" />
+          {ausencias.length === 0 ? (
+            <div style={{ padding:32, textAlign:'center', color:T.mute, fontSize:13 }}>No hay ausencias registradas.</div>
+          ) : (
+            <div style={{ display:'grid', gap:10 }}>
+              {ausencias.map(absenceCard)}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1941,7 +2114,7 @@ function NuevoEventoModal({
 // ─────────────────────────────────────────────────────────────
 // MODAL NUEVA TAREA
 // ─────────────────────────────────────────────────────────────
-function NuevaTareaModal({ onClose, onConfirm, eventos, conductores, vehiculos }) {
+function NuevaTareaModal({ onClose, onConfirm, eventos, conductores, vehiculos, ausencias = [], fecha = todayISO() }) {
   const EMPTY = { nombre:'', hora:'08:00', fin:'09:00', eventoId:'', condId:'', vehId:'', pax:'', origen:'', destino:'' };
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState('');
@@ -1962,6 +2135,10 @@ function NuevaTareaModal({ onClose, onConfirm, eventos, conductores, vehiculos }
     if (!hora || !fin) return setError('Las horas de inicio y fin deben tener un formato valido.');
     if (hora >= fin) return setError('La hora de fin debe ser mayor que la de inicio.');
     if (!form.pax || isNaN(+form.pax) || +form.pax < 1) return setError('El número de pasajeros es inválido.');
+    const selectedAbsence = getDriverAbsenceForDate(form.condId, fecha, ausencias);
+    if (selectedAbsence) {
+      return setError(`El conductor esta ausente ese dia por ${LC[selectedAbsence.tipo]?.[0] || selectedAbsence.tipo}.`);
+    }
     setError('');
     onConfirm({
       nombre:   form.nombre.trim(),
@@ -2029,9 +2206,14 @@ function NuevaTareaModal({ onClose, onConfirm, eventos, conductores, vehiculos }
               <label style={lbl}>CONDUCTOR (opcional)</label>
               <select style={{ ...inp, cursor:'pointer' }} value={form.condId} onChange={e => set('condId', e.target.value)}>
                 <option value="">— Sin asignar —</option>
-                {condsActivos.map(c => (
-                  <option key={c.id} value={c.id}>{c.nombre} ({LC[c.estado]?.[0]})</option>
-                ))}
+                {condsActivos.map(c => {
+                  const absence = getDriverAbsenceForDate(c.id, fecha, ausencias);
+                  return (
+                    <option key={c.id} value={c.id} disabled={Boolean(absence)}>
+                      {c.nombre} ({absence ? `Ausente: ${LC[absence.tipo]?.[0] || absence.tipo}` : LC[c.estado]?.[0]})
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <div style={{ flex:1 }}>
@@ -2158,7 +2340,7 @@ function EventosView({ eventos, onAdd }) {
 // ─────────────────────────────────────────────────────────────
 // VISTA: TAREAS
 // ─────────────────────────────────────────────────────────────
-function TareasView({ tareas, conductores, vehiculos, eventos, onAsignar, onAddTarea, selectedDate, onDateChange, scope, onScopeChange, focusedTaskId, focusedEventId, onCreateEventFromTasks, onUpdateTaskStatus }) {
+function TareasView({ tareas, conductores, vehiculos, eventos, ausencias = [], onAsignar, onAddTarea, selectedDate, onDateChange, scope, onScopeChange, focusedTaskId, focusedEventId, onCreateEventFromTasks, onUpdateTaskStatus }) {
   const [modalNuevo, setModalNuevo] = useState(false);
   const [modalEvento, setModalEvento] = useState(false);
   const [modalEstado, setModalEstado] = useState(null);
@@ -2402,7 +2584,7 @@ function TareasView({ tareas, conductores, vehiculos, eventos, onAsignar, onAddT
         </div>
       </div>
 
-      {modalNuevo && <NuevaTareaModal onClose={() => setModalNuevo(false)} onConfirm={async datos => { await onAddTarea({ ...datos, fecha: selectedDate }); setModalNuevo(false); }} eventos={eventos} conductores={conductores} vehiculos={vehiculos} />}
+      {modalNuevo && <NuevaTareaModal onClose={() => setModalNuevo(false)} onConfirm={async datos => { await onAddTarea({ ...datos, fecha: selectedDate }); setModalNuevo(false); }} eventos={eventos} conductores={conductores} vehiculos={vehiculos} ausencias={ausencias} fecha={selectedDate} />}
       {modalEvento && <NuevoEventoModal onClose={() => setModalEvento(false)} title="Crear evento desde tareas" submitLabel="Crear y agrupar" description={`${selectedTasks.length} tareas seleccionadas serán agrupadas en un solo evento.`} initialValues={{ nombre:selectedTasks[0]?.nombre || '', cliente:(selectedTasks[0]?.eventoId ? (eventos.find(e => e.id === selectedTasks[0].eventoId)?.clienteEmpresa || eventos.find(e => e.id === selectedTasks[0].eventoId)?.cliente || '') : ''), inicio:selectedTasks[0]?.fecha || selectedDate, fin:selectedTasks[selectedTasks.length - 1]?.fecha || selectedDate, pax:selectedTasks.reduce((sum, task) => sum + Number(task.pax || 0), 0) }} onConfirm={async datos => { await onCreateEventFromTasks(datos, selectedTasks); setSelectedIds([]); setModalEvento(false); }} />}
       {modalEstado && <TaskStatusModal tarea={modalEstado} onClose={() => setModalEstado(null)} onConfirm={async payload => { await onUpdateTaskStatus(modalEstado, payload); setModalEstado(null); }} />}
     </div>
@@ -2861,6 +3043,7 @@ const ROOT_TAB_ITEMS = [
     { id:'tareas',      Icon:CheckSquare,     label:'Tareas'         },
     { id:'gantt',       Icon:BarChart3,       label:'Línea de tiempo'},
     { id:'conductores', Icon:Users,           label:'Conductores'    },
+    { id:'rrhh',        Icon:Clock,           label:'RRHH'           },
     { id:'vehiculos',   Icon:Bus,             label:'Vehículos'      },
     { id:'gastos',      Icon:Receipt,         label:'Gastos'         },
     { id:'reportes',    Icon:BarChart3,       label:'Reportes'       },
@@ -3077,6 +3260,7 @@ function AppContent() {
   const [taskScope, setTaskScope] = useState('day');
   const [tareas,      setTareas]    = useState([]);
   const [conductores, setConductores] = useState([]);
+  const [ausencias,   setAusencias] = useState([]);
   const [vehiculos,   setVehiculos] = useState([]);
   const [eventos,     setEventos]   = useState([]);
   const [gastos,      setGastos]    = useState([]);
@@ -3210,14 +3394,16 @@ function AppContent() {
     if (!token) return;
     setLoading(true);
     try {
-      const [conds, vehs, evts, tareas, gastosData] = await Promise.all([
+      const [conds, ausenciasData, vehs, evts, tareas, gastosData] = await Promise.all([
         apiFetch(`${API}/conductores`),
+        apiFetch(`${API}/conductor-ausencias`),
         apiFetch(`${API}/vehiculos`),
         apiFetch(`${API}/eventos`),
         apiFetch(`${API}/tareas?fecha=${selectedTaskDate}`),
         apiFetch(`${API}/gastos`),
       ]);
       setConductores(conds);
+      setAusencias(ausenciasData);
       setVehiculos(vehs);
       setEventos(evts);
       setTareas(sortTasksByStart(tareas));
@@ -3338,6 +3524,7 @@ function AppContent() {
       setModal(null);
     } catch (err) {
       console.error('Error asignando tarea:', err);
+      alert(err.message || 'No se pudo asignar la tarea.');
     }
   }
 
@@ -3440,6 +3627,29 @@ function AppContent() {
       console.error('Error actualizando conductor:', err);
       throw err;
     }
+  }
+
+  async function handleAddAusencia(datos) {
+    const { id } = await apiFetch(`${API}/conductor-ausencias`, {
+      method: 'POST',
+      body: JSON.stringify(datos),
+    });
+    const conductor = conductores.find(item => item.id === datos.conductorId);
+    setAusencias(prev => [...prev, {
+      id,
+      conductorId: datos.conductorId,
+      conductorNombre: conductor?.nombre || 'Conductor',
+      tipo: datos.tipo || 'vacaciones',
+      fechaInicio: datos.fechaInicio,
+      fechaFin: datos.fechaFin,
+      motivo: datos.motivo || '',
+      estado: 'programada',
+    }].sort((a, b) => `${a.fechaInicio}-${a.conductorNombre}`.localeCompare(`${b.fechaInicio}-${b.conductorNombre}`)));
+  }
+
+  async function handleCancelAusencia(id) {
+    await apiFetch(`${API}/conductor-ausencias/${id}`, { method: 'DELETE' });
+    setAusencias(prev => prev.filter(item => item.id !== id));
   }
 
   async function handleBajaConductor(id) {
@@ -3570,11 +3780,13 @@ function AppContent() {
       case 'eventos':
         return <EventosView eventos={eventos} onAdd={handleAddEvento} />;
       case 'tareas':
-        return <TareasView key={`${selectedTaskDate}-${taskScope}`} tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onAsignar={handleAsignar} onAddTarea={handleAddTarea} selectedDate={selectedTaskDate} onDateChange={handleTaskDateChange} scope={taskScope} onScopeChange={handleTaskScopeChange} focusedTaskId={focusedTaskId} focusedEventId={focusedEventId} onCreateEventFromTasks={handleCreateEventFromTasks} onUpdateTaskStatus={handleUpdateTaskStatus} />;
+        return <TareasView key={`${selectedTaskDate}-${taskScope}`} tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} ausencias={ausencias} onAsignar={handleAsignar} onAddTarea={handleAddTarea} selectedDate={selectedTaskDate} onDateChange={handleTaskDateChange} scope={taskScope} onScopeChange={handleTaskScopeChange} focusedTaskId={focusedTaskId} focusedEventId={focusedEventId} onCreateEventFromTasks={handleCreateEventFromTasks} onUpdateTaskStatus={handleUpdateTaskStatus} />;
       case 'gantt':
         return <FlotaGanttView apiFetch={apiFetch} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onTooltipChange={setGanttTooltip} onFocusTask={focusTaskInPlanner} />;
       case 'conductores':
         return <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} onAdd={handleAddConductor} onUpdate={handleUpdateConductor} onBaja={handleBajaConductor} onDelete={handleDeleteConductor} canDelete={user?.rol === 'admin'} apiFetch={apiFetch} onFocusTask={focusTaskInPlanner} />;
+      case 'rrhh':
+        return <RecursosHumanosView conductores={conductores} ausencias={ausencias} onAddAusencia={handleAddAusencia} onCancelAusencia={handleCancelAusencia} />;
       case 'vehiculos':
         return <VehiculosView vehiculos={vehiculos} conductores={conductores} onAdd={handleAddVehiculo} onBaja={handleBajaVehiculo} onUpdate={handleUpdateVehiculo} onUploadImage={uploadVehiculoImage} gastos={gastos} onAddGasto={handleAddGasto} onUploadGastoAdjunto={uploadGastoAdjunto} onDelete={handleDeleteVehiculo} canDelete={user?.rol === 'admin'} apiFetch={apiFetch} onFocusTask={focusTaskInPlanner} />;
       case 'usuarios':
@@ -3714,6 +3926,7 @@ function AppContent() {
           vehiculos={vehiculos}
           tareas={tareas}
           eventos={eventos}
+          ausencias={ausencias}
           onClose={() => setModal(null)}
           onConfirm={handleConfirm}
         />

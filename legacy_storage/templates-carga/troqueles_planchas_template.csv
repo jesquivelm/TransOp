@@ -1,0 +1,4 @@
+tipo_registro,codigo,descripcion,ancho,largo,repeticiones,dientes,gap,compatible_digital,compatible_convencional,costo_base,estado
+TROQUEL,TRQ-001,Troquel cilindrico 4 x 6,4,6,1,1,0,NO,SI,0.00,ACTIVO
+TROQUEL,TRQ-002,Troquel rectangular 3 x 5,3,5,2,2,0.125,NO,SI,0.00,ACTIVO
+PLANCHA,PLN-001,Plancha cyrel 450 x 320,,,,,,NO,SI,35.00,ACTIVO
