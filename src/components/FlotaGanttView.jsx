@@ -76,7 +76,10 @@ function getTaskSpan(task, visibleDays) {
   return { left: `${left}%`, width: `${width}%` };
 }
 
-function taskColor(task) {
+function taskColor(task, alert = null) {
+  if (alert) {
+    return { bg: T.redDim, border: `${T.RED}66`, text: T.RED };
+  }
   switch (task.estado) {
     case 'completada':
       return { bg: T.grnDim, border: `${T.GRN}66`, text: T.GRN };
@@ -91,7 +94,29 @@ function taskColor(task) {
   }
 }
 
-export default function FlotaGanttView({ apiFetch, conductores, vehiculos, eventos, onTooltipChange, onFocusTask }) {
+function isDateWithinRange(dateISO, startISO, endISO) {
+  if (!dateISO || !startISO || !endISO) return false;
+  return dateISO >= startISO && dateISO <= endISO;
+}
+
+function getAbsenceForTask(task, ausencias = []) {
+  if (!task?.condId || !task?.fecha) return null;
+  return ausencias.find(item =>
+    item.conductorId === task.condId &&
+    item.estado !== 'cancelada' &&
+    isDateWithinRange(task.fecha, item.fechaInicio, item.fechaFin)
+  ) || null;
+}
+
+function getTaskAlert(task, ausencias = [], vehiculos = []) {
+  const absence = getAbsenceForTask(task, ausencias);
+  if (absence) return `Ausencia del conductor: ${absence.tipo}`;
+  const vehiculo = vehiculos.find(item => item.id === task?.vehId);
+  if (vehiculo?.estado === 'fuera_de_servicio') return 'Vehículo fuera de servicio';
+  return '';
+}
+
+export default function FlotaGanttView({ apiFetch, conductores, vehiculos, ausencias = [], eventos, onTooltipChange, onFocusTask }) {
   const [mode, setMode] = useState('vehiculos');
   const [rangeId, setRangeId] = useState('2w');
   const [baseDate, setBaseDate] = useState(todayISO());
@@ -262,6 +287,9 @@ export default function FlotaGanttView({ apiFetch, conductores, vehiculos, event
 
               {rows.map(row => {
                 const rowTasks = tasks.filter(task => taskMatchesRow(task, mode, row.id));
+                const rowAbsences = mode === 'conductores'
+                  ? ausencias.filter(item => item.conductorId === row.id && item.estado !== 'cancelada' && item.fechaInicio <= visibleTo && item.fechaFin >= visibleFrom)
+                  : [];
                 return (
                   <div key={row.id} style={{ display: 'flex', minHeight: ROW_HEIGHT, borderBottom: `1px solid ${T.bdr}` }}>
                     <div style={{ width: LABEL_WIDTH, flexShrink: 0, padding: '12px 14px', borderRight: `1px solid ${T.bdr}`, background: T.card3 }}>
@@ -272,6 +300,11 @@ export default function FlotaGanttView({ apiFetch, conductores, vehiculos, event
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 13, fontWeight: 800, color: T.txt }}>{row.title}</div>
                           <div style={{ fontSize: 11, color: T.mute, marginTop: 4 }}>{row.subtitle}</div>
+                          {!!rowAbsences.length && (
+                            <div style={{ fontSize: 10, color: T.RED, marginTop: 5, fontWeight: 800 }}>
+                              {rowAbsences.length} ausencia{rowAbsences.length === 1 ? '' : 's'} en el rango
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -281,10 +314,26 @@ export default function FlotaGanttView({ apiFetch, conductores, vehiculos, event
                           <div key={`${row.id}-${day}`} style={{ borderRight: `1px solid ${T.bdr}`, background: day === todayISO() ? 'rgba(59,130,246,0.05)' : 'transparent' }} />
                         ))}
                       </div>
+                      {mode === 'conductores' && rowAbsences.map(absence => {
+                        const startIndex = visibleDays.findIndex(day => day >= absence.fechaInicio);
+                        const endIndex = [...visibleDays].reverse().findIndex(day => day <= absence.fechaFin);
+                        if (startIndex < 0 || endIndex < 0) return null;
+                        const finalIndex = visibleDays.length - 1 - endIndex;
+                        const dayWidth = 100 / visibleDays.length;
+                        const left = startIndex * dayWidth;
+                        const width = Math.max(dayWidth, ((finalIndex - startIndex) + 1) * dayWidth);
+                        return (
+                          <div
+                            key={absence.id}
+                            style={{ position:'absolute', left:`${left}%`, width:`${width}%`, top:0, bottom:0, background:'rgba(239,68,68,0.10)', borderLeft:`2px solid ${T.RED}`, borderRight:`2px solid ${T.RED}`, pointerEvents:'none' }}
+                          />
+                        );
+                      })}
                       {rowTasks.map(task => {
                         const span = getTaskSpan(task, visibleDays);
                         if (!span) return null;
-                        const colors = taskColor(task);
+                        const alert = getTaskAlert(task, ausencias, vehiculos);
+                        const colors = taskColor(task, alert);
                         const event = eventos.find(item => item.id === task.eventoId);
                         const cond = conductores.find(item => item.id === task.condId);
                         const veh = vehiculos.find(item => item.id === task.vehId);
@@ -293,8 +342,8 @@ export default function FlotaGanttView({ apiFetch, conductores, vehiculos, event
                             key={task.id}
                             type="button"
                             onClick={() => onFocusTask?.(task)}
-                            onMouseEnter={(eventInfo) => onTooltipChange?.({ tarea: task, evento: event, cond, veh, x: eventInfo.clientX + 12, y: eventInfo.clientY + 12 })}
-                            onMouseMove={(eventInfo) => onTooltipChange?.({ tarea: task, evento: event, cond, veh, x: eventInfo.clientX + 12, y: eventInfo.clientY + 12 })}
+                            onMouseEnter={(eventInfo) => onTooltipChange?.({ tarea: task, evento: event, cond, veh, alert, x: eventInfo.clientX + 12, y: eventInfo.clientY + 12 })}
+                            onMouseMove={(eventInfo) => onTooltipChange?.({ tarea: task, evento: event, cond, veh, alert, x: eventInfo.clientX + 12, y: eventInfo.clientY + 12 })}
                             onMouseLeave={() => onTooltipChange?.(null)}
                             style={{ position: 'absolute', left: span.left, width: span.width, top: 10, height: 44, borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.bg, color: colors.text, cursor: 'pointer', padding: '6px 8px', overflow: 'hidden', boxShadow: '0 6px 16px rgba(15,23,42,0.16)' }}>
                             <div style={{ fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{task.hora} - {task.fin || task.hora}</div>

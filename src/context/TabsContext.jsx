@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { useAuth } from './AuthContext';
 
 const TabsContext = createContext(null);
 const isRenderableIcon = (icon) => (
@@ -26,16 +27,34 @@ const stableSerialize = (value) => {
 };
 
 export function TabsProvider({ children }) {
+  const { user, isAuthenticated } = useAuth();
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
   const [tabsData, setTabsData] = useState({});
+  const [tabsReady, setTabsReady] = useState(false);
+  const rememberTabs = Boolean(user?.recordar_tabs);
+  const userScope = user?.id ? `user:${user.id}` : 'guest';
+  const tabsKey = `tms_global_tabs:${userScope}`;
+  const dataKey = `tms_global_tabs_data:${userScope}`;
+  const activeKey = `tms_global_active_tab:${userScope}`;
 
-  // Cargar pestañas desde localStorage al iniciar
   useEffect(() => {
+    setTabs([]);
+    setTabsData({});
+    setActiveTabId(null);
+    setTabsReady(false);
+    if (!isAuthenticated) {
+      setTabsReady(true);
+      return;
+    }
+    if (!rememberTabs) {
+      setTabsReady(true);
+      return;
+    }
     try {
-      const savedTabs = localStorage.getItem('tms_global_tabs');
-      const savedData = localStorage.getItem('tms_global_tabs_data');
-      const savedActiveTabId = localStorage.getItem('tms_global_active_tab');
+      const savedTabs = localStorage.getItem(tabsKey);
+      const savedData = localStorage.getItem(dataKey);
+      const savedActiveTabId = localStorage.getItem(activeKey);
       if (savedTabs) {
         const parsedTabs = JSON.parse(savedTabs)
           .map(sanitizeTab)
@@ -51,23 +70,28 @@ export function TabsProvider({ children }) {
       }
     } catch (e) {
       console.error('Error cargando pestañas:', e);
+    } finally {
+      setTabsReady(true);
     }
-  }, []);
+  }, [activeKey, dataKey, isAuthenticated, rememberTabs, tabsKey]);
 
-  // Guardar pestañas en localStorage cuando cambian
   useEffect(() => {
-    if (tabs.length > 0) {
-      localStorage.setItem('tms_global_tabs', JSON.stringify(tabs.map(serializeTab).filter(Boolean)));
-      localStorage.setItem('tms_global_tabs_data', JSON.stringify(tabsData));
-      if (activeTabId) {
-        localStorage.setItem('tms_global_active_tab', activeTabId);
-      }
-    } else {
-      localStorage.removeItem('tms_global_tabs');
-      localStorage.removeItem('tms_global_tabs_data');
-      localStorage.removeItem('tms_global_active_tab');
+    if (!isAuthenticated || !rememberTabs) {
+      localStorage.removeItem(tabsKey);
+      localStorage.removeItem(dataKey);
+      localStorage.removeItem(activeKey);
+      return;
     }
-  }, [activeTabId, tabs, tabsData]);
+    if (tabs.length > 0) {
+      localStorage.setItem(tabsKey, JSON.stringify(tabs.map(serializeTab).filter(Boolean)));
+      localStorage.setItem(dataKey, JSON.stringify(tabsData));
+      if (activeTabId) localStorage.setItem(activeKey, activeTabId);
+    } else {
+      localStorage.removeItem(tabsKey);
+      localStorage.removeItem(dataKey);
+      localStorage.removeItem(activeKey);
+    }
+  }, [activeKey, activeTabId, dataKey, isAuthenticated, rememberTabs, tabs, tabsData, tabsKey]);
 
   const openTab = useCallback((tabConfig) => {
     const normalizedTab = sanitizeTab(tabConfig);
@@ -132,6 +156,12 @@ export function TabsProvider({ children }) {
     return tabsData[tabId];
   }, [tabsData]);
 
+  const resetTabs = useCallback(() => {
+    setTabs([]);
+    setTabsData({});
+    setActiveTabId(null);
+  }, []);
+
   const value = {
     tabs,
     activeTabId,
@@ -140,7 +170,9 @@ export function TabsProvider({ children }) {
     activateTab,
     updateTabData,
     getTabData,
-    tabsData
+    tabsData,
+    resetTabs,
+    tabsReady,
   };
 
   return (

@@ -3,7 +3,8 @@ import {
   LayoutDashboard, CalendarDays, CheckSquare, Users, Bus, Receipt,
   BarChart3, AlertTriangle, CheckCircle, XCircle, Clock, MapPin,
   Phone, Plus, Search, ChevronRight, ChevronLeft, Shield, Wrench, X, User,
-  MessageSquare, Zap, Eye, RefreshCcw, ChevronDown, Moon, Sun, Calculator, Settings, Trash2
+  MessageSquare, Zap, Eye, RefreshCcw, ChevronDown, Moon, Sun, Calculator, Settings, Trash2,
+  Paperclip, Filter, FileText
 } from "lucide-react";
 
 import CotizadorView from './components/Cotizador/CotizadorView';
@@ -28,6 +29,16 @@ export { T };
 // HELPERS
 // ─────────────────────────────────────────────────────────────
 const API = '/api/tms';
+const CRC_MONEY_FORMATTER = new Intl.NumberFormat('es-CR', {
+  style: 'currency',
+  currency: 'CRC',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+const NUMBER_FORMATTER = new Intl.NumberFormat('es-CR', {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+});
 
 // Fecha de hoy en YYYY-MM-DD (dinámica)
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -125,6 +136,22 @@ const sortTasksByStart = (items) => (
     return dateA.localeCompare(dateB);
   })
 );
+const formatMoneyCRC = (value) => CRC_MONEY_FORMATTER.format(Number(value) || 0);
+const formatNumberCR = (value) => NUMBER_FORMATTER.format(Number(value) || 0);
+const formatDateSlash = (value) => {
+  if (!value) return '—';
+  const [year, month, day] = String(value).split('-');
+  if (!year || !month || !day) return value;
+  return `${day}/${month}/${year}`;
+};
+const GASTO_TYPE_LABELS = {
+  reparacion: 'Reparación',
+  repuesto: 'Repuesto',
+  mantenimiento: 'Mantenimiento',
+  otro: 'Otro',
+  llantas: 'Llantas',
+};
+const formatGastoType = (value) => GASTO_TYPE_LABELS[value] || String(value || 'Otro').replace(/^./, char => char.toUpperCase());
 
 function stringToHue(value) {
   const text = String(value || 'sin-evento');
@@ -300,6 +327,49 @@ function getDriverAbsenceForDate(conductorId, dateISO, ausencias = []) {
   ) || null;
 }
 
+function getDriverAbsencesInRange(conductorId, fromISO, toISO, ausencias = []) {
+  if (!conductorId || !fromISO || !toISO) return [];
+  return ausencias.filter(item =>
+    item.conductorId === conductorId &&
+    item.estado !== 'cancelada' &&
+    item.fechaInicio <= toISO &&
+    item.fechaFin >= fromISO
+  );
+}
+
+function isTaskAffectedByAbsence(task, ausencias = []) {
+  if (!task?.condId || !task?.fecha) return null;
+  return getDriverAbsenceForDate(task.condId, task.fecha, ausencias);
+}
+
+function getVehicleOperationalIssue(task, vehiculos = []) {
+  if (!task?.vehId) return null;
+  const vehiculo = vehiculos.find(item => item.id === task.vehId);
+  if (!vehiculo) return null;
+  if (vehiculo.estado === 'fuera_de_servicio') {
+    return {
+      type: 'vehiculo_fuera_servicio',
+      label: 'Vehículo fuera de servicio',
+      vehiculo,
+    };
+  }
+  return null;
+}
+
+function getTaskOperationalAlert(task, ausencias = [], vehiculos = []) {
+  const absence = isTaskAffectedByAbsence(task, ausencias);
+  if (absence) {
+    return {
+      type: 'conductor_ausente',
+      label: `Conductor ausente por ${LC[absence.tipo]?.[0] || absence.tipo}`,
+      absence,
+    };
+  }
+  const vehicleIssue = getVehicleOperationalIssue(task, vehiculos);
+  if (vehicleIssue) return vehicleIssue;
+  return null;
+}
+
 function formatShortDate(dateStr) {
   if (!dateStr) return '';
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString('es-CR', { day: 'numeric', month: 'short' });
@@ -338,6 +408,7 @@ const LC = {
 // ─────────────────────────────────────────────────────────────
 function Badge({ estado }) {
   const [label, color, bg] = LC[estado] ?? ['?', T.mute, T.bdr];
+
   return (
     <span style={{ fontSize:11, fontWeight:600, padding:'3px 9px', borderRadius:20,
       letterSpacing:.3, color, background:bg, whiteSpace:'nowrap', display:'inline-block' }}>
@@ -596,7 +667,7 @@ function Dashboard({ tareas, conductores, vehiculos, eventos, onAsignar }) {
   const tdSt = (w) => ({ width:w, padding:'0 8px', verticalAlign:'middle', color:T.txt, fontSize:13 });
 
   return (
-    <div>
+    <div style={{ width:'100%', maxWidth:1320, margin:'0 auto' }}>
       <div style={{ display:'flex', gap:12, marginBottom:24, flexWrap:'wrap' }}>
         <StatCard label="Tareas hoy"     value={total}    sub={`${complet} completadas`}    icon={CheckSquare} color={T.txt} />
         <StatCard label="En ruta ahora"  value={enRuta}   sub="vehículos activos"           icon={Zap}         color={T.BLU} />
@@ -967,7 +1038,7 @@ function VehicleImageInput({ imageUrl, onFileSelect, loading = false }) {
   };
 
   return (
-    <div>
+    <div style={{ width:'100%', maxWidth:1320, margin:'0 auto' }}>
       <div
         onClick={() => !loading && inputRef.current?.click()}
         style={previewStyle}
@@ -1020,8 +1091,9 @@ function AdjuntosList({ adjuntos = [] }) {
           href={adjunto.archivoPath}
           target="_blank"
           rel="noreferrer"
-          style={{ padding: '10px 12px', borderRadius: 10, background: T.card2, border: `1px solid ${T.bdr}`, color: T.txt, textDecoration: 'none', fontSize: 13 }}
+          style={{ padding: '10px 12px', borderRadius: 10, background: T.card2, border: `1px solid ${T.bdr}`, color: T.txt, textDecoration: 'none', fontSize: 13, display:'flex', alignItems:'center', gap:10 }}
         >
+          <Paperclip size={14} color={T.AMB} />
           {adjunto.nombreOriginal || 'Adjunto'}
         </a>
       ))}
@@ -1032,7 +1104,7 @@ function AdjuntosList({ adjuntos = [] }) {
 // ─────────────────────────────────────────────────────────────
 // VISTA: CONDUCTORES
 // ─────────────────────────────────────────────────────────────
-function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBaja, onDelete, canDelete = false, apiFetch, onFocusTask }) {
+function ConductoresView({ conductores, tareas, vehiculos, ausencias = [], onAdd, onUpdate, onBaja, onDelete, canDelete = false, apiFetch, onFocusTask }) {
   const [search, setSearch]     = useState('');
   const [filtroEst, setFiltro]  = useState('todos');
   const [expandido, setExpand]  = useState(null);
@@ -1232,12 +1304,12 @@ function ConductoresView({ conductores, tareas, vehiculos, onAdd, onUpdate, onBa
           onConfirm={() => { onBaja(bajaTarget.id); setBajaTarget(null); }}
         />
       )}
-      {reportTarget && <MonthlyReportModal apiFetch={apiFetch} type="conductor" target={reportTarget} onClose={() => setReportTarget(null)} onFocusTask={onFocusTask} />}
+      {reportTarget && <MonthlyReportModal apiFetch={apiFetch} type="conductor" target={reportTarget} vehiculos={vehiculos} ausencias={ausencias} onClose={() => setReportTarget(null)} onFocusTask={onFocusTask} />}
     </div>
   );
 }
 
-function RecursosHumanosView({ conductores, ausencias, onAddAusencia, onCancelAusencia }) {
+function RecursosHumanosView({ apiFetch, conductores, vehiculos, ausencias, onAddAusencia, onCancelAusencia, onFocusTask }) {
   const activeDrivers = conductores.filter(c => c.estado !== 'inactivo');
   const [form, setForm] = useState({
     conductorId: activeDrivers[0]?.id || '',
@@ -1248,12 +1320,44 @@ function RecursosHumanosView({ conductores, ausencias, onAddAusencia, onCancelAu
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [impactLoading, setImpactLoading] = useState(false);
+  const [impactError, setImpactError] = useState('');
+  const [impactTasks, setImpactTasks] = useState([]);
 
   useEffect(() => {
     if (!form.conductorId && activeDrivers[0]?.id) {
       setForm(prev => ({ ...prev, conductorId: activeDrivers[0].id }));
     }
   }, [activeDrivers, form.conductorId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadImpact() {
+      if (!form.conductorId || !form.fechaInicio || !form.fechaFin || form.fechaFin < form.fechaInicio) {
+        setImpactTasks([]);
+        setImpactError('');
+        return;
+      }
+      setImpactLoading(true);
+      setImpactError('');
+      try {
+        const payload = await apiFetch(`${API}/tareas?desde=${encodeURIComponent(form.fechaInicio)}&hasta=${encodeURIComponent(form.fechaFin)}`);
+        const filtered = (Array.isArray(payload) ? payload : []).filter(task => task.condId === form.conductorId);
+        if (!cancelled) setImpactTasks(filtered);
+      } catch (err) {
+        if (!cancelled) {
+          setImpactTasks([]);
+          setImpactError(err.message || 'No se pudo calcular el impacto operativo.');
+        }
+      } finally {
+        if (!cancelled) setImpactLoading(false);
+      }
+    }
+
+    loadImpact();
+    return () => { cancelled = true; };
+  }, [apiFetch, form.conductorId, form.fechaFin, form.fechaInicio]);
 
   const today = todayISO();
   const currentAbsences = ausencias.filter(item => isDateWithinRange(today, item.fechaInicio, item.fechaFin));
@@ -1265,6 +1369,11 @@ function RecursosHumanosView({ conductores, ausencias, onAddAusencia, onCancelAu
   }, 0);
   const inp = { width:'100%', padding:'9px 12px', background:T.card2, border:`1px solid ${T.bdr2}`, borderRadius:8, color:T.txt, fontSize:13, outline:'none', boxSizing:'border-box' };
   const lbl = { fontSize:12, fontWeight:600, color:T.sub, display:'block', marginBottom:6 };
+  const impactEvents = Array.from(new Map(
+    impactTasks
+      .filter(task => task.eventoId)
+      .map(task => [task.eventoId, { id: task.eventoId, nombre: task.eventoNombre || task.nombre, fecha: task.fecha }])
+  ).values());
 
   async function submit() {
     setError('');
@@ -1352,6 +1461,40 @@ function RecursosHumanosView({ conductores, ausencias, onAddAusencia, onCancelAu
               <textarea value={form.motivo} onChange={e => setForm(prev => ({ ...prev, motivo:e.target.value }))} rows={3} style={{ ...inp, resize:'vertical' }} placeholder="Ej. Vacaciones aprobadas, incapacidad médica..." />
             </label>
             {error && <div style={{ padding:'10px 12px', borderRadius:10, background:T.redDim, color:T.RED, fontSize:12 }}>{error}</div>}
+            <div style={{ padding:'12px 14px', borderRadius:12, background: impactTasks.length ? T.redDim : T.card2, border:`1px solid ${impactTasks.length ? `${T.RED}33` : T.bdr}`, color: impactTasks.length ? T.RED : T.sub }}>
+              <div style={{ fontSize:12, fontWeight:800, marginBottom:6 }}>Impacto operativo del rango</div>
+              {impactLoading && <div style={{ fontSize:12 }}>Revisando tareas y eventos afectados...</div>}
+              {!impactLoading && impactError && <div style={{ fontSize:12 }}>{impactError}</div>}
+              {!impactLoading && !impactError && (
+                <>
+                  <div style={{ fontSize:12 }}>
+                    {impactTasks.length
+                      ? `${impactTasks.length} tarea${impactTasks.length === 1 ? '' : 's'} y ${impactEvents.length} evento${impactEvents.length === 1 ? '' : 's'} quedarían comprometidos en ese rango.`
+                      : 'No hay tareas asignadas a este conductor en el rango elegido.'}
+                  </div>
+                  {impactTasks.length > 0 && (
+                    <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:8, maxHeight:220, overflowY:'auto' }}>
+                      {impactTasks.map(task => {
+                        const vehiculo = vehiculos.find(item => item.id === task.vehId);
+                        return (
+                          <button
+                            key={task.id}
+                            type="button"
+                            onClick={() => onFocusTask?.(task)}
+                            style={{ textAlign:'left', padding:'10px 12px', borderRadius:10, border:`1px solid ${T.RED}22`, background:'rgba(15,23,42,0.24)', color:'inherit', cursor:'pointer' }}
+                          >
+                            <div style={{ fontSize:12, fontWeight:800 }}>{task.fecha} · {task.hora} · {task.nombre}</div>
+                            <div style={{ fontSize:11, marginTop:4, color: impactTasks.length ? '#fecaca' : T.mute }}>
+                              {task.origen || 'Sin origen'} {task.origen && task.destino ? '→' : ''} {task.destino || 'Sin destino'} · {vehiculo ? vehiculo.placa : 'Sin vehículo'}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
             <button onClick={submit} disabled={saving || !activeDrivers.length} style={{ padding:'11px 14px', borderRadius:10, border:'none', background:T.AMB, color:'#111827', cursor:saving ? 'wait' : 'pointer', fontWeight:800 }}>
               {saving ? 'Guardando...' : 'Guardar ausencia'}
             </button>
@@ -1536,13 +1679,14 @@ function NuevoVehiculoModal({ onClose, onConfirm, onUploadImage }) {
 // ─────────────────────────────────────────────────────────────
 // VISTA: VEHÍCULOS
 // ─────────────────────────────────────────────────────────────
-function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gastos = [], onAddGasto, onUploadGastoAdjunto, onDelete, canDelete = false }) {
+function EditarVehiculoModal({ vehiculo, conductores = [], onClose, onConfirm, onUploadImage, gastos = [], onAddGasto, onAppendGastoAdjuntos, onUploadGastoAdjunto, onDelete, canDelete = false }) {
   const [tab, setTab] = useState('general');
   const [form, setForm] = useState({
     km: vehiculo?.km ?? 0,
     revTec: (vehiculo?.revTec || '').split('T')[0],
     revTec2: (vehiculo?.revTec2 || '').split('T')[0],
     foto_url: vehiculo?.foto_url || '',
+    condId: vehiculo?.condId || '',
     licenciaRequerida: vehiculo?.licenciaRequerida || '',
     estado: vehiculo?.estado || 'disponible',
     combustibleTipo: vehiculo?.combustibleTipo || 'Diésel',
@@ -1552,9 +1696,19 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [savingGasto, setSavingGasto] = useState(false);
+  const [uploadingGastoId, setUploadingGastoId] = useState(null);
+  const existingGastoInputRef = useRef(null);
+  const newGastoInputRef = useRef(null);
+  const [pendingGastoAdjuntosTarget, setPendingGastoAdjuntosTarget] = useState(null);
 
   const gastosVehiculo = gastos.filter(item => item.vehiculoId === vehiculo.id);
   const adjuntosVehiculo = gastosVehiculo.flatMap(item => item.adjuntos || []);
+  const gastoSummary = gastosVehiculo.reduce((acc, gasto) => {
+    const tipo = gasto.tipo || 'otro';
+    acc.total += Number(gasto.monto) || 0;
+    acc.byType[tipo] = (acc.byType[tipo] || 0) + (Number(gasto.monto) || 0);
+    return acc;
+  }, { total: 0, byType: {} });
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
   const setGasto = (k, v) => setGastoForm(prev => ({ ...prev, [k]: v }));
@@ -1577,7 +1731,7 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
 
   async function submitGasto() {
     if (!gastoForm.detalle.trim()) return setError('El detalle del gasto es requerido.');
-    if (!gastoForm.monto || isNaN(Number(gastoForm.monto))) return setError('El monto del gasto es invalido.');
+    if (!gastoForm.monto || isNaN(Number(gastoForm.monto))) return setError('El monto del gasto es inválido.');
     try {
       setSavingGasto(true);
       const adjuntos = [];
@@ -1603,6 +1757,33 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
     }
   }
 
+  async function appendAdjuntosToGasto(gastoId, files) {
+    const nextFiles = Array.from(files || []);
+    if (!gastoId || !nextFiles.length) return;
+    try {
+      setUploadingGastoId(gastoId);
+      const adjuntos = [];
+      for (const file of nextFiles) {
+        const archivoPath = await onUploadGastoAdjunto(file);
+        adjuntos.push({
+          nombreOriginal: file.name,
+          archivoPath,
+          mimeType: file.type || null,
+        });
+      }
+      await onAppendGastoAdjuntos?.(gastoId, adjuntos);
+      setError('');
+    } catch (err) {
+      setError(err.message || 'No se pudieron agregar los adjuntos.');
+    } finally {
+      setUploadingGastoId(null);
+      setPendingGastoAdjuntosTarget(null);
+      if (existingGastoInputRef.current) {
+        existingGastoInputRef.current.value = '';
+      }
+    }
+  }
+
   function submit() {
     if (form.km === '' || isNaN(Number(form.km)) || Number(form.km) < 0) {
       return setError('El kilometraje actual debe ser un número válido mayor o igual a 0.');
@@ -1613,6 +1794,7 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
       revTec: form.revTec || null,
       revTec2: form.revTec2 || null,
       march: null,
+      vehId: form.condId || null,
       licenciaRequerida: form.licenciaRequerida || null,
       estado: form.estado,
       foto_url: form.foto_url.trim() || null,
@@ -1626,7 +1808,7 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
       <div style={panel}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}>
           <div>
-            <div style={{ fontSize:17, fontWeight:700, color:T.txt }}>Gestionar vehiculo</div>
+            <div style={{ fontSize:17, fontWeight:700, color:T.txt }}>Gestión de Vehículo</div>
             <div style={{ fontSize:12, color:T.mute, marginTop:4 }}>{vehiculo.placa} · {vehiculo.marca} {vehiculo.modelo}</div>
           </div>
           <button onClick={onClose} style={{ background:'transparent', border:'none', cursor:'pointer', color:T.mute }}><X size={20}/></button>
@@ -1635,7 +1817,7 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
         <div style={{ display:'flex', gap:8, marginBottom:18, flexWrap:'wrap' }}>
           {[
             ['general', 'General'],
-            ['gastos', 'Gastos y reparaciones'],
+            ['gastos', 'Gastos y Reparaciones'],
             ['adjuntos', 'Adjuntos'],
           ].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)} style={{ padding:'8px 12px', borderRadius:10, border:`1px solid ${tab === id ? T.AMB : T.bdr2}`, background:tab === id ? T.ambDim : T.card2, color:tab === id ? T.AMB : T.sub, cursor:'pointer', fontSize:12, fontWeight:700 }}>
@@ -1675,6 +1857,15 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
                 </select>
               </div>
               <div style={{ gridColumn:'span 4' }}>
+                <label style={lbl}>CONDUCTOR ASIGNADO</label>
+                <select value={form.condId} onChange={e => set('condId', e.target.value)} style={{ ...inp, cursor:'pointer' }}>
+                  <option value="">Sin conductor asignado</option>
+                  {conductores.filter(item => item.estado !== 'inactivo').map(item => (
+                    <option key={item.id} value={item.id}>{item.nombre}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ gridColumn:'span 4' }}>
                 <label style={lbl}>TIPO DE COMBUSTIBLE</label>
                 <select value={form.combustibleTipo} onChange={e => set('combustibleTipo', e.target.value)} style={{ ...inp, cursor:'pointer' }}>
                   <option value="Súper">Súper</option>
@@ -1707,13 +1898,35 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
                   <div style={{ display:'flex', justifyContent:'space-between', gap:12 }}>
                     <div>
                       <div style={{ fontSize:13, fontWeight:700, color:T.txt }}>{gasto.detalle}</div>
-                      <div style={{ fontSize:11, color:T.mute, marginTop:4 }}>{gasto.fecha} · {gasto.tipo}</div>
+                      <div style={{ fontSize:11, color:T.mute, marginTop:4 }}>{formatDateSlash(gasto.fecha)} · {formatGastoType(gasto.tipo)}</div>
                     </div>
-                    <div style={{ fontSize:14, fontWeight:800, color:T.AMB }}>${Number(gasto.monto || 0).toFixed(2)}</div>
+                    <div style={{ fontSize:14, fontWeight:800, color:T.AMB }}>{formatMoneyCRC(gasto.monto)}</div>
+                  </div>
+                  <div style={{ display:'flex', justifyContent:'flex-end', marginTop:10 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingGastoAdjuntosTarget(gasto.id);
+                        existingGastoInputRef.current?.click();
+                      }}
+                      disabled={uploadingGastoId === gasto.id}
+                      style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:9, border:`1px solid ${T.bdr2}`, background:T.card3, color:T.sub, cursor:uploadingGastoId === gasto.id ? 'wait' : 'pointer', fontSize:12, fontWeight:700 }}
+                    >
+                      <Paperclip size={13} />
+                      {uploadingGastoId === gasto.id ? 'Subiendo...' : 'Agregar Documento'}
+                    </button>
                   </div>
                   {!!gasto.adjuntos?.length && <div style={{ marginTop:10 }}><AdjuntosList adjuntos={gasto.adjuntos} /></div>}
                 </div>
               ))}
+              <input
+                ref={existingGastoInputRef}
+                type="file"
+                multiple
+                accept="image/png,image/jpeg,image/webp,application/pdf"
+                style={{ display:'none' }}
+                onChange={e => appendAdjuntosToGasto(pendingGastoAdjuntosTarget, e.target.files)}
+              />
             </div>
             <div style={{ padding:'14px', borderRadius:12, background:T.card2, border:`1px solid ${T.bdr}`, height:'fit-content' }}>
               <div style={{ fontSize:13, fontWeight:700, color:T.txt, marginBottom:12 }}>Agregar gasto</div>
@@ -1721,10 +1934,10 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
                 <div>
                   <label style={lbl}>TIPO</label>
                   <select value={gastoForm.tipo} onChange={e => setGasto('tipo', e.target.value)} style={{ ...inp, cursor:'pointer' }}>
-                    <option value="reparacion">reparacion</option>
-                    <option value="repuesto">repuesto</option>
-                    <option value="mantenimiento">mantenimiento</option>
-                    <option value="otro">otro</option>
+                    <option value="reparacion">Reparación</option>
+                    <option value="repuesto">Repuesto</option>
+                    <option value="mantenimiento">Mantenimiento</option>
+                    <option value="otro">Otro</option>
                   </select>
                 </div>
                 <div>
@@ -1735,6 +1948,9 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
                   <div style={{ flex:1 }}>
                     <label style={lbl}>MONTO</label>
                     <input type="number" value={gastoForm.monto} onChange={e => setGasto('monto', e.target.value)} style={inp} />
+                    {!!gastoForm.monto && !Number.isNaN(Number(gastoForm.monto)) && (
+                      <div style={{ marginTop:6, fontSize:11, color:T.mute }}>{formatMoneyCRC(gastoForm.monto)}</div>
+                    )}
                   </div>
                   <div style={{ flex:1 }}>
                     <label style={lbl}>FECHA</label>
@@ -1743,12 +1959,42 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
                 </div>
                 <div>
                   <label style={lbl}>ADJUNTOS</label>
-                  <input type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf" onChange={e => setGasto('files', Array.from(e.target.files || []))} style={inp} />
+                  <input
+                    ref={newGastoInputRef}
+                    type="file"
+                    multiple
+                    accept="image/png,image/jpeg,image/webp,application/pdf"
+                    onChange={e => setGasto('files', Array.from(e.target.files || []))}
+                    style={{ display:'none' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => newGastoInputRef.current?.click()}
+                    style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:'10px 12px', background:T.card3, border:`1px dashed ${T.bdr2}`, borderRadius:10, color:T.sub, cursor:'pointer', fontSize:13, fontWeight:700 }}
+                  >
+                    <Paperclip size={14} />
+                    Seleccionar Documentos
+                  </button>
                   {gastoForm.files.length > 0 && <div style={{ marginTop:8, fontSize:12, color:T.mute }}>{gastoForm.files.length} archivo(s) seleccionado(s)</div>}
                 </div>
                 <button onClick={submitGasto} disabled={savingGasto} style={{ padding:'10px 16px', background:T.AMB, border:'none', borderRadius:10, color:'#000', cursor:savingGasto ? 'wait' : 'pointer', fontWeight:700 }}>
                   {savingGasto ? 'Guardando...' : 'Guardar gasto'}
                 </button>
+                {gastosVehiculo.length > 0 && (
+                  <div style={{ marginTop:6, padding:'12px 14px', borderRadius:10, background:T.card3, border:`1px solid ${T.bdr}` }}>
+                    <div style={{ fontSize:11, fontWeight:800, color:T.mute, letterSpacing:0.3, marginBottom:8 }}>RESUMEN DE LA UNIDAD</div>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:T.sub, marginBottom:6 }}>
+                      <span>Total Registrado</span>
+                      <strong style={{ color:T.AMB }}>{formatMoneyCRC(gastoSummary.total)}</strong>
+                    </div>
+                    {Object.entries(gastoSummary.byType).map(([tipo, total]) => (
+                      <div key={tipo} style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:T.mute, marginTop:4 }}>
+                        <span>{formatGastoType(tipo)}</span>
+                        <span>{formatMoneyCRC(total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1783,7 +2029,7 @@ function EditarVehiculoModal({ vehiculo, onClose, onConfirm, onUploadImage, gast
   );
 }
 
-function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUploadImage, gastos, onAddGasto, onUploadGastoAdjunto, onDelete, canDelete = false, apiFetch, onFocusTask }) {
+function VehiculosView({ vehiculos, conductores, ausencias = [], onAdd, onBaja, onUpdate, onUploadImage, gastos, onAddGasto, onAppendGastoAdjuntos, onUploadGastoAdjunto, onDelete, canDelete = false, apiFetch, onFocusTask }) {
   const [filtroEst, setFiltro] = useState('todos');
   const [modalNuevo, setModalNuevo] = useState(false);
   const [bajaTarget, setBajaTarget] = useState(null);
@@ -1814,7 +2060,7 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUplo
     { val:'disponible',       label:`Disponibles (${counts.disponible || 0})` },
     { val:'en_servicio',      label:`En servicio (${counts.en_servicio || 0})` },
     { val:'mantenimiento',    label:`Mantenimiento (${counts.mantenimiento || 0})` },
-    { val:'fuera_de_servicio',label:`Fuera servicio (${counts.fuera_de_servicio || 0})` },
+    { val:'fuera_de_servicio',label:`Fuera de Servicio (${counts.fuera_de_servicio || 0})` },
   ];
 
   return (
@@ -1850,7 +2096,7 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUplo
           <div style={{ padding:40, textAlign:'center', color:T.mute, fontSize:13 }}>No hay vehículos en esta categoría.</div>
         )}
 
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:12 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:12, maxWidth:940 }}>
           {filtrados.map(v => {
             const cond = conductores.find(c => c.id === v.condId);
             const regulatoryDates = getVehicleRegulatoryDates(v);
@@ -1974,10 +2220,12 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUplo
       {editTarget && (
         <EditarVehiculoModal
           vehiculo={editTarget}
+          conductores={conductores}
           onClose={() => setEditTarget(null)}
           onUploadImage={onUploadImage}
           gastos={gastos}
           onAddGasto={onAddGasto}
+          onAppendGastoAdjuntos={onAppendGastoAdjuntos}
           onUploadGastoAdjunto={onUploadGastoAdjunto}
           onDelete={onDelete}
           canDelete={canDelete}
@@ -1995,7 +2243,7 @@ function VehiculosView({ vehiculos, conductores, onAdd, onBaja, onUpdate, onUplo
           onConfirm={() => { onBaja(bajaTarget.id); setBajaTarget(null); }}
         />
       )}
-      {reportTarget && <MonthlyReportModal apiFetch={apiFetch} type="vehiculo" target={reportTarget} onClose={() => setReportTarget(null)} onFocusTask={onFocusTask} />}
+      {reportTarget && <MonthlyReportModal apiFetch={apiFetch} type="vehiculo" target={reportTarget} vehiculos={vehiculos} ausencias={ausencias} onClose={() => setReportTarget(null)} onFocusTask={onFocusTask} />}
     </div>
   );
 }
@@ -2503,6 +2751,7 @@ function TareasView({ tareas, conductores, vehiculos, eventos, ausencias = [], o
                     {group.tareas.map(t => {
                       const cond = conductores.find(c => c.id === t.condId);
                       const veh = vehiculos.find(v => v.id === t.vehId);
+                      const operationalAlert = getTaskOperationalAlert(t, ausencias, vehiculos);
                       const selected = selectedTaskId === t.id;
                       const focused = focusedTaskId === t.id;
                       const sinA = t.estado === 'pendiente' && !t.condId;
@@ -2519,6 +2768,7 @@ function TareasView({ tareas, conductores, vehiculos, eventos, ausencias = [], o
                               <div style={{ fontSize:12, color:T.sub, marginTop:7 }}>{t.origen || 'Sin origen'} {t.origen && t.destino ? '→' : ''} {t.destino || 'Sin destino'}</div>
                               <div style={{ fontSize:11, color:T.mute, marginTop:6 }}>{t.hora} → {t.fin} · {t.pax} pax · {cond ? (cond.alias || cond.nombre.split(' ')[0]) : 'Sin conductor'} · {veh ? veh.placa : 'Sin vehículo'}</div>
                               {sinA && <div style={{ display:'inline-flex', marginTop:8, padding:'4px 8px', borderRadius:999, background:T.redDim, color:T.RED, fontSize:11, fontWeight:700 }}>Sin asignación completa</div>}
+                              {operationalAlert && <div style={{ display:'inline-flex', marginTop:8, marginLeft: sinA ? 8 : 0, padding:'4px 8px', borderRadius:999, background:T.redDim, color:T.RED, fontSize:11, fontWeight:700 }}>{operationalAlert.label}</div>}
                             </div>
                             <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8 }}>
                               <Badge estado={t.estado} />
@@ -2540,6 +2790,11 @@ function TareasView({ tareas, conductores, vehiculos, eventos, ausencias = [], o
               {!detailTask && <div style={{ color:T.mute, fontSize:13 }}>Selecciona una tarea para verla aquí.</div>}
               {detailTask && (
                 <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                  {getTaskOperationalAlert(detailTask, ausencias, vehiculos) && (
+                    <div style={{ padding:'10px 12px', borderRadius:12, background:T.redDim, border:`1px solid ${T.RED}33`, color:T.RED, fontSize:12, fontWeight:700 }}>
+                      {getTaskOperationalAlert(detailTask, ausencias, vehiculos).label}
+                    </div>
+                  )}
                   <div>
                     <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
                       <span style={{ fontSize:18, fontWeight:800, color:T.txt }}>{detailTask.nombre}</span>
@@ -2601,7 +2856,7 @@ function ReportMetricCard({ label, value, sub, color = T.txt }) {
   );
 }
 
-function MonthCalendarCard({ month, calendar, selectedDay, onSelectDay }) {
+function MonthCalendarCard({ month, calendar, selectedDay, onSelectDay, alertDays = {} }) {
   const cells = buildMonthGrid(month);
   const statsByDay = useMemo(() => {
     const map = new Map();
@@ -2621,6 +2876,7 @@ function MonthCalendarCard({ month, calendar, selectedDay, onSelectDay }) {
             return <div key={`empty-${index}`} style={{ minHeight:72, borderRadius:12, background:'rgba(148,163,184,0.05)' }} />;
           }
           const dayStats = statsByDay.get(dateValue);
+          const alertCount = alertDays[dateValue] || 0;
           const dayNumber = Number(dateValue.slice(-2));
           const selected = selectedDay === dateValue;
           return (
@@ -2628,11 +2884,16 @@ function MonthCalendarCard({ month, calendar, selectedDay, onSelectDay }) {
               type="button"
               key={dateValue}
               onClick={() => onSelectDay?.(dateValue)}
-              style={{ minHeight:72, borderRadius:12, padding:'10px 8px', border:`1px solid ${selected ? T.BLU : dayStats ? T.AMB+'33' : T.bdr}`, background:selected ? T.bluDim : dayStats ? T.ambDim : T.card3, textAlign:'left', cursor:'pointer' }}>
+              style={{ minHeight:72, borderRadius:12, padding:'10px 8px', border:`1px solid ${selected ? T.BLU : alertCount ? `${T.RED}55` : dayStats ? T.AMB+'33' : T.bdr}`, background:selected ? T.bluDim : alertCount ? T.redDim : dayStats ? T.ambDim : T.card3, textAlign:'left', cursor:'pointer' }}>
               <div style={{ fontSize:13, fontWeight:800, color:T.txt }}>{dayNumber}</div>
               <div style={{ fontSize:11, color:dayStats ? T.sub : T.mute, marginTop:6 }}>
                 {dayStats ? `${dayStats.tareas} tareas` : 'Sin carga'}
               </div>
+              {alertCount > 0 && (
+                <div style={{ fontSize:10, color:T.RED, marginTop:4, fontWeight:800 }}>
+                  {alertCount} alerta{alertCount === 1 ? '' : 's'}
+                </div>
+              )}
               {dayStats && (
                 <div style={{ fontSize:10, color:T.mute, marginTop:4 }}>
                   {dayStats.completadas} ok · {dayStats.eventos} eventos
@@ -2646,7 +2907,7 @@ function MonthCalendarCard({ month, calendar, selectedDay, onSelectDay }) {
   );
 }
 
-function MonthlyReportModal({ apiFetch, type, target, onClose, onFocusTask }) {
+function MonthlyReportModal({ apiFetch, type, target, vehiculos = [], ausencias = [], onClose, onFocusTask }) {
   const [month, setMonth] = useState(currentMonthKey());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -2732,6 +2993,47 @@ function MonthlyReportModal({ apiFetch, type, target, onClose, onFocusTask }) {
     ? events.filter(eventItem => Array.isArray(eventItem.fechas) && eventItem.fechas.includes(selectedDay))
     : events;
   const selectedDayLabel = selectedDay ? formatLongDate(selectedDay, { month: 'long' }) : 'Todo el mes';
+  const absenceRange = type === 'conductor'
+    ? getDriverAbsencesInRange(target?.id, report?.range?.from, report?.range?.to, ausencias)
+    : [];
+  const taskAlerts = useMemo(() => tasks.reduce((map, task) => {
+    const alert = getTaskOperationalAlert(task, ausencias, vehiculos);
+    if (!alert) return map;
+    map.set(task.id, alert);
+    return map;
+  }, new Map()), [ausencias, tasks, vehiculos]);
+  const alertDays = useMemo(() => tasks.reduce((acc, task) => {
+    if (!task?.fecha) return acc;
+    if (taskAlerts.has(task.id)) {
+      acc[task.fecha] = (acc[task.fecha] || 0) + 1;
+    }
+    return acc;
+  }, {}), [taskAlerts, tasks]);
+  if (type === 'conductor') {
+    absenceRange.forEach(item => {
+      let current = item.fechaInicio;
+      while (current <= item.fechaFin) {
+        if (current >= (report?.range?.from || current) && current <= (report?.range?.to || current)) {
+          alertDays[current] = (alertDays[current] || 0) + 1;
+        }
+        current = addDaysISO(current, 1);
+      }
+    });
+  }
+  const filteredTaskAlertCount = filteredTasks.filter(task => taskAlerts.has(task.id)).length;
+  const selectedAbsence = type === 'conductor' && selectedDay
+    ? getDriverAbsenceForDate(target?.id, selectedDay, ausencias)
+    : null;
+  const vehicleStatusAlert = type === 'vehiculo' && report?.vehiculo?.estado === 'fuera_de_servicio'
+    ? 'La unidad está marcada como fuera de servicio y cualquier tarea futura asociada requiere reasignación.'
+    : '';
+  const metricCards = [
+    { label:'Tareas del mes', value: summary.totalTareas || 0 },
+    { label:'Completadas', value: summary.completadas || 0, color: T.GRN },
+    { label:'Eventos asociados', value: summary.eventosAsociados || 0, color: T.BLU },
+    { label:'Dias activos', value: summary.diasActivos || 0, color: T.AMB },
+    { label:'Pasajeros', value: summary.pasajeros || 0 },
+  ];
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.76)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1200, padding:20 }} onClick={e => e.target === e.currentTarget && onClose()}>
@@ -2740,9 +3042,6 @@ function MonthlyReportModal({ apiFetch, type, target, onClose, onFocusTask }) {
           <div>
             <div style={{ fontSize:22, fontWeight:900, color:T.txt }}>{meta.title}</div>
             <div style={{ fontSize:13, color:T.sub, marginTop:6 }}>{meta.subtitle}</div>
-            <div style={{ fontSize:12, color:T.mute, marginTop:6 }}>
-              Reporte mensual operativo. Los kilómetros todavía no se calculan aquí porque la tarea no persiste una distancia confiable por servicio.
-            </div>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
             <button onClick={() => setMonth(prev => addMonthsKey(prev, -1))} style={{ width:36, height:36, borderRadius:10, border:`1px solid ${T.bdr2}`, background:T.card2, color:T.txt, cursor:'pointer', display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
@@ -2765,21 +3064,11 @@ function MonthlyReportModal({ apiFetch, type, target, onClose, onFocusTask }) {
         {!loading && !error && report && (
           <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
             <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
-              <ReportMetricCard label="Tareas del mes" value={summary.totalTareas || 0} />
-              <ReportMetricCard label="Completadas" value={summary.completadas || 0} color={T.GRN} />
-              <ReportMetricCard label="Eventos asociados" value={summary.eventosAsociados || 0} color={T.BLU} />
-              <ReportMetricCard label="Dias activos" value={summary.diasActivos || 0} color={T.AMB} />
-              <ReportMetricCard label="Pasajeros" value={summary.pasajeros || 0} />
-              <ReportMetricCard
-                label="Kilometros"
-                value="Pendiente"
-                sub="Falta distancia persistida por tarea"
-                color={T.mute}
-              />
+              {metricCards.map(card => <ReportMetricCard key={card.label} label={card.label} value={card.value} color={card.color} />)}
             </div>
 
             <div style={{ display:'grid', gridTemplateColumns:'minmax(0, 1.1fr) minmax(320px, .9fr)', gap:18, alignItems:'start' }}>
-              <MonthCalendarCard month={month} calendar={report.calendar} selectedDay={selectedDay} onSelectDay={setSelectedDay} />
+              <MonthCalendarCard month={month} calendar={report.calendar} selectedDay={selectedDay} onSelectDay={setSelectedDay} alertDays={alertDays} />
               <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
                 <div style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:16, padding:16 }}>
                   <div style={{ fontSize:12, color:T.mute, fontWeight:700, marginBottom:10 }}>RESUMEN CONFIABLE</div>
@@ -2798,20 +3087,21 @@ function MonthlyReportModal({ apiFetch, type, target, onClose, onFocusTask }) {
                       Unidad base: <strong style={{ color:T.txt }}>{report.conductor.vehiculoAsignadoPlaca}</strong>
                     </div>
                   )}
-                </div>
-
-                <div style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:16, padding:16 }}>
-                  <div style={{ fontSize:12, color:T.mute, fontWeight:700, marginBottom:10 }}>ACLARACION</div>
-                  <div style={{ fontSize:13, color:T.sub, lineHeight:1.6 }}>
-                    Este reporte separa solo relaciones operativas confiables.
-                    No suma kilómetros mensuales todavía porque la estructura actual no guarda una distancia persistida en cada tarea ejecutada.
-                  </div>
-                  {!!report?.activityMonths?.length && (
-                    <div style={{ fontSize:12, color:T.mute, marginTop:10 }}>
-                      Meses con actividad: {report.activityMonths.join(', ')}
+                  {vehicleStatusAlert && (
+                    <div style={{ marginTop:10, padding:'10px 12px', borderRadius:10, background:T.redDim, border:`1px solid ${T.RED}33`, fontSize:12, color:T.RED }}>
+                      {vehicleStatusAlert}
                     </div>
                   )}
                 </div>
+
+                {!!report?.activityMonths?.length && (
+                  <div style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:16, padding:16 }}>
+                    <div style={{ fontSize:12, color:T.mute, fontWeight:700, marginBottom:10 }}>Actividad Registrada</div>
+                    <div style={{ fontSize:12, color:T.mute }}>
+                      Meses con actividad: {report.activityMonths.join(', ')}
+                    </div>
+                  </div>
+                )}
 
                 <div style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:16, padding:16 }}>
                   <div style={{ fontSize:12, color:T.mute, fontWeight:700, marginBottom:10 }}>DETALLE DEL DIA</div>
@@ -2821,6 +3111,13 @@ function MonthlyReportModal({ apiFetch, type, target, onClose, onFocusTask }) {
                       ? `${filteredTasks.length} tarea${filteredTasks.length === 1 ? '' : 's'} y ${filteredEvents.length} evento${filteredEvents.length === 1 ? '' : 's'} en la fecha seleccionada.`
                       : 'Selecciona un día en el calendario para revisar la carga puntual.'}
                   </div>
+                  {(selectedAbsence || filteredTaskAlertCount > 0) && (
+                    <div style={{ marginTop:10, padding:'10px 12px', borderRadius:10, background:T.redDim, border:`1px solid ${T.RED}33`, fontSize:12, color:T.RED }}>
+                      {selectedAbsence
+                        ? `Ausencia registrada: ${LC[selectedAbsence.tipo]?.[0] || selectedAbsence.tipo} del ${formatShortDate(selectedAbsence.fechaInicio)} al ${formatShortDate(selectedAbsence.fechaFin)}.`
+                        : `${filteredTaskAlertCount} tarea${filteredTaskAlertCount === 1 ? '' : 's'} requieren atención por ausencia del conductor o indisponibilidad del vehículo.`}
+                    </div>
+                  )}
                   {selectedDay && filteredTasks.length === 0 && (
                     <div style={{ fontSize:12, color:T.mute, marginTop:10 }}>
                       Ese día no tiene tareas asociadas para este registro.
@@ -2872,6 +3169,11 @@ function MonthlyReportModal({ apiFetch, type, target, onClose, onFocusTask }) {
                 <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
                   {filteredTasks.map(task => (
                     <div key={task.id} style={{ border:`1px solid ${T.bdr}`, borderRadius:14, padding:'14px 16px', background:T.card3 }}>
+                      {taskAlerts.get(task.id) && (
+                        <div style={{ marginBottom:10, padding:'8px 10px', borderRadius:10, background:T.redDim, border:`1px solid ${T.RED}22`, fontSize:11, color:T.RED, fontWeight:800 }}>
+                          {taskAlerts.get(task.id).label}
+                        </div>
+                      )}
                       <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap' }}>
                         <div>
                           <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
@@ -2943,7 +3245,7 @@ function ReportesView({ apiFetch }) {
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, marginBottom:20, flexWrap:'wrap' }}>
         <div>
-          <div style={{ fontSize:24, fontWeight:900, color:T.txt }}>Reportes operativos</div>
+          <div style={{ fontSize:24, fontWeight:900, color:T.txt }}>Reportes Operativos</div>
           <div style={{ fontSize:13, color:T.sub, marginTop:6 }}>
             Tablero mensual de carga por unidad y por conductor, usando solo relaciones confiables del sistema actual.
           </div>
@@ -2973,15 +3275,9 @@ function ReportesView({ apiFetch }) {
             <StatCard label="Pasajeros" value={totals.pasajeros || 0} icon={Users} color={T.txt} />
           </div>
 
-          <div style={{ padding:'12px 14px', borderRadius:14, background:T.card2, border:`1px solid ${T.bdr}` }}>
-            <div style={{ fontSize:12, color:T.mute }}>
-              Kilómetros mensuales: pendientes de consolidación estructural. La tarea todavía no persiste una distancia verificable por servicio.
-            </div>
-          </div>
-
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:18 }}>
             <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:18, padding:18 }}>
-              <div style={{ fontSize:16, fontWeight:800, color:T.txt, marginBottom:14 }}>Carga por vehículo</div>
+              <div style={{ fontSize:16, fontWeight:800, color:T.txt, marginBottom:14 }}>Carga por Vehículo</div>
               <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
                 {(report.vehiculos || []).map(item => (
                   <div key={item.id} style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'14px 16px' }}>
@@ -3004,7 +3300,7 @@ function ReportesView({ apiFetch }) {
             </div>
 
             <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:18, padding:18 }}>
-              <div style={{ fontSize:16, fontWeight:800, color:T.txt, marginBottom:14 }}>Carga por conductor</div>
+              <div style={{ fontSize:16, fontWeight:800, color:T.txt, marginBottom:14 }}>Carga por Conductor</div>
               <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
                 {(report.conductores || []).map(item => (
                   <div key={item.id} style={{ background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'14px 16px' }}>
@@ -3036,22 +3332,23 @@ function ReportesView({ apiFetch }) {
 // SIDEBAR
 // ─────────────────────────────────────────────────────────────
 const ROOT_TAB_ITEMS = [
-    { id:'dashboard',   Icon:LayoutDashboard, label:'Dashboard'      },
+    { id:'dashboard',   Icon:LayoutDashboard, label:'Dashboard'       },
     { id:'socios',      Icon:User,            label:'Socios'          },
-    { id:'cotizaciones',Icon:Calculator,      label:'Proformas'      },
-    { id:'eventos',     Icon:CalendarDays,    label:'Eventos'        },
-    { id:'tareas',      Icon:CheckSquare,     label:'Tareas'         },
-    { id:'gantt',       Icon:BarChart3,       label:'Línea de tiempo'},
-    { id:'conductores', Icon:Users,           label:'Conductores'    },
-    { id:'rrhh',        Icon:Clock,           label:'RRHH'           },
-    { id:'vehiculos',   Icon:Bus,             label:'Vehículos'      },
-    { id:'gastos',      Icon:Receipt,         label:'Gastos'         },
-    { id:'reportes',    Icon:BarChart3,       label:'Reportes'       },
-    { id:'usuarios',    Icon:Shield,          label:'Seguridad'      , role: 'admin' },
-    { id:'config',      Icon:Settings,        label:'Configuración'  , role: 'admin' },
+    { id:'cotizaciones',Icon:Calculator,      label:'Proformas'       },
+    { id:'eventos',     Icon:CalendarDays,    label:'Eventos'         },
+    { id:'tareas',      Icon:CheckSquare,     label:'Tareas'          },
+    { id:'gantt',       Icon:BarChart3,       label:'Línea de Tiempo' },
+    { id:'conductores', Icon:Users,           label:'Conductores'     },
+    { id:'rrhh',        Icon:Clock,           label:'RRHH'            },
+    { id:'vehiculos',   Icon:Bus,             label:'Vehículos'       },
+    { id:'gastos',      Icon:Receipt,         label:'Gastos'          },
+    { id:'reportes',    Icon:BarChart3,       label:'Reportes'        },
+    { id:'usuarios',    Icon:Shield,          label:'Seguridad'       , role: 'admin' },
+    { id:'config',      Icon:Settings,        label:'Configuración'   , role: 'admin' },
 ];
+const APP_TOP_BAR_HEIGHT = 68;
 
-function Sidebar({ active, onOpenView, user, onLogout }) {
+function Sidebar({ active, onOpenView, user, onLogout, onOpenUserMenu }) {
   const items = ROOT_TAB_ITEMS;
 
   const filteredItems = items.filter(item => !item.role || item.role === user?.rol);
@@ -3059,7 +3356,7 @@ function Sidebar({ active, onOpenView, user, onLogout }) {
   return (
     <div style={{ width:220, background:T.card, borderRight:`1px solid ${T.bdr}`,
       display:'flex', flexDirection:'column', flexShrink:0, height:'100vh', position:'sticky', top:0 }}>
-      <div style={{ padding:'20px 20px 16px', borderBottom:`1px solid ${T.bdr}` }}>
+      <div style={{ height:APP_TOP_BAR_HEIGHT, padding:'0 20px', borderBottom:`1px solid ${T.bdr}`, display:'flex', alignItems:'center' }}>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <div style={{ width:32, height:32, borderRadius:8, background:T.AMB,
             display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -3089,10 +3386,14 @@ function Sidebar({ active, onOpenView, user, onLogout }) {
       </nav>
 
       <div style={{ padding:'16px', borderTop:`1px solid ${T.bdr}`, background:T.card2 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
+        <button
+          type="button"
+          onClick={onOpenUserMenu}
+          style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, width:'100%', background:'transparent', border:'none', padding:0, cursor:'pointer', textAlign:'left' }}
+        >
           <img
             src={user?.foto_url || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png'}
-            style={{ width:32, height:32, borderRadius:8, objectFit:'cover', border:`1px solid ${T.bdr2}` }}
+            style={{ width:32, height:32, borderRadius:'50%', objectFit:'cover' }}
             alt="User"
           />
           <div style={{ flex:1, minWidth:0 }}>
@@ -3101,7 +3402,7 @@ function Sidebar({ active, onOpenView, user, onLogout }) {
             </div>
             <div style={{ fontSize:10, color:T.mute }}>{user?.rol === 'admin' ? 'Administrador' : 'Operador'}</div>
           </div>
-        </div>
+        </button>
         <button onClick={onLogout}
           style={{ width:'100%', padding:'6px', background:'rgba(239,68,68,0.1)', color:T.RED,
             border:'none', borderRadius:6, fontSize:11, fontWeight:600, cursor:'pointer' }}>
@@ -3144,7 +3445,7 @@ const toMinApp = (t) => { const [h,m] = t.split(':').map(Number); return h*60+m;
 
 function GanttTooltip({ tooltip }) {
   if (!tooltip) return null;
-  const { tarea, evento, cond, veh, x, y } = tooltip;
+  const { tarea, evento, cond, veh, alert, x, y } = tooltip;
   const col = GANTT_ESTADO_COLOR[tarea.estado] ?? GANTT_ESTADO_COLOR.pendiente;
   return (
     <div style={{
@@ -3208,34 +3509,157 @@ function GanttTooltip({ tooltip }) {
             <AlertTriangle size={11}/> Sin conductor asignado
           </div>
         )}
+        {alert && (
+          <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:11,
+            color:T.RED, background:T.redDim, borderRadius:6, padding:'4px 8px', marginTop:4 }}>
+            <AlertTriangle size={11}/> {alert}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 function GastosView({ gastos, vehiculos }) {
+  const [vehiculoFiltro, setVehiculoFiltro] = useState('todos');
+  const [tipoFiltro, setTipoFiltro] = useState('todos');
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+
+  const gastosFiltrados = useMemo(() => gastos.filter(gasto => {
+    if (vehiculoFiltro !== 'todos' && gasto.vehiculoId !== vehiculoFiltro) return false;
+    if (tipoFiltro !== 'todos' && (gasto.tipo || 'otro') !== tipoFiltro) return false;
+    if (desde && String(gasto.fecha || '') < desde) return false;
+    if (hasta && String(gasto.fecha || '') > hasta) return false;
+    return true;
+  }), [desde, gastos, hasta, tipoFiltro, vehiculoFiltro]);
+
+  const resumen = useMemo(() => {
+    const byVehiculo = {};
+    const byTipo = {};
+    let total = 0;
+    gastosFiltrados.forEach(gasto => {
+      const monto = Number(gasto.monto) || 0;
+      const tipo = gasto.tipo || 'otro';
+      const vehiculo = vehiculos.find(item => item.id === gasto.vehiculoId);
+      const vehiculoKey = vehiculo?.placa || 'Sin Unidad';
+      total += monto;
+      byTipo[tipo] = (byTipo[tipo] || 0) + monto;
+      byVehiculo[vehiculoKey] = (byVehiculo[vehiculoKey] || 0) + monto;
+    });
+    return {
+      total,
+      byTipo: Object.entries(byTipo).sort((a, b) => b[1] - a[1]),
+      byVehiculo: Object.entries(byVehiculo).sort((a, b) => b[1] - a[1]),
+    };
+  }, [gastosFiltrados, vehiculos]);
+
+  const maxTipo = resumen.byTipo[0]?.[1] || 1;
+  const maxVehiculo = resumen.byVehiculo[0]?.[1] || 1;
+
   return (
-    <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'20px 24px' }}>
-      {gastos.length === 0 ? (
-        <div style={{ padding:30, textAlign:'center', color:T.mute, fontSize:13 }}>Aun no hay gastos registrados.</div>
+    <div style={{ display:'grid', gridTemplateColumns:'minmax(0, 1.7fr) minmax(280px, 0.9fr)', gap:18 }}>
+      <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'20px 24px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(170px, 1fr))', gap:12, marginBottom:18 }}>
+          <div>
+            <label style={{ fontSize:12, fontWeight:700, color:T.mute, display:'block', marginBottom:6 }}>Unidad</label>
+            <select value={vehiculoFiltro} onChange={e => setVehiculoFiltro(e.target.value)} style={{ width:'100%', padding:'10px 12px', background:T.card2, border:`1px solid ${T.bdr2}`, borderRadius:10, color:T.txt }}>
+              <option value="todos">Todas las Unidades</option>
+              {vehiculos.map(vehiculo => (
+                <option key={vehiculo.id} value={vehiculo.id}>{vehiculo.placa} · {vehiculo.marca}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize:12, fontWeight:700, color:T.mute, display:'block', marginBottom:6 }}>Categoría</label>
+            <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)} style={{ width:'100%', padding:'10px 12px', background:T.card2, border:`1px solid ${T.bdr2}`, borderRadius:10, color:T.txt }}>
+              <option value="todos">Todas las Categorías</option>
+              {Object.keys(GASTO_TYPE_LABELS).map(tipo => (
+                <option key={tipo} value={tipo}>{formatGastoType(tipo)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize:12, fontWeight:700, color:T.mute, display:'block', marginBottom:6 }}>Desde</label>
+            <input type="date" value={desde} onChange={e => setDesde(e.target.value)} style={{ width:'100%', padding:'10px 12px', background:T.card2, border:`1px solid ${T.bdr2}`, borderRadius:10, color:T.txt }} />
+          </div>
+          <div>
+            <label style={{ fontSize:12, fontWeight:700, color:T.mute, display:'block', marginBottom:6 }}>Hasta</label>
+            <input type="date" value={hasta} onChange={e => setHasta(e.target.value)} style={{ width:'100%', padding:'10px 12px', background:T.card2, border:`1px solid ${T.bdr2}`, borderRadius:10, color:T.txt }} />
+          </div>
+        </div>
+
+        {gastosFiltrados.length === 0 ? (
+        <div style={{ padding:30, textAlign:'center', color:T.mute, fontSize:13 }}>Aún no hay gastos registrados.</div>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          {gastos.map(gasto => {
+          {gastosFiltrados.map(gasto => {
             const vehiculo = vehiculos.find(item => item.id === gasto.vehiculoId);
             return (
               <div key={gasto.id} style={{ padding:'12px 14px', background:T.card2, border:`1px solid ${T.bdr}`, borderRadius:12 }}>
                 <div style={{ display:'flex', justifyContent:'space-between', gap:12 }}>
                   <div>
                     <div style={{ fontSize:13, fontWeight:700, color:T.txt }}>{gasto.detalle}</div>
-                    <div style={{ fontSize:11, color:T.mute, marginTop:4 }}>{vehiculo?.placa || 'Sin unidad'} · {gasto.fecha} · {gasto.tipo}</div>
+                    <div style={{ fontSize:11, color:T.mute, marginTop:4 }}>{vehiculo?.placa || 'Sin Unidad'} · {formatDateSlash(gasto.fecha)} · {formatGastoType(gasto.tipo)}</div>
                   </div>
-                  <div style={{ fontSize:14, fontWeight:800, color:T.AMB }}>${Number(gasto.monto || 0).toFixed(2)}</div>
+                  <div style={{ fontSize:14, fontWeight:800, color:T.AMB }}>{formatMoneyCRC(gasto.monto)}</div>
                 </div>
+                {!!gasto.adjuntos?.length && <div style={{ marginTop:10 }}><AdjuntosList adjuntos={gasto.adjuntos} /></div>}
               </div>
             );
           })}
         </div>
-      )}
+      )}</div>
+
+      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+        <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'18px 18px' }}>
+          <div style={{ fontSize:11, fontWeight:800, color:T.mute, letterSpacing:0.35, marginBottom:8 }}>RESUMEN DE GASTOS</div>
+          <div style={{ fontSize:28, fontWeight:900, color:T.AMB }}>{formatMoneyCRC(resumen.total)}</div>
+          <div style={{ fontSize:12, color:T.mute, marginTop:4 }}>{formatNumberCR(gastosFiltrados.length)} registro(s) visibles</div>
+        </div>
+
+        <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'18px 18px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+            <Filter size={14} color={T.AMB} />
+            <div style={{ fontSize:13, fontWeight:800, color:T.txt }}>Gasto por Categoría</div>
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {resumen.byTipo.length === 0 && <div style={{ fontSize:12, color:T.mute }}>Sin datos para mostrar.</div>}
+            {resumen.byTipo.map(([tipo, total]) => (
+              <div key={tipo}>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:T.sub, marginBottom:4 }}>
+                  <span>{formatGastoType(tipo)}</span>
+                  <strong style={{ color:T.txt }}>{formatMoneyCRC(total)}</strong>
+                </div>
+                <div style={{ height:9, borderRadius:999, background:T.card3, overflow:'hidden' }}>
+                  <div style={{ width:`${Math.max(10, (total / maxTipo) * 100)}%`, height:'100%', borderRadius:999, background:`linear-gradient(90deg, ${T.AMB}, ${T.ORG})` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ background:T.card, border:`1px solid ${T.bdr}`, borderRadius:14, padding:'18px 18px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+            <BarChart3 size={14} color={T.BLU} />
+            <div style={{ fontSize:13, fontWeight:800, color:T.txt }}>Gasto por Unidad</div>
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {resumen.byVehiculo.length === 0 && <div style={{ fontSize:12, color:T.mute }}>Sin datos para mostrar.</div>}
+            {resumen.byVehiculo.slice(0, 8).map(([vehiculo, total]) => (
+              <div key={vehiculo}>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:T.sub, marginBottom:4 }}>
+                  <span>{vehiculo}</span>
+                  <strong style={{ color:T.txt }}>{formatMoneyCRC(total)}</strong>
+                </div>
+                <div style={{ height:9, borderRadius:999, background:T.card3, overflow:'hidden' }}>
+                  <div style={{ width:`${Math.max(10, (total / maxVehiculo) * 100)}%`, height:'100%', borderRadius:999, background:`linear-gradient(90deg, ${T.BLU}, ${T.PUR})` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3250,12 +3674,119 @@ function PlaceholderView({ icono: PlaceholderIcon }) {
   );
 }
 
+function UserMenuModal({ user, apiFetch, onClose, onLogout, onUserUpdated }) {
+  const [profile, setProfile] = useState({
+    nombre: user?.nombre || '',
+    email: user?.email || '',
+    telefono: user?.telefono || '',
+    foto_url: user?.foto_url || '',
+    recordarTabs: Boolean(user?.recordar_tabs),
+  });
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '' });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [message, setMessage] = useState('');
+  const panelStyle = { background:T.card, border:`1px solid ${T.bdr}`, borderRadius:16, padding:16 };
+  const inputStyleLocal = { width:'100%', padding:'10px 12px', background:T.card2, border:`1px solid ${T.bdr2}`, borderRadius:10, color:T.txt, fontSize:13, outline:'none', boxSizing:'border-box' };
+  const labelStyle = { fontSize:12, fontWeight:700, color:T.mute, marginBottom:6, display:'block' };
+
+  async function saveProfile() {
+    setSavingProfile(true);
+    setMessage('');
+    try {
+      const payload = await apiFetch(`${API}/usuarios/me`, {
+        method: 'PUT',
+        body: JSON.stringify(profile),
+      });
+      onUserUpdated?.(payload.user);
+      setMessage('Perfil actualizado.');
+    } catch (error) {
+      setMessage(error.message || 'No se pudo guardar el perfil.');
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  async function savePassword() {
+    setSavingPassword(true);
+    setMessage('');
+    try {
+      await apiFetch(`${API}/usuarios/me/password`, {
+        method: 'PATCH',
+        body: JSON.stringify(passwordForm),
+      });
+      setPasswordForm({ currentPassword: '', newPassword: '' });
+      setMessage('Contraseña actualizada.');
+    } catch (error) {
+      setMessage(error.message || 'No se pudo cambiar la contraseña.');
+    } finally {
+      setSavingPassword(false);
+    }
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.72)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1400, padding:20 }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ width:'min(760px, 100%)', maxHeight:'92vh', overflow:'auto', background:`linear-gradient(180deg, ${T.card}, ${T.card2})`, border:`1px solid ${T.bdr}`, borderRadius:22, padding:22 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, marginBottom:18 }}>
+          <div>
+            <div style={{ fontSize:22, fontWeight:900, color:T.txt }}>Mi Perfil</div>
+            <div style={{ fontSize:12, color:T.mute, marginTop:6 }}>Configura tu perfil, contraseña y preferencias de pestañas.</div>
+          </div>
+          <button onClick={onClose} style={{ width:40, height:40, borderRadius:12, border:`1px solid ${T.bdr2}`, background:'transparent', color:T.mute, cursor:'pointer' }}><X size={18} /></button>
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:16 }}>
+          <div style={panelStyle}>
+            <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
+              <img src={profile.foto_url || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png'} alt={profile.nombre || 'Usuario'} style={{ width:56, height:56, borderRadius:'50%', objectFit:'cover' }} />
+              <div>
+                <div style={{ fontSize:15, fontWeight:800, color:T.txt }}>{user?.nombre || 'Usuario'}</div>
+                <div style={{ fontSize:12, color:T.mute }}>@{user?.username} · {user?.rol}</div>
+              </div>
+            </div>
+            <div style={{ display:'grid', gap:12 }}>
+              <label><span style={labelStyle}>Nombre</span><input value={profile.nombre} onChange={e => setProfile(prev => ({ ...prev, nombre:e.target.value }))} style={inputStyleLocal} /></label>
+              <label><span style={labelStyle}>Correo</span><input value={profile.email} onChange={e => setProfile(prev => ({ ...prev, email:e.target.value }))} style={inputStyleLocal} /></label>
+              <label><span style={labelStyle}>Teléfono</span><input value={profile.telefono} onChange={e => setProfile(prev => ({ ...prev, telefono:e.target.value }))} style={inputStyleLocal} /></label>
+              <label><span style={labelStyle}>Foto (URL)</span><input value={profile.foto_url} onChange={e => setProfile(prev => ({ ...prev, foto_url:e.target.value }))} style={inputStyleLocal} placeholder="https://..." /></label>
+              <label style={{ display:'flex', alignItems:'center', gap:10, fontSize:13, color:T.sub }}>
+                <input type="checkbox" checked={profile.recordarTabs} onChange={e => setProfile(prev => ({ ...prev, recordarTabs:e.target.checked }))} />
+                Recordar Pestañas al Iniciar
+              </label>
+              <button onClick={saveProfile} disabled={savingProfile} style={{ padding:'11px 14px', borderRadius:10, border:'none', background:T.AMB, color:'#111827', cursor:savingProfile ? 'wait' : 'pointer', fontWeight:800 }}>
+                {savingProfile ? 'Guardando...' : 'Guardar Perfil'}
+              </button>
+            </div>
+          </div>
+
+          <div style={panelStyle}>
+            <div style={{ fontSize:15, fontWeight:800, color:T.txt, marginBottom:14 }}>Cambiar Contraseña</div>
+            <div style={{ display:'grid', gap:12 }}>
+              <label><span style={labelStyle}>Usuario</span><input value={user?.username || ''} readOnly style={{ ...inputStyleLocal, color:T.mute, cursor:'default' }} /></label>
+              <label><span style={labelStyle}>Contraseña Actual</span><input type="password" value={passwordForm.currentPassword} onChange={e => setPasswordForm(prev => ({ ...prev, currentPassword:e.target.value }))} style={inputStyleLocal} /></label>
+              <label><span style={labelStyle}>Nueva Contraseña</span><input type="password" value={passwordForm.newPassword} onChange={e => setPasswordForm(prev => ({ ...prev, newPassword:e.target.value }))} style={inputStyleLocal} /></label>
+              <button onClick={savePassword} disabled={savingPassword} style={{ padding:'11px 14px', borderRadius:10, border:'none', background:T.bluDim, color:T.BLU, cursor:savingPassword ? 'wait' : 'pointer', fontWeight:800 }}>
+                {savingPassword ? 'Actualizando...' : 'Actualizar Contraseña'}
+              </button>
+              <button onClick={onLogout} style={{ padding:'11px 14px', borderRadius:10, border:`1px solid ${T.RED}33`, background:T.redDim, color:T.RED, cursor:'pointer', fontWeight:800 }}>
+                Cerrar Sesión
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {message && <div style={{ marginTop:16, fontSize:13, color: message.toLowerCase().includes('no se pudo') ? T.RED : T.GRN }}>{message}</div>}
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // APP CONTENT (PROTECTED) — sin datos locales, todo desde API
 // ─────────────────────────────────────────────────────────────
 function AppContent() {
-  const { isAuthenticated, user, token, logout } = useAuth();
-  const { tabs, activeTabId, openTab, closeTab, updateTabData, getTabData } = useTabs();
+  const { isAuthenticated, user, token, logout, updateUser } = useAuth();
+  const { tabs, activeTabId, openTab, closeTab, updateTabData, getTabData, tabsReady } = useTabs();
   const [selectedTaskDate, setSelectedTaskDate] = useState(todayISO());
   const [taskScope, setTaskScope] = useState('day');
   const [tareas,      setTareas]    = useState([]);
@@ -3269,6 +3800,7 @@ function AppContent() {
   const [modalTarea,  setModal]     = useState(null);
   const [theme,       setTheme]     = useState('dark');
   const [ganttTooltip, setGanttTooltip] = useState(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [voiceDraft,  setVoiceDraft] = useState(null);
   const [focusedTaskId, setFocusedTaskId] = useState(null);
   const [focusedEventId, setFocusedEventId] = useState(null);
@@ -3294,6 +3826,13 @@ function AppContent() {
       closable: true,
     });
   }, [openTab]);
+
+  useEffect(() => {
+    if (!isAuthenticated || loading || !tabsReady) return;
+    if (tabs.length === 0) {
+      openRootView('dashboard');
+    }
+  }, [isAuthenticated, loading, openRootView, tabs.length, tabsReady]);
 
   // ── Helper para llamadas autenticadas ──────────────────────
   const apiFetch = useCallback(async (path, opts = {}) => {
@@ -3731,6 +4270,23 @@ function AppContent() {
     }
   }
 
+  async function handleAppendGastoAdjuntos(gastoId, adjuntos) {
+    try {
+      await apiFetch(`${API}/gastos/${gastoId}/adjuntos`, {
+        method: 'POST',
+        body: JSON.stringify({ adjuntos }),
+      });
+      setGastos(prev => prev.map(gasto => (
+        gasto.id === gastoId
+          ? { ...gasto, adjuntos: [...(gasto.adjuntos || []), ...adjuntos] }
+          : gasto
+      )));
+    } catch (err) {
+      console.error('Error agregando adjuntos al gasto:', err);
+      throw err;
+    }
+  }
+
   const renderTabView = (tab) => {
     switch (tab.view) {
       case 'dashboard':
@@ -3782,13 +4338,13 @@ function AppContent() {
       case 'tareas':
         return <TareasView key={`${selectedTaskDate}-${taskScope}`} tareas={tareas} conductores={conductores} vehiculos={vehiculos} eventos={eventos} ausencias={ausencias} onAsignar={handleAsignar} onAddTarea={handleAddTarea} selectedDate={selectedTaskDate} onDateChange={handleTaskDateChange} scope={taskScope} onScopeChange={handleTaskScopeChange} focusedTaskId={focusedTaskId} focusedEventId={focusedEventId} onCreateEventFromTasks={handleCreateEventFromTasks} onUpdateTaskStatus={handleUpdateTaskStatus} />;
       case 'gantt':
-        return <FlotaGanttView apiFetch={apiFetch} conductores={conductores} vehiculos={vehiculos} eventos={eventos} onTooltipChange={setGanttTooltip} onFocusTask={focusTaskInPlanner} />;
+        return <FlotaGanttView apiFetch={apiFetch} conductores={conductores} vehiculos={vehiculos} ausencias={ausencias} eventos={eventos} onTooltipChange={setGanttTooltip} onFocusTask={focusTaskInPlanner} />;
       case 'conductores':
-        return <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} onAdd={handleAddConductor} onUpdate={handleUpdateConductor} onBaja={handleBajaConductor} onDelete={handleDeleteConductor} canDelete={user?.rol === 'admin'} apiFetch={apiFetch} onFocusTask={focusTaskInPlanner} />;
+        return <ConductoresView conductores={conductores} tareas={tareas} vehiculos={vehiculos} ausencias={ausencias} onAdd={handleAddConductor} onUpdate={handleUpdateConductor} onBaja={handleBajaConductor} onDelete={handleDeleteConductor} canDelete={user?.rol === 'admin'} apiFetch={apiFetch} onFocusTask={focusTaskInPlanner} />;
       case 'rrhh':
-        return <RecursosHumanosView conductores={conductores} ausencias={ausencias} onAddAusencia={handleAddAusencia} onCancelAusencia={handleCancelAusencia} />;
+        return <RecursosHumanosView apiFetch={apiFetch} conductores={conductores} vehiculos={vehiculos} ausencias={ausencias} onAddAusencia={handleAddAusencia} onCancelAusencia={handleCancelAusencia} onFocusTask={focusTaskInPlanner} />;
       case 'vehiculos':
-        return <VehiculosView vehiculos={vehiculos} conductores={conductores} onAdd={handleAddVehiculo} onBaja={handleBajaVehiculo} onUpdate={handleUpdateVehiculo} onUploadImage={uploadVehiculoImage} gastos={gastos} onAddGasto={handleAddGasto} onUploadGastoAdjunto={uploadGastoAdjunto} onDelete={handleDeleteVehiculo} canDelete={user?.rol === 'admin'} apiFetch={apiFetch} onFocusTask={focusTaskInPlanner} />;
+        return <VehiculosView vehiculos={vehiculos} conductores={conductores} ausencias={ausencias} onAdd={handleAddVehiculo} onBaja={handleBajaVehiculo} onUpdate={handleUpdateVehiculo} onUploadImage={uploadVehiculoImage} gastos={gastos} onAddGasto={handleAddGasto} onAppendGastoAdjuntos={handleAppendGastoAdjuntos} onUploadGastoAdjunto={uploadGastoAdjunto} onDelete={handleDeleteVehiculo} canDelete={user?.rol === 'admin'} apiFetch={apiFetch} onFocusTask={focusTaskInPlanner} />;
       case 'usuarios':
         return <UsuarioMgmtView />;
       case 'config':
@@ -3803,32 +4359,34 @@ function AppContent() {
   };
 
   if (!isAuthenticated) return <LoginView />;
-  if (loading) {
+  if (loading || !tabsReady || !activeTab) {
     return (
       <div style={{ display:'flex', alignItems:'center', justifyContent:'center',
         minHeight:'100vh', background:T.bg, flexDirection:'column', gap:16 }}>
         <div style={{ width:32, height:32, border:`3px solid ${T.bdr2}`,
           borderTop:`3px solid ${T.AMB}`, borderRadius:'50%',
           animation:'spin 0.8s linear infinite' }} />
-        <span style={{ color:T.mute, fontSize:13 }}>Cargando datos…</span>
+        <span style={{ color:T.mute, fontSize:13 }}>{loading ? 'Cargando datos…' : 'Abriendo Dashboard…'}</span>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
   return (
-    <div style={{ display:'flex', minHeight:'100vh', background:T.bg, fontFamily:"system-ui,-apple-system,sans-serif",
+    <div style={{ display:'flex', width:'100%', minHeight:'100vh', background:T.bg, fontFamily:'var(--font-sans)',
       color:T.txt, fontSize:14, lineHeight:1.5 }}>
-      <Sidebar active={view} onOpenView={openRootView} user={user} onLogout={logout} />
+      <Sidebar active={view} onOpenView={openRootView} user={user} onLogout={logout} onOpenUserMenu={() => setUserMenuOpen(true)} />
 
-      <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
+      <div style={{ flex:'1 1 auto', width:'100%', display:'flex', flexDirection:'column', minWidth:0 }}>
         <AlertBar tareas={tareas} />
-        <GlobalTabs />
+        <div style={{ flex:'0 0 auto', width:'100%', minHeight:APP_TOP_BAR_HEIGHT, height:APP_TOP_BAR_HEIGHT, background:T.card, borderBottom:`1px solid ${T.bdr}`, display:'flex', alignItems:'center' }}>
+          <GlobalTabs />
+        </div>
 
         <div
           style={{
             position: 'fixed',
-            top: 18,
+            top: 13,
             right: 22,
             zIndex: 80,
             display: 'flex',
@@ -3909,7 +4467,7 @@ function AppContent() {
           ) : tabs.map(tab => (
             <div
               key={tab.id}
-              style={{ display: tab.id === activeTabId ? 'block' : 'none', height:'100%' }}
+              style={{ display: tab.id === activeTabId ? 'block' : 'none', height:'100%', width:'100%', maxWidth:1400, margin:'0 auto' }}
             >
               {renderTabView(tab)}
             </div>
@@ -3929,6 +4487,16 @@ function AppContent() {
           ausencias={ausencias}
           onClose={() => setModal(null)}
           onConfirm={handleConfirm}
+        />
+      )}
+
+      {userMenuOpen && (
+        <UserMenuModal
+          user={user}
+          apiFetch={apiFetch}
+          onClose={() => setUserMenuOpen(false)}
+          onLogout={logout}
+          onUserUpdated={updateUser}
         />
       )}
     </div>

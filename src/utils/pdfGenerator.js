@@ -117,7 +117,99 @@ function buildFooterHtml(config = {}) {
   `).join('<span class="footer-sep">|</span>');
 }
 
-export function pdfGen({ params, socio, resData, config = {}, seller = null }) {
+function sanitizeItineraryRows(rows = []) {
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .map((row, index) => ({
+      id: row?.id || `itin-${index + 1}`,
+      fecha: String(row?.fecha || '').trim(),
+      hora: String(row?.hora || '').trim(),
+      origen: String(row?.origen || '').trim(),
+      destino: String(row?.destino || '').trim(),
+      recorrido: String(row?.recorrido || '').trim(),
+      tiempoEstimado: String(row?.tiempoEstimado || '').trim(),
+      vehiculoLabel: String(row?.vehiculoLabel || '').trim(),
+    }))
+    .filter(row => row.fecha || row.hora || row.origen || row.destino);
+}
+
+function itineraryRowComplete(row) {
+  return Boolean(row?.fecha && row?.hora && row?.origen && row?.destino);
+}
+
+function formatDateLong(value) {
+  if (!value) return 'Fecha por confirmar';
+  try {
+    return new Date(`${value}T00:00:00`).toLocaleDateString('es-CR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+  } catch {
+    return value;
+  }
+}
+
+function formatDistanceLabel(rawValue) {
+  const normalized = String(rawValue || '').trim();
+  if (!normalized) return '—';
+  const numeric = Number.parseFloat(normalized.replace(',', '.'));
+  if (!Number.isFinite(numeric)) return normalized;
+  return `${new Intl.NumberFormat('es-CR', {
+    minimumFractionDigits: numeric % 1 === 0 ? 0 : 1,
+    maximumFractionDigits: 1,
+  }).format(numeric)} km`;
+}
+
+function formatDurationLabel(rawValue) {
+  const text = String(rawValue || '').trim();
+  if (!text) return '—';
+  return text.replace(/\s+/g, ' ');
+}
+
+function buildItinerarySummary(rows = []) {
+  const safeRows = sanitizeItineraryRows(rows).filter(itineraryRowComplete);
+  if (!safeRows.length) return null;
+  const days = new Set(safeRows.map(row => row.fecha).filter(Boolean)).size || 1;
+  return {
+    segments: safeRows.length,
+    days,
+    start: safeRows[0],
+    end: safeRows[safeRows.length - 1],
+  };
+}
+
+function buildItineraryHtml(rows = []) {
+  const safeRows = sanitizeItineraryRows(rows).filter(itineraryRowComplete);
+  if (!safeRows.length) return '';
+  return safeRows.map((row, index) => `
+    <div class="itinerary-row">
+      <div class="itinerary-step">
+        <div class="itinerary-badge">Tramo ${index + 1}</div>
+        <div class="itinerary-date">${escapeHtml(formatDateLong(row.fecha))}</div>
+        <div class="itinerary-time">${escapeHtml(row.hora || 'Hora por confirmar')}</div>
+      </div>
+      <div class="itinerary-route">
+        <div class="route-point">
+          <span class="route-label">Origen</span>
+          <span class="route-value">${escapeHtml(row.origen || 'Por confirmar')}</span>
+        </div>
+        <div class="route-divider"></div>
+        <div class="route-point">
+          <span class="route-label">Destino</span>
+          <span class="route-value">${escapeHtml(row.destino || 'Por confirmar')}</span>
+        </div>
+      </div>
+      <div class="itinerary-meta">
+        <div class="itinerary-chip">${escapeHtml(formatDistanceLabel(row.recorrido))}</div>
+        <div class="itinerary-chip">${escapeHtml(formatDurationLabel(row.tiempoEstimado))}</div>
+        ${row.vehiculoLabel ? `<div class="itinerary-chip muted">${escapeHtml(row.vehiculoLabel)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+export function pdfGen({ params, socio, resData, config = {}, seller = null, itineraryRows = [] }) {
   const displayCurrency = socio?.cfMoneda || 'CRC';
   const companyName = escapeHtml(config.nombre || 'TransOP S.A.');
   const logoUrl = String(config.logo || '').trim();
@@ -156,6 +248,8 @@ export function pdfGen({ params, socio, resData, config = {}, seller = null }) {
 
   const paymentText = escapeHtml(socio.cfPago || '50% adelanto y saldo contra servicio.');
   const disclaimer = 'Esta proforma no constituye un contrato vinculante hasta ser formalmente aceptada por el cliente mediante firma o confirmacion escrita.';
+  const itinerarySummary = buildItinerarySummary(itineraryRows);
+  const itineraryHtml = buildItineraryHtml(itineraryRows);
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -481,6 +575,206 @@ export function pdfGen({ params, socio, resData, config = {}, seller = null }) {
       color: #4c5c70;
     }
 
+    .itinerary-section {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: linear-gradient(180deg, #fffdf8 0%, #fff 100%);
+      padding: 18px;
+      margin-top: 6px;
+    }
+
+    .itinerary-section.second-page {
+      margin-top: 0;
+      border-radius: 22px;
+      padding: 22px;
+    }
+
+    .itinerary-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .itinerary-kicker {
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #be8a2f;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+
+    .itinerary-title {
+      font-family: ${companyFont};
+      font-size: 22px;
+      color: var(--ink);
+      line-height: 1.05;
+    }
+
+    .itinerary-subtitle {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .itinerary-summary {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .summary-pill {
+      min-width: 98px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      text-align: left;
+    }
+
+    .summary-pill-label {
+      display: block;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      margin-bottom: 4px;
+      font-weight: 700;
+    }
+
+    .summary-pill-value {
+      display: block;
+      font-size: 15px;
+      color: var(--ink);
+      font-weight: 800;
+    }
+
+    .itinerary-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .itinerary-row {
+      display: grid;
+      grid-template-columns: 148px minmax(0, 1fr) 180px;
+      gap: 14px;
+      align-items: center;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .itinerary-step {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .itinerary-badge {
+      width: fit-content;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: #fcf3df;
+      color: #a26a17;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .itinerary-date {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .itinerary-time {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--brand);
+      line-height: 1;
+    }
+
+    .itinerary-route {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+    }
+
+    .route-point {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .route-label {
+      font-size: 9px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .route-value {
+      font-size: 12px;
+      color: var(--ink);
+      font-weight: 700;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+
+    .route-divider {
+      position: relative;
+      width: 20px;
+      height: 2px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #d4a146 0%, #233750 100%);
+    }
+
+    .route-divider::after {
+      content: '';
+      position: absolute;
+      right: -1px;
+      top: 50%;
+      transform: translateY(-50%);
+      border-top: 4px solid transparent;
+      border-bottom: 4px solid transparent;
+      border-left: 6px solid #233750;
+    }
+
+    .itinerary-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .itinerary-chip {
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: #eef4fa;
+      border: 1px solid #dde7f0;
+      color: #28405d;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .itinerary-chip.muted {
+      background: #f8fafc;
+      color: var(--muted);
+    }
+
     .footer-separator {
       flex: 1;
       display: flex;
@@ -572,7 +866,7 @@ export function pdfGen({ params, socio, resData, config = {}, seller = null }) {
 </head>
 <body>
   <div class="page">
-    <div class="header">
+    <div class="header" id="main-header">
       <div class="brand">
         <div class="logo-box">
           ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${companyName}">` : ''}
@@ -603,7 +897,7 @@ export function pdfGen({ params, socio, resData, config = {}, seller = null }) {
       ${introText}
     </div>
 
-    <div class="table-card">
+    <div class="table-card" id="service-card">
       <table>
         <thead>
           <tr>
@@ -654,7 +948,7 @@ export function pdfGen({ params, socio, resData, config = {}, seller = null }) {
       </div>
     </div>
 
-    <div class="terms-grid">
+    <div class="terms-grid" id="terms-grid">
       <div class="term-box">
         <div class="term-title">Terminos de pago</div>
         <div class="term-body">${paymentText}</div>
@@ -664,6 +958,34 @@ export function pdfGen({ params, socio, resData, config = {}, seller = null }) {
         <div class="term-body">${escapeHtml(disclaimer)}</div>
       </div>
     </div>
+
+    ${itineraryHtml ? `
+    <section class="itinerary-section" id="itinerary-section">
+      <div class="itinerary-header">
+        <div>
+          <div class="itinerary-kicker">Ruta Operativa</div>
+          <div class="itinerary-title">Itinerario del Servicio</div>
+          <div class="itinerary-subtitle">
+            Hoja de ruta sugerida para ejecutar esta operación. Si el bloque completo no cabe en esta primera página,
+            se moverá automáticamente a una segunda hoja dedicada.
+          </div>
+        </div>
+        ${itinerarySummary ? `
+        <div class="itinerary-summary">
+          <div class="summary-pill">
+            <span class="summary-pill-label">Tramos</span>
+            <span class="summary-pill-value">${itinerarySummary.segments}</span>
+          </div>
+          <div class="summary-pill">
+            <span class="summary-pill-label">Días</span>
+            <span class="summary-pill-value">${itinerarySummary.days}</span>
+          </div>
+        </div>` : ''}
+      </div>
+      <div class="itinerary-list">
+        ${itineraryHtml}
+      </div>
+    </section>` : ''}
 
     <div class="footer-separator">
       <div class="signatures">
@@ -683,10 +1005,73 @@ export function pdfGen({ params, socio, resData, config = {}, seller = null }) {
     </div>
   </div>
 
+  ${itineraryHtml ? `
+  <div class="page" id="itinerary-page" style="display:none;">
+    <div class="header">
+      <div class="brand">
+        <div class="logo-box">
+          ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${companyName}">` : ''}
+        </div>
+        <div class="brand-copy">
+          <div class="brand-name">${companyName}</div>
+          <div class="brand-sub">Continuación operativa</div>
+        </div>
+      </div>
+      <div class="doc-box">
+        <div class="doc-title">Itinerario</div>
+        <div class="doc-number">${proformaNumber}</div>
+      </div>
+    </div>
+    <section class="itinerary-section second-page" id="itinerary-section-clone">
+      <div class="itinerary-header">
+        <div>
+          <div class="itinerary-kicker">Ruta Operativa</div>
+          <div class="itinerary-title">Itinerario del Servicio</div>
+          <div class="itinerary-subtitle">
+            Distribución detallada por tramo, fecha, hora y ruta prevista.
+          </div>
+        </div>
+        ${itinerarySummary ? `
+        <div class="itinerary-summary">
+          <div class="summary-pill">
+            <span class="summary-pill-label">Tramos</span>
+            <span class="summary-pill-value">${itinerarySummary.segments}</span>
+          </div>
+          <div class="summary-pill">
+            <span class="summary-pill-label">Días</span>
+            <span class="summary-pill-value">${itinerarySummary.days}</span>
+          </div>
+        </div>` : ''}
+      </div>
+      <div class="itinerary-list">
+        ${itineraryHtml}
+      </div>
+    </section>
+  </div>` : ''}
+
   <script>
     window.onload = function() {
-      window.print();
-      window.onafterprint = function() { window.close(); };
+      window.requestAnimationFrame(function() {
+        const itinerarySection = document.getElementById('itinerary-section');
+        const itineraryPage = document.getElementById('itinerary-page');
+        if (itinerarySection && itineraryPage) {
+          const page = itinerarySection.closest('.page');
+          const footerSeparator = page ? page.querySelector('.footer-separator') : null;
+          const pageHeight = page ? page.clientHeight : 0;
+          const itineraryBottom = itinerarySection.offsetTop + itinerarySection.offsetHeight;
+          const footerTop = footerSeparator ? footerSeparator.offsetTop : pageHeight;
+          const available = footerTop - itinerarySection.offsetTop;
+          const needsSecondPage = itinerarySection.offsetHeight > available || itineraryBottom > footerTop;
+          if (needsSecondPage) {
+            itinerarySection.remove();
+            itineraryPage.style.display = 'flex';
+          } else {
+            itineraryPage.remove();
+          }
+        }
+        window.print();
+        window.onafterprint = function() { window.close(); };
+      });
     };
   </script>
 </body>

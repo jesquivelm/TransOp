@@ -635,6 +635,7 @@ function MapLocationPicker({
                   Usar este valor
                 </button>
               </div>
+
             </div>
           </div>
         </div>
@@ -1516,6 +1517,10 @@ function RouteDesignerModal({ unitId, unitItinerary, vehiculoId = null, vehicleL
   const [isExpanded, setIsExpanded] = useState(false);
   const [loadingState, setLoadingState] = useState('Cargando...');
 
+  const embeddedRoutes = Array.isArray(unitItinerary?.importedRoutes) && unitItinerary.importedRoutes.length > 0
+    ? unitItinerary.importedRoutes.filter(route => route && route.origin && route.destination)
+    : (unitItinerary?.raw?.origin ? [unitItinerary.raw] : []);
+
   useEffect(() => {
     const handleMessage = (event) => {
       try {
@@ -1542,8 +1547,11 @@ function RouteDesignerModal({ unitId, unitItinerary, vehiculoId = null, vehicleL
           type: 'designer-context',
           context: { unitId, vehicleLabel, vehiculoId },
         }, '*');
-        if (unitItinerary?.raw?.origin) {
-          iframeRef.current.contentWindow.postMessage({ type: 'load-route', route: unitItinerary.raw }, '*');
+        if (embeddedRoutes.length > 0) {
+          iframeRef.current.contentWindow.postMessage({
+            type: 'load-routes',
+            routes: embeddedRoutes,
+          }, '*');
         }
       } catch (e) {
         console.error('Error sending route context to iframe:', e);
@@ -1551,21 +1559,25 @@ function RouteDesignerModal({ unitId, unitItinerary, vehiculoId = null, vehicleL
     }
   };
 
-  const iframeSrc = googleMapsApiKey 
-    ? `/designroute.html?apiKey=${encodeURIComponent(googleMapsApiKey)}&mode=embedded`
-    : '/designroute.html';
+  const iframeSrc = googleMapsApiKey
+    ? `/route-designer.html?apiKey=${encodeURIComponent(googleMapsApiKey)}&mode=embedded`
+    : '/route-designer.html?mode=embedded';
 
   return (
     <div
       style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(15,23,42,0.85)',
-        backdropFilter: 'blur(12px)',
+        position: isExpanded ? 'fixed' : 'relative',
+        inset: isExpanded ? 0 : 'auto',
+        background: isExpanded ? 'rgba(15,23,42,0.85)' : 'transparent',
+        backdropFilter: isExpanded ? 'blur(12px)' : 'none',
         display: 'flex',
         flexDirection: 'column',
-        zIndex: 100,
-        padding: isExpanded ? 0 : 20,
+        zIndex: isExpanded ? 100 : 'auto',
+        padding: isExpanded ? 0 : 0,
+        width: '100%',
+        flex: 1,
+        minHeight: 0,
+        height: isExpanded ? '100vh' : '100%',
       }}
     >
       <div
@@ -1573,9 +1585,11 @@ function RouteDesignerModal({ unitId, unitItinerary, vehiculoId = null, vehicleL
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: isExpanded ? '12px 20px' : '0 0 12px 0',
-          background: isExpanded ? T.card : 'transparent',
-          borderRadius: isExpanded ? 0 : undefined,
+          padding: isExpanded ? '12px 20px' : '14px 16px',
+          background: T.card,
+          border: `1px solid ${T.bdr}`,
+          borderBottom: 'none',
+          borderRadius: isExpanded ? 0 : '18px 18px 0 0',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1622,7 +1636,16 @@ function RouteDesignerModal({ unitId, unitItinerary, vehiculoId = null, vehicleL
           </button>
         </div>
       </div>
-      <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+      <div
+        style={{
+          flex: 1,
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+          height: isExpanded ? 'calc(100vh - 72px)' : '100%',
+        }}
+      >
         {loadingState && (
           <div style={{
             position: 'absolute',
@@ -1644,13 +1667,14 @@ function RouteDesignerModal({ unitId, unitItinerary, vehiculoId = null, vehicleL
           onError={() => setLoadingState('Error cargando el mapa')}
           style={{
             flex: 1,
-            width: isExpanded ? '100%' : '100%',
-            height: isExpanded ? '100%' : 'calc(100vh - 180px)',
+            width: '100%',
+            height: '100%',
             border: `1px solid ${T.bdr}`,
-            borderRadius: isExpanded ? 0 : 14,
+            borderTop: 'none',
+            borderRadius: isExpanded ? 0 : '0 0 18px 18px',
             background: '#fff',
           }}
-          allow="geolocation; allow-scripts"
+          allow="geolocation"
         />
       </div>
     </div>
@@ -1852,6 +1876,7 @@ export default function CotizadorView({
   const [operationMsg, setOperationMsg] = useState(() => initialDetailState?.operationMsg || '');
   const [showRouteDesigner, setShowRouteDesigner] = useState(false);
   const [routeDesignerUnitId, setRouteDesignerUnitId] = useState(null);
+  const [routeDesignerViewportHeight, setRouteDesignerViewportHeight] = useState(null);
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState('');
 
   const autosaveTimer = useRef(null);
@@ -1871,6 +1896,7 @@ export default function CotizadorView({
   const fuelPricesRef = useRef(fuelPrices);
   const clienteSearchWrapperRef = useRef(null);
   const [socioDropdownStyle, setSocioDropdownStyle] = useState(null);
+  const detailViewRef = useRef(null);
 
   const { socios: sociosBD, loading: loadingSocios } = useSocios(token);
   const activeTab = tabs.find(tab => tab.id === activeTabId) || tabs[0];
@@ -2157,6 +2183,9 @@ export default function CotizadorView({
   }, [params, units]);
 
   const currentStatus = socio._estado || 'borrador';
+  const linkedOperation = socio._operacion || null;
+  const proformaLocked = currentStatus === 'aprobada';
+  const canCreateOperation = currentStatus === 'aprobada' && !linkedOperation?.taskId;
   const selectedVehiculo = vehiculos.find(item => item.id === (activeUnit?.vehiculoId || units[0]?.vehiculoId || vehiculoActivo));
   const currentItineraryRows = useMemo(
     () => sanitizeItineraryRows(activeUnit?.itineraryRows || itineraryRows),
@@ -2323,11 +2352,15 @@ export default function CotizadorView({
     },
   }), [currentStatus, currentItineraryRows, displayCurrency, moneyExchange, params, proformaAttachments, proformaComments, resData.total, socio, units, vehiculoActivo, voiceFeedback]);
 
-  const guardar = useCallback(async (estadoOverride, forceCreate = false) => {
+  const guardar = useCallback(async (estadoOverride, forceCreate = false, socioOverride = null) => {
     if (savingRef.current) return null;
-    const estado = estadoOverride ?? socio._estado ?? 'borrador';
+    const baseSocio = socioOverride || socio;
+    const estado = estadoOverride ?? baseSocio._estado ?? 'borrador';
+    if ((socio._estado ?? 'borrador') === 'aprobada' && !forceCreate && (estadoOverride == null || estadoOverride === 'aprobada')) {
+      return null;
+    }
     
-    let numeroFinal = socio.cfNumero;
+    let numeroFinal = baseSocio.cfNumero;
     if (!numeroFinal && forceCreate) {
       numeroFinal = makeProformaNumber();
     }
@@ -2337,12 +2370,12 @@ export default function CotizadorView({
 
     const payload = {
       numero: numeroFinal,
-      cliente_nombre: socio.sNombre,
-      cliente_empresa: socio.sEmpresa,
+      cliente_nombre: baseSocio.sNombre,
+      cliente_empresa: baseSocio.sEmpresa,
       total_usd: resData.total,
       data_json: {
         params: { ...params, moneySchema: MONEY_SCHEMA_VERSION },
-        socio: { ...socio, _estado: estado },
+        socio: { ...baseSocio, _estado: estado },
         units: units.map(unit => ({ ...unit, moneySchema: MONEY_SCHEMA_VERSION })),
         itineraryRows: currentItineraryRows,
         proformaComments,
@@ -2371,7 +2404,7 @@ export default function CotizadorView({
       const resolvedNumero = data.numero || numeroFinal;
       const resolvedId = data.id || selectedId;
       const nextTabId = isExternalDetailMode ? activeTabId : (resolvedId ? `proforma-${resolvedId}` : activeTabId);
-      const nextSocio = { ...socio, cfNumero: resolvedNumero, _estado: estado };
+      const nextSocio = { ...baseSocio, cfNumero: resolvedNumero, _estado: estado };
       const nextSnapshot = {
         selectedId: resolvedId || null,
         params: { ...params },
@@ -2883,12 +2916,38 @@ export default function CotizadorView({
   }, [authH, closeTab, selectedId, tabs]);
 
   const actualizarEstado = async (nuevoEstado) => {
-    setSocio(prev => ({ ...prev, _estado: nuevoEstado }));
+    if (proformaLocked && nuevoEstado !== currentStatus) {
+      return;
+    }
+    let nextSocio = { ...socio, _estado: nuevoEstado };
+    if (nuevoEstado === 'rechazada') {
+      const motivo = window.prompt('Indica el motivo del rechazo de la proforma:');
+      if (!motivo || !motivo.trim()) {
+        setOperationMsg('Debes indicar el motivo del rechazo para continuar.');
+        setShowStatusMenu(false);
+        return;
+      }
+      const entry = {
+        fecha: new Date().toISOString(),
+        motivo: motivo.trim(),
+        usuario: user?.nombre || user?.username || 'Sistema',
+      };
+      nextSocio = {
+        ...nextSocio,
+        _rechazoMotivo: entry.motivo,
+        _rechazoHistorial: [...(Array.isArray(socio._rechazoHistorial) ? socio._rechazoHistorial : []), entry],
+      };
+    }
+    setSocio(nextSocio);
     setShowStatusMenu(false);
-    await guardar(nuevoEstado);
+    await guardar(nuevoEstado, false, nextSocio);
   };
 
   const generarPDF = async () => {
+    if (proformaLocked) {
+      setOperationMsg('La proforma aprobada queda bloqueada. Solo puedes abrir la tarea vinculada.');
+      return;
+    }
     const result = await guardar(null, true);
     const numero = result?.numero || socio.cfNumero || makeProformaNumber();
     pdfGen({
@@ -2898,18 +2957,25 @@ export default function CotizadorView({
       vehiculo: selectedVehiculo,
       config: empresaData,
       seller: user,
+      itineraryRows: currentItineraryRows,
     });
   };
 
   const handleGuardar = () => {
+    if (proformaLocked) return;
     if (selectedId || socio.cfNumero) guardar();
   };
 
   const handleGuardarManual = () => {
+    if (proformaLocked) {
+      setOperationMsg('La proforma aprobada ya no permite guardar cambios.');
+      return;
+    }
     guardar(null, true);
   };
 
   const handleCommentsChange = (value) => {
+    if (proformaLocked) return;
     setProformaComments(value);
     setAutoSaveEnabled(true);
   };
@@ -3331,6 +3397,18 @@ export default function CotizadorView({
   };
 
   const createOperationFromProforma = async () => {
+    if (linkedOperation?.taskId) {
+      onFocusTask?.({
+        id: linkedOperation.taskId,
+        fecha: linkedOperation.fecha || socio.sFecha || '',
+        eventoId: linkedOperation.eventoId || null,
+      });
+      return;
+    }
+    if (currentStatus !== 'aprobada') {
+      setOperationMsg('Primero debes aprobar la proforma para poder crear la tarea o el evento.');
+      return;
+    }
     const rows = operationRowsComplete;
     if (!rows.length) {
       setOperationMsg('Completa al menos el primer tramo del itinerario.');
@@ -3380,6 +3458,20 @@ export default function CotizadorView({
         }
 
         onFocusTask?.(firstTask);
+        const nextSocio = {
+          ...socio,
+          _estado: 'aprobada',
+          _operacion: {
+            id: `evento:${eventoId}`,
+            type: 'evento',
+            eventoId,
+            taskId: firstTask?.id || null,
+            fecha: firstTask?.fecha || rows[0]?.fecha || '',
+            label: createdEvent?.nombre || `Evento ${baseName}`,
+          },
+        };
+        setSocio(nextSocio);
+        await guardar('aprobada', true, nextSocio);
         setOperationMsg(`Evento creado con ${rows.length} tramos.`);
       } else {
         const row = rows[0];
@@ -3397,6 +3489,20 @@ export default function CotizadorView({
         }, { navigate: false });
         if (!createdTask?.id) throw new Error('No se pudo crear la tarea.');
         onFocusTask?.(createdTask);
+        const nextSocio = {
+          ...socio,
+          _estado: 'aprobada',
+          _operacion: {
+            id: `tarea:${createdTask.id}`,
+            type: 'tarea',
+            taskId: createdTask.id,
+            eventoId: createdTask.eventoId || null,
+            fecha: createdTask.fecha || row.fecha,
+            label: createdTask.nombre || `Tarea ${baseName}`,
+          },
+        };
+        setSocio(nextSocio);
+        await guardar('aprobada', true, nextSocio);
         setOperationMsg('Tarea creada desde la proforma.');
       }
     } catch (error) {
@@ -3406,6 +3512,7 @@ export default function CotizadorView({
   };
 
   const sChange = ({ target: { name, value } }) => {
+    if (proformaLocked) return;
     if (name === 'sOrigen' || name === 'sDestino') {
       setDistanceStatus('');
       const coordField = name === 'sOrigen' ? 'sOrigenCoords' : 'sDestinoCoords';
@@ -3458,6 +3565,72 @@ export default function CotizadorView({
     setMapPickerField('');
     setAutoSaveEnabled(true);
   };
+
+  const closeRouteDesigner = () => {
+    setShowRouteDesigner(false);
+    setRouteDesignerUnitId(null);
+  };
+
+  const handleRouteDesignerSave = (routePayload) => {
+    if (routeDesignerUnitId) {
+      const sourceUnit = units.find(unit => unit.id === routeDesignerUnitId) || activeUnit || null;
+      const currentVehicle = vehiculos.find(item => item.id === sourceUnit?.vehiculoId) || null;
+      const defaultVehiculoLabel = formatVehicleLabel(currentVehicle);
+      const routeResults = Array.isArray(routePayload) ? routePayload : [routePayload];
+      const validRouteResults = routeResults.filter(Boolean);
+      const routeRows = buildItineraryRowsFromRouteResults(validRouteResults, {
+        initialTime: sourceUnit?.sHora || socio.sHora || '',
+        defaultVehiculoId: sourceUnit?.vehiculoId || null,
+        defaultVehiculoLabel,
+      });
+      const itinerary = {
+        unitId: routeDesignerUnitId,
+        raw: validRouteResults[0] || null,
+        importedRoutes: validRouteResults.map(route => ({
+          ...route,
+          vehiculoId: route.vehiculoId || sourceUnit?.vehiculoId || null,
+          vehicleLabel: route.vehicleLabel || defaultVehiculoLabel,
+        })),
+        totals: {
+          distance_m: validRouteResults.reduce((sum, route) => sum + Number(route?.result?.totalDistance || 0), 0),
+          duration_s: validRouteResults.reduce((sum, route) => sum + Number(route?.result?.totalTime || 0), 0),
+        },
+      };
+      setUnits(prev => prev.map(unit => {
+        if (unit.id === routeDesignerUnitId) {
+          const updated = syncUnitFromItineraryRows(unit, routeRows);
+          updated.itinerary = itinerary;
+          return updated;
+        }
+        return unit;
+      }));
+      setActiveUnitId(routeDesignerUnitId);
+      setActiveUnitTab('operacion');
+      setOpenSection('costos');
+      setSavedMsg('Itinerario cargado desde mapas ✓');
+      setAutoSaveEnabled(true);
+    }
+    closeRouteDesigner();
+  };
+
+  useEffect(() => {
+    if (!showRouteDesigner) {
+      setRouteDesignerViewportHeight(null);
+      return undefined;
+    }
+
+    const updateRouteDesignerViewport = () => {
+      const node = detailViewRef.current;
+      if (!node) return;
+      const rect = node.getBoundingClientRect();
+      const availableHeight = Math.max(420, Math.floor(window.innerHeight - rect.top - 16));
+      setRouteDesignerViewportHeight(availableHeight);
+    };
+
+    updateRouteDesignerViewport();
+    window.addEventListener('resize', updateRouteDesignerViewport);
+    return () => window.removeEventListener('resize', updateRouteDesignerViewport);
+  }, [showRouteDesigner]);
 
   const cargarDesdeSocio = (item) => {
     setSocio(prev => ({
@@ -3656,7 +3829,7 @@ export default function CotizadorView({
     : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', overflowX: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', overflowX: 'hidden', position: 'relative', minHeight: '78vh' }}>
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: isDetailTab ? 'nowrap' : 'wrap', width: '100%', overflowX: 'hidden' }}>
       <div style={{ flex: isDetailTab ? '0 0 700px' : '1 1 0', width: isDetailTab ? 700 : 'auto', minWidth: isDetailTab ? 700 : 0, maxWidth: isDetailTab ? 700 : 'none', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {isListTab && (
@@ -3730,7 +3903,7 @@ export default function CotizadorView({
         )}
 
         {isDetailTab && (
-            <div style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 12, overflowX: 'hidden' }}>
+            <div ref={detailViewRef} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 12, overflowX: 'hidden', position: 'relative', minHeight: '78vh' }}>
               {Boolean(
                 voiceFeedback && (
                   voiceFeedback.message
@@ -3793,221 +3966,6 @@ export default function CotizadorView({
                   <Field label="Direccion" style={{ gridColumn: 'span 6' }}>
                     <input name="sDireccion" value={socio.sDireccion} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Direccion" />
                   </Field>
-                </div>
-              </AccordionSection>
-
-              <AccordionSection
-                id="ia"
-                label="Trazabilidad IA"
-                summary={aiResumen}
-                open={openSection === 'ia'}
-                onToggle={toggleSection}
-                actions={voiceFeedback?.routePreview ? <div style={{ padding: '6px 10px', borderRadius: 999, background: T.grnDim, color: T.GRN, fontSize: 11, fontWeight: 800 }}>Ruta lista</div> : null}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 16 }}>
-                  <div style={{ padding: 12, borderRadius: 12, background: T.card, border: `1px solid ${T.bdr}` }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                      <MessageSquare size={14} color={T.AMB} />
-                      <div style={{ fontSize: 12, fontWeight: 800, color: T.AMB }}>Lectura actual de la IA</div>
-                    </div>
-                    <div style={{ fontSize: 13, color: T.txt, lineHeight: 1.6 }}>
-                      {voiceFeedback?.message || 'Todavía no hay una interpretación registrada para esta proforma.'}
-                    </div>
-                    {voiceFeedback?.missingFields?.length > 0 && (
-                      <div style={{ marginTop: 8, fontSize: 12, color: T.sub }}>
-                        Pendientes: {voiceFeedback.missingFields.join(', ')}.
-                      </div>
-                    )}
-                    {voiceFeedback?.interpretationNotes?.length > 0 && (
-                      <div style={{ marginTop: 8, fontSize: 12, color: T.mute }}>
-                        {voiceFeedback.interpretationNotes.join(' ')}
-                      </div>
-                    )}
-                    {voiceFeedback?.routePreview && (
-                      <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, background: T.grnDim, border: `1px solid ${T.GRN}33`, fontSize: 12, color: T.GRN }}>
-                        Ruta inicial: {beautifyPlaceLabel(voiceFeedback.routePreview.originDesc || voiceFeedback.routePreview.origin)} → {beautifyPlaceLabel(voiceFeedback.routePreview.destinationDesc || voiceFeedback.routePreview.destination)}
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={{ padding: 12, borderRadius: 12, background: T.card, border: `1px solid ${T.bdr}` }}>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: T.sub, marginBottom: 10 }}>Conversación almacenada</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
-                      {normalizeConversationLog(voiceFeedback?.conversationLog).map(message => {
-                        const isAssistant = message.role === 'assistant';
-                        return (
-                          <div
-                            key={message.id}
-                            style={{
-                              alignSelf: isAssistant ? 'stretch' : 'flex-end',
-                              background: isAssistant ? T.card2 : T.ambDim,
-                              border: `1px solid ${isAssistant ? T.bdr : `${T.AMB}33`}`,
-                              borderRadius: 12,
-                              padding: '10px 12px',
-                            }}
-                          >
-                            <div style={{ fontSize: 11, fontWeight: 800, color: isAssistant ? T.AMB : T.sub, marginBottom: 4 }}>
-                              {isAssistant ? 'GROQ' : 'USUARIO'}
-                            </div>
-                            <div style={{ fontSize: 12, color: isAssistant ? T.sub : T.txt, lineHeight: 1.55 }}>{message.text}</div>
-                          </div>
-                        );
-                      })}
-                      {!normalizeConversationLog(voiceFeedback?.conversationLog).length && (
-                        <div style={{ fontSize: 12, color: T.mute }}>Cuando uses el asistente, aquí quedará el historial completo de mensajes.</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </AccordionSection>
-
-              <AccordionSection id="comentarios" label="Comentarios" summary={commentsResumen} open={openSection === 'comentarios'} onToggle={toggleSection}>
-                <div style={{ marginTop: 16 }}>
-                  <textarea
-                    value={proformaComments}
-                    onChange={e => handleCommentsChange(e.target.value)}
-                    onBlur={handleGuardar}
-                    style={{ ...areaStyle, minHeight: 120 }}
-                    placeholder="Observaciones internas, acuerdos, alertas o cualquier comentario de la proforma."
-                  />
-                  <div style={{ marginTop: 8, fontSize: 11, color: T.mute }}>
-                    Este espacio es interno y sirve para trazabilidad operativa y comercial.
-                  </div>
-                </div>
-              </AccordionSection>
-
-              <AccordionSection
-                id="adjuntos"
-                label="Adjuntos"
-                summary={attachmentsResumen}
-                open={openSection === 'adjuntos'}
-                onToggle={toggleSection}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 12px', borderRadius: 10, background: uploadingAttachments ? T.card3 : T.ambDim, color: uploadingAttachments ? T.mute : T.AMB, fontSize: 12, fontWeight: 800, cursor: uploadingAttachments ? 'wait' : 'pointer' }}>
-                      <Upload size={14} />
-                      {uploadingAttachments ? 'Subiendo adjuntos...' : 'Agregar adjuntos'}
-                      <input
-                        type="file"
-                        multiple
-                        disabled={uploadingAttachments || attachmentAudioBusy}
-                        onChange={async (event) => {
-                          const files = event.target.files;
-                          await uploadProformaAttachments(files);
-                          event.target.value = '';
-                        }}
-                        style={{ display: 'none' }}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      onClick={toggleAttachmentRecording}
-                      disabled={attachmentAudioBusy || uploadingAttachments}
-                      title={attachmentRecording ? 'Detener grabación' : 'Grabar audio'}
-                      style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: 12,
-                        border: `1px solid ${attachmentRecording ? `${T.RED}55` : `${T.AMB}44`}`,
-                        background: attachmentRecording ? T.redDim : `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
-                        color: attachmentRecording ? T.RED : T.AMB,
-                        cursor: attachmentAudioBusy || uploadingAttachments ? 'wait' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        boxShadow: attachmentRecording ? '0 0 0 4px rgba(239,68,68,0.12)' : '0 10px 24px rgba(15,23,42,0.10)',
-                        animation: attachmentRecording ? 'pulse 1.4s ease-in-out infinite' : 'none',
-                      }}
-                    >
-                      {attachmentAudioBusy
-                        ? <LoaderCircle size={16} style={{ animation: 'spin 0.9s linear infinite' }} />
-                        : attachmentRecording
-                          ? <MicOff size={16} />
-                          : <Mic size={16} />}
-                    </button>
-                  </div>
-                  {!proformaAttachments.length && (
-                    <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px dashed ${T.bdr2}`, color: T.mute, fontSize: 12 }}>
-                      No hay adjuntos todavía.
-                    </div>
-                  )}
-                  {proformaAttachments.map((attachment, index) => (
-                    <div key={attachment.id} style={{ padding: 12, borderRadius: 12, background: T.card, border: `1px solid ${T.bdr}` }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                          {attachment.tipoArchivo === 'audio' && (
-                            <button
-                              type="button"
-                              onClick={() => toggleAttachmentPlayback(attachment)}
-                              style={{
-                                width: 28,
-                                height: 28,
-                                borderRadius: 999,
-                                border: `1px solid ${playingAttachmentId === attachment.id ? `${T.GRN}55` : `${T.AMB}44`}`,
-                                background: playingAttachmentId === attachment.id ? T.grnDim : T.ambDim,
-                                color: playingAttachmentId === attachment.id ? T.GRN : T.AMB,
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                flexShrink: 0,
-                              }}
-                            >
-                              {playingAttachmentId === attachment.id ? <Pause size={13} /> : <Play size={13} style={{ marginLeft: 1 }} />}
-                            </button>
-                          )}
-                          <div style={{ width: 28, height: 28, borderRadius: 999, background: T.ambDim, color: T.AMB, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, flexShrink: 0 }}>
-                            {index + 1}
-                          </div>
-                          <div style={{ minWidth: 0 }}>
-                            <a href={attachment.archivoPath} target="_blank" rel="noreferrer" style={{ color: T.txt, fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
-                              {attachment.nombreOriginal}
-                            </a>
-                            <div style={{ fontSize: 11, color: T.mute, marginTop: 2 }}>
-                              {attachment.mimeType || attachment.tipoArchivo} · {formatBytes(attachment.sizeBytes)}
-                            </div>
-                            {attachment.tipoArchivo === 'audio' && (
-                              <audio
-                                ref={(node) => {
-                                  if (!node) {
-                                    delete attachmentAudioRefs.current[attachment.id];
-                                    return;
-                                  }
-                                  attachmentAudioRefs.current[attachment.id] = node;
-                                }}
-                                src={attachment.archivoPath}
-                                preload="metadata"
-                                onEnded={() => setPlayingAttachmentId(current => (current === attachment.id ? null : current))}
-                                style={{ display: 'none' }}
-                              />
-                            )}
-                          </div>
-                        </div>
-                        <button type="button" onClick={() => removeAttachment(attachment.id)} style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${T.RED}33`, background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
-                          Quitar
-                        </button>
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 12 }}>
-                        <Field label="Descripción" style={{ gridColumn: 'span 5' }}>
-                          <input value={attachment.descripcion} onChange={e => updateAttachmentField(attachment.id, 'descripcion', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Qué contiene este archivo" />
-                        </Field>
-                        <Field label="Clasificación" style={{ gridColumn: 'span 3' }}>
-                          <select value={attachment.clasificacion} onChange={e => updateAttachmentField(attachment.id, 'clasificacion', e.target.value)} onBlur={handleGuardar} style={{ ...inputStyle, cursor: 'pointer' }}>
-                            {PROFORMA_ATTACHMENT_CLASSIFICATIONS.map(option => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label="Fecha entrada" style={{ gridColumn: 'span 2' }}>
-                          <input type="date" value={attachment.fechaEntrada} onChange={e => updateAttachmentField(attachment.id, 'fechaEntrada', e.target.value)} onBlur={handleGuardar} style={inputStyle} />
-                        </Field>
-                        <Field label="Guardado por" style={{ gridColumn: 'span 2' }}>
-                          <input value={attachment.guardadoPor} onChange={e => updateAttachmentField(attachment.id, 'guardadoPor', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Usuario" />
-                        </Field>
-                      </div>
-                    </div>
-                  ))}
                 </div>
               </AccordionSection>
 
@@ -4232,7 +4190,14 @@ export default function CotizadorView({
                                       <button
                                         type="button"
                                         title="Diseñar ruta"
-                                        onClick={() => { setRouteDesignerUnitId(activeUnit.id); setShowRouteDesigner(true); }}
+                                        onClick={() => {
+                                          if (showRouteDesigner && routeDesignerUnitId === activeUnit.id) {
+                                            closeRouteDesigner();
+                                            return;
+                                          }
+                                          setRouteDesignerUnitId(activeUnit.id);
+                                          setShowRouteDesigner(true);
+                                        }}
                                         style={{
                                           width: 40,
                                           height: 40,
@@ -4240,10 +4205,10 @@ export default function CotizadorView({
                                           alignItems: 'center',
                                           justifyContent: 'center',
                                           borderRadius: 10,
-                                          border: `1px solid ${googleMapsApiKey ? T.AMB : T.bdr2}`,
-                                          background: googleMapsApiKey ? T.ambDim : T.card2,
-                                          color: googleMapsApiKey ? T.AMB : T.mute,
-                                          cursor: googleMapsApiKey ? 'pointer' : 'not-allowed',
+                                          border: `1px solid ${showRouteDesigner && routeDesignerUnitId === activeUnit.id ? `${T.BLU}55` : (googleMapsApiKey ? T.AMB : T.bdr2)}`,
+                                          background: showRouteDesigner && routeDesignerUnitId === activeUnit.id ? T.bluDim : (googleMapsApiKey ? T.ambDim : T.card2),
+                                          color: showRouteDesigner && routeDesignerUnitId === activeUnit.id ? T.BLU : (googleMapsApiKey ? T.AMB : T.mute),
+                                          cursor: 'pointer',
                                           flexShrink: 0,
                                         }}
                                       >
@@ -4271,6 +4236,7 @@ export default function CotizadorView({
                                       </button>
                                     </div>
                                   </div>
+
                                 </div>
                               ) : (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -4436,7 +4402,7 @@ export default function CotizadorView({
 
               <AccordionSection
                 id="transfer"
-                label="Tarifa transfer"
+                label="Tarifa Transfer"
                 summary={transferResumen}
                 open={openSection === 'transfer'}
                 onToggle={toggleSection}
@@ -4472,7 +4438,7 @@ export default function CotizadorView({
 
               <AccordionSection
                 id="extras"
-                label="Hospedaje y viaticos"
+                label="Hospedaje y Viáticos"
                 summary={extrasResumen}
                 open={openSection === 'extras'}
                 onToggle={toggleSection}
@@ -4487,6 +4453,221 @@ export default function CotizadorView({
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 14 }}>
                   <Field label="Viatico diario por persona" style={{ gridColumn: 'span 3' }}><MonetaryInput name="viatDiario" value={params.viatDiario || 0} onChange={pChange} onBlur={handleGuardar} symbol={getCurrencyMeta(BASE_CURRENCY).symbol} /></Field>
                   <Field label="Personas con viaticos" style={{ gridColumn: 'span 3' }}><input type="number" name="persViat" value={params.persViat || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                </div>
+              </AccordionSection>
+
+              <AccordionSection id="comentarios" label="Comentarios" summary={commentsResumen} open={openSection === 'comentarios'} onToggle={toggleSection}>
+                <div style={{ marginTop: 16 }}>
+                  <textarea
+                    value={proformaComments}
+                    onChange={e => handleCommentsChange(e.target.value)}
+                    onBlur={handleGuardar}
+                    style={{ ...areaStyle, minHeight: 120 }}
+                    placeholder="Observaciones internas, acuerdos, alertas o cualquier comentario de la proforma."
+                  />
+                  <div style={{ marginTop: 8, fontSize: 11, color: T.mute }}>
+                    Este espacio es interno y sirve para trazabilidad operativa y comercial.
+                  </div>
+                </div>
+              </AccordionSection>
+
+              <AccordionSection
+                id="adjuntos"
+                label="Adjuntos"
+                summary={attachmentsResumen}
+                open={openSection === 'adjuntos'}
+                onToggle={toggleSection}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 12px', borderRadius: 10, background: uploadingAttachments ? T.card3 : T.ambDim, color: uploadingAttachments ? T.mute : T.AMB, fontSize: 12, fontWeight: 800, cursor: uploadingAttachments ? 'wait' : 'pointer' }}>
+                      <Upload size={14} />
+                      {uploadingAttachments ? 'Subiendo adjuntos...' : 'Agregar adjuntos'}
+                      <input
+                        type="file"
+                        multiple
+                        disabled={uploadingAttachments || attachmentAudioBusy}
+                        onChange={async (event) => {
+                          const files = event.target.files;
+                          await uploadProformaAttachments(files);
+                          event.target.value = '';
+                        }}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={toggleAttachmentRecording}
+                      disabled={attachmentAudioBusy || uploadingAttachments}
+                      title={attachmentRecording ? 'Detener grabación' : 'Grabar audio'}
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 12,
+                        border: `1px solid ${attachmentRecording ? `${T.RED}55` : `${T.AMB}44`}`,
+                        background: attachmentRecording ? T.redDim : `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
+                        color: attachmentRecording ? T.RED : T.AMB,
+                        cursor: attachmentAudioBusy || uploadingAttachments ? 'wait' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: attachmentRecording ? '0 0 0 4px rgba(239,68,68,0.12)' : '0 10px 24px rgba(15,23,42,0.10)',
+                        animation: attachmentRecording ? 'pulse 1.4s ease-in-out infinite' : 'none',
+                      }}
+                    >
+                      {attachmentAudioBusy
+                        ? <LoaderCircle size={16} style={{ animation: 'spin 0.9s linear infinite' }} />
+                        : attachmentRecording
+                          ? <MicOff size={16} />
+                          : <Mic size={16} />}
+                    </button>
+                  </div>
+                  {!proformaAttachments.length && (
+                    <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px dashed ${T.bdr2}`, color: T.mute, fontSize: 12 }}>
+                      No hay adjuntos todavía.
+                    </div>
+                  )}
+                  {proformaAttachments.map((attachment, index) => (
+                    <div key={attachment.id} style={{ padding: 12, borderRadius: 12, background: T.card, border: `1px solid ${T.bdr}` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                          {attachment.tipoArchivo === 'audio' && (
+                            <button
+                              type="button"
+                              onClick={() => toggleAttachmentPlayback(attachment)}
+                              style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: 999,
+                                border: `1px solid ${playingAttachmentId === attachment.id ? `${T.GRN}55` : `${T.AMB}44`}`,
+                                background: playingAttachmentId === attachment.id ? T.grnDim : T.ambDim,
+                                color: playingAttachmentId === attachment.id ? T.GRN : T.AMB,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {playingAttachmentId === attachment.id ? <Pause size={13} /> : <Play size={13} style={{ marginLeft: 1 }} />}
+                            </button>
+                          )}
+                          <div style={{ width: 28, height: 28, borderRadius: 999, background: T.ambDim, color: T.AMB, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, flexShrink: 0 }}>
+                            {index + 1}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <a href={attachment.archivoPath} target="_blank" rel="noreferrer" style={{ color: T.txt, fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
+                              {attachment.nombreOriginal}
+                            </a>
+                            <div style={{ fontSize: 11, color: T.mute, marginTop: 2 }}>
+                              {attachment.mimeType || attachment.tipoArchivo} · {formatBytes(attachment.sizeBytes)}
+                            </div>
+                            {attachment.tipoArchivo === 'audio' && (
+                              <audio
+                                ref={(node) => {
+                                  if (!node) {
+                                    delete attachmentAudioRefs.current[attachment.id];
+                                    return;
+                                  }
+                                  attachmentAudioRefs.current[attachment.id] = node;
+                                }}
+                                src={attachment.archivoPath}
+                                preload="metadata"
+                                onEnded={() => setPlayingAttachmentId(current => (current === attachment.id ? null : current))}
+                                style={{ display: 'none' }}
+                              />
+                            )}
+                          </div>
+                        </div>
+                        <button type="button" onClick={() => removeAttachment(attachment.id)} style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${T.RED}33`, background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                          Quitar
+                        </button>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 12 }}>
+                        <Field label="Descripción" style={{ gridColumn: 'span 5' }}>
+                          <input value={attachment.descripcion} onChange={e => updateAttachmentField(attachment.id, 'descripcion', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Qué contiene este archivo" />
+                        </Field>
+                        <Field label="Clasificación" style={{ gridColumn: 'span 3' }}>
+                          <select value={attachment.clasificacion} onChange={e => updateAttachmentField(attachment.id, 'clasificacion', e.target.value)} onBlur={handleGuardar} style={{ ...inputStyle, cursor: 'pointer' }}>
+                            {PROFORMA_ATTACHMENT_CLASSIFICATIONS.map(option => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="Fecha entrada" style={{ gridColumn: 'span 2' }}>
+                          <input type="date" value={attachment.fechaEntrada} onChange={e => updateAttachmentField(attachment.id, 'fechaEntrada', e.target.value)} onBlur={handleGuardar} style={inputStyle} />
+                        </Field>
+                        <Field label="Guardado por" style={{ gridColumn: 'span 2' }}>
+                          <input value={attachment.guardadoPor} onChange={e => updateAttachmentField(attachment.id, 'guardadoPor', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Usuario" />
+                        </Field>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </AccordionSection>
+
+              <AccordionSection
+                id="ia"
+                label="Trazabilidad IA"
+                summary={aiResumen}
+                open={openSection === 'ia'}
+                onToggle={toggleSection}
+                actions={voiceFeedback?.routePreview ? <div style={{ padding: '6px 10px', borderRadius: 999, background: T.grnDim, color: T.GRN, fontSize: 11, fontWeight: 800 }}>Ruta lista</div> : null}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 16 }}>
+                  <div style={{ padding: 12, borderRadius: 12, background: T.card, border: `1px solid ${T.bdr}` }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <MessageSquare size={14} color={T.AMB} />
+                      <div style={{ fontSize: 12, fontWeight: 800, color: T.AMB }}>Lectura actual de la IA</div>
+                    </div>
+                    <div style={{ fontSize: 13, color: T.txt, lineHeight: 1.6 }}>
+                      {voiceFeedback?.message || 'Todavía no hay una interpretación registrada para esta proforma.'}
+                    </div>
+                    {voiceFeedback?.missingFields?.length > 0 && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: T.sub }}>
+                        Pendientes: {voiceFeedback.missingFields.join(', ')}.
+                      </div>
+                    )}
+                    {voiceFeedback?.interpretationNotes?.length > 0 && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: T.mute }}>
+                        {voiceFeedback.interpretationNotes.join(' ')}
+                      </div>
+                    )}
+                    {voiceFeedback?.routePreview && (
+                      <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, background: T.grnDim, border: `1px solid ${T.GRN}33`, fontSize: 12, color: T.GRN }}>
+                        Ruta inicial: {beautifyPlaceLabel(voiceFeedback.routePreview.originDesc || voiceFeedback.routePreview.origin)} → {beautifyPlaceLabel(voiceFeedback.routePreview.destinationDesc || voiceFeedback.routePreview.destination)}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ padding: 12, borderRadius: 12, background: T.card, border: `1px solid ${T.bdr}` }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: T.sub, marginBottom: 10 }}>Conversación almacenada</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
+                      {normalizeConversationLog(voiceFeedback?.conversationLog).map(message => {
+                        const isAssistant = message.role === 'assistant';
+                        return (
+                          <div
+                            key={message.id}
+                            style={{
+                              alignSelf: isAssistant ? 'stretch' : 'flex-end',
+                              background: isAssistant ? T.card2 : T.ambDim,
+                              border: `1px solid ${isAssistant ? T.bdr : `${T.AMB}33`}`,
+                              borderRadius: 12,
+                              padding: '10px 12px',
+                            }}
+                          >
+                            <div style={{ fontSize: 11, fontWeight: 800, color: isAssistant ? T.AMB : T.sub, marginBottom: 4 }}>
+                              {isAssistant ? 'GROQ' : 'USUARIO'}
+                            </div>
+                            <div style={{ fontSize: 12, color: isAssistant ? T.sub : T.txt, lineHeight: 1.55 }}>{message.text}</div>
+                          </div>
+                        );
+                      })}
+                      {!normalizeConversationLog(voiceFeedback?.conversationLog).length && (
+                        <div style={{ fontSize: 12, color: T.mute }}>Cuando uses el asistente, aquí quedará el historial completo de mensajes.</div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </AccordionSection>
 
@@ -4559,6 +4740,7 @@ export default function CotizadorView({
                       <button
                         key={item.id}
                         type="button"
+                        disabled={proformaLocked && item.id !== currentStatus}
                         onClick={() => actualizarEstado(item.id)}
                         style={{
                           width: '100%',
@@ -4571,8 +4753,9 @@ export default function CotizadorView({
                           borderBottom: `1px solid ${T.bdr}`,
                           background: item.id === currentStatus ? item.bg : 'transparent',
                           color: T.txt,
-                          cursor: 'pointer',
+                          cursor: proformaLocked && item.id !== currentStatus ? 'not-allowed' : 'pointer',
                           textAlign: 'left',
+                          opacity: proformaLocked && item.id !== currentStatus ? 0.45 : 1,
                         }}
                       >
                         <span style={{ fontSize: 13, fontWeight: item.id === currentStatus ? 800 : 600 }}>{item.label}</span>
@@ -4623,7 +4806,9 @@ export default function CotizadorView({
               <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px solid ${T.bdr}`, background: T.card2 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, letterSpacing: 0.3, marginBottom: 8 }}>OPERACIÓN</div>
                 <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5 }}>
-                  {itineraryIsEvent
+                  {linkedOperation?.taskId
+                    ? 'La proforma ya quedó vinculada a una operación. Desde aquí solo puedes abrir la tarea creada.'
+                    : itineraryIsEvent
                     ? 'Con varios tramos en itinerario se creará un evento con todas las tareas asociadas.'
                     : 'Con un solo tramo se creará una tarea individual para operación diaria.'}
                 </div>
@@ -4635,57 +4820,83 @@ export default function CotizadorView({
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
-                <button
-                  onClick={createOperationFromProforma}
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    background: T.card2,
-                    color: T.txt,
-                    border: `1px solid ${T.bdr}`,
-                    borderRadius: 12,
-                    fontSize: 13,
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                  }}
-                >
-                  <Clock size={16} /> {itineraryIsEvent ? 'Crear evento' : 'Crear tarea'}
-                </button>
+                {!linkedOperation?.taskId ? (
+                  <button
+                    onClick={createOperationFromProforma}
+                    disabled={!canCreateOperation}
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px',
+                      background: canCreateOperation ? T.card2 : T.card,
+                      color: canCreateOperation ? T.txt : T.mute,
+                      border: `1px solid ${canCreateOperation ? T.bdr : T.bdr2}`,
+                      borderRadius: 12,
+                      fontSize: 13,
+                      fontWeight: 800,
+                      cursor: canCreateOperation ? 'pointer' : 'not-allowed',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <Clock size={16} /> {itineraryIsEvent ? 'Crear Evento' : 'Crear Tarea'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => onFocusTask?.({ id: linkedOperation.taskId, fecha: linkedOperation.fecha || socio.sFecha || '', eventoId: linkedOperation.eventoId || null })}
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px',
+                      background: T.grnDim,
+                      color: T.GRN,
+                      border: `1px solid ${T.GRN}44`,
+                      borderRadius: 12,
+                      fontSize: 13,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <CheckCircle size={16} /> Abrir Tarea Vinculada
+                  </button>
+                )}
                 <button
                   onClick={handleGuardarManual}
+                  disabled={proformaLocked}
                   style={{
                     width: '100%',
                     padding: '12px 14px',
-                    background: T.BLU,
-                    color: '#fff',
-                    border: `1px solid ${T.BLU}55`,
+                    background: proformaLocked ? T.card : T.BLU,
+                    color: proformaLocked ? T.mute : '#fff',
+                    border: `1px solid ${proformaLocked ? T.bdr2 : `${T.BLU}55`}`,
                     borderRadius: 12,
                     fontSize: 14,
                     fontWeight: 800,
-                    cursor: 'pointer',
+                    cursor: proformaLocked ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: 8,
-                    boxShadow: '0 10px 24px rgba(59,130,246,0.20)',
+                    boxShadow: proformaLocked ? 'none' : '0 10px 24px rgba(59,130,246,0.20)',
                   }}
                 >
-                  <Save size={16} /> Guardar proforma
+                  <Save size={16} /> Guardar Proforma
                 </button>
                 <button
                   onClick={generarPDF}
+                  disabled={proformaLocked}
                   style={{
                     width: '100%',
                     padding: '13px 14px',
-                    background: T.ambDim,
-                    border: `1px solid ${T.AMB}55`,
+                    background: proformaLocked ? T.card : T.ambDim,
+                    border: `1px solid ${proformaLocked ? T.bdr2 : `${T.AMB}55`}`,
                     borderRadius: 12,
-                    color: T.AMB,
-                    cursor: 'pointer',
+                    color: proformaLocked ? T.mute : T.AMB,
+                    cursor: proformaLocked ? 'not-allowed' : 'pointer',
                     fontSize: 13,
                     fontWeight: 800,
                     display: 'flex',
@@ -4711,110 +4922,59 @@ export default function CotizadorView({
         onConfirm={applyMapLocation}
       />
 
-      {showRouteDesigner && googleMapsApiKey && (
-        <RouteDesignerModal
-          unitId={routeDesignerUnitId}
-          unitItinerary={units.find(u => u.id === routeDesignerUnitId)?.itinerary}
-          vehiculoId={units.find(u => u.id === routeDesignerUnitId)?.vehiculoId || null}
-          vehicleLabel={(() => {
-            const unit = units.find(u => u.id === routeDesignerUnitId);
-            const vehiculo = vehiculos.find(item => item.id === unit?.vehiculoId);
-            return vehiculo ? `${vehiculo.placa} · ${vehiculo.marca} ${vehiculo.modelo}` : '';
-          })()}
-          googleMapsApiKey={googleMapsApiKey}
-          onClose={() => { setShowRouteDesigner(false); setRouteDesignerUnitId(null); }}
-          onSave={(routePayload) => {
-            if (routeDesignerUnitId) {
-              const sourceUnit = units.find(unit => unit.id === routeDesignerUnitId) || activeUnit || null;
-              const currentVehicle = vehiculos.find(item => item.id === sourceUnit?.vehiculoId) || null;
-              const defaultVehiculoLabel = formatVehicleLabel(currentVehicle);
-              const routeResults = Array.isArray(routePayload) ? routePayload : [routePayload];
-              const validRouteResults = routeResults.filter(Boolean);
-              const routeRows = buildItineraryRowsFromRouteResults(validRouteResults, {
-                initialTime: sourceUnit?.sHora || socio.sHora || '',
-                defaultVehiculoId: sourceUnit?.vehiculoId || null,
-                defaultVehiculoLabel,
-              });
-              const itinerary = {
-                unitId: routeDesignerUnitId,
-                importedRoutes: validRouteResults.map(route => ({
-                  ...route,
-                  vehiculoId: route.vehiculoId || sourceUnit?.vehiculoId || null,
-                  vehicleLabel: route.vehicleLabel || defaultVehiculoLabel,
-                })),
-                totals: {
-                  distance_m: validRouteResults.reduce((sum, route) => sum + Number(route?.result?.totalDistance || 0), 0),
-                  duration_s: validRouteResults.reduce((sum, route) => sum + Number(route?.result?.totalTime || 0), 0),
-                },
-              };
-              setUnits(prev => prev.map(unit => {
-                if (unit.id === routeDesignerUnitId) {
-                  const updated = syncUnitFromItineraryRows(unit, routeRows);
-                  updated.itinerary = itinerary;
-                  return updated;
-                }
-                return unit;
-              }));
-              setActiveUnitId(routeDesignerUnitId);
-              setActiveUnitTab('operacion');
-              setOpenSection('costos');
-              setSavedMsg('Itinerario cargado desde mapas ✓');
-              setAutoSaveEnabled(true);
-            }
-            setShowRouteDesigner(false);
-            setRouteDesignerUnitId(null);
-          }}
-        />
-      )}
-
-      {!googleMapsApiKey && showRouteDesigner && (
+      {showRouteDesigner && (
         <div
           style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15,23,42,0.62)',
-            backdropFilter: 'blur(8px)',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 40,
+            background: T.card,
+            border: `1px solid ${T.bdr}`,
+            borderRadius: 14,
+            padding: 14,
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 90,
+            flexDirection: 'column',
+            minHeight: 0,
+            height: routeDesignerViewportHeight ? `${routeDesignerViewportHeight}px` : '100%',
+            overflow: 'hidden',
           }}
-          onClick={() => { setShowRouteDesigner(false); setRouteDesignerUnitId(null); }}
         >
-          <div
-            style={{
-              width: 400,
-              padding: 32,
-              background: T.card,
-              border: `1px solid ${T.bdr}`,
-              borderRadius: 18,
-              boxShadow: '0 30px 80px rgba(15,23,42,0.35)',
-              textAlign: 'center',
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <Map size={48} color={T.RED} style={{ marginBottom: 16 }} />
-            <div style={{ fontSize: 16, fontWeight: 700, color: T.txt, marginBottom: 8 }}>Google Maps API no configurada</div>
-            <div style={{ fontSize: 13, color: T.sub, marginBottom: 20 }}>
-              Ve a Configuraci&oacute;n → APIs para agregar tu API Key de Google Maps.
+          {googleMapsApiKey ? (
+            <RouteDesignerModal
+              unitId={routeDesignerUnitId}
+              unitItinerary={units.find(u => u.id === routeDesignerUnitId)?.itinerary}
+              vehiculoId={units.find(u => u.id === routeDesignerUnitId)?.vehiculoId || null}
+              vehicleLabel={(() => {
+                const unit = units.find(u => u.id === routeDesignerUnitId);
+                const vehiculo = vehiculos.find(item => item.id === unit?.vehiculoId);
+                return vehiculo ? `${vehiculo.placa} · ${vehiculo.marca} ${vehiculo.modelo}` : '';
+              })()}
+              googleMapsApiKey={googleMapsApiKey}
+              onClose={closeRouteDesigner}
+              onSave={handleRouteDesignerSave}
+            />
+          ) : (
+            <div style={{ flex: 1, padding: 18, borderRadius: 16, background: T.card2, border: `1px solid ${T.RED}33`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: T.txt, marginBottom: 6 }}>Google Maps API no configurada</div>
+                <div style={{ fontSize: 13, color: T.sub }}>
+                  Ve a Configuración → APIs para agregar la API Key de Google Maps.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeRouteDesigner}
+                style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${T.bdr}`, background: T.card, color: T.txt, cursor: 'pointer', fontWeight: 700 }}
+              >
+                Cerrar
+              </button>
             </div>
-            <button
-              onClick={() => { setShowRouteDesigner(false); setRouteDesignerUnitId(null); }}
-              style={{
-                padding: '10px 20px',
-                background: T.AMB,
-                color: '#000',
-                border: 'none',
-                borderRadius: 8,
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              Cerrar
-            </button>
-          </div>
+          )}
         </div>
       )}
+
       </div>
       {socioSuggestionsDropdown}
     </div>

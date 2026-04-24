@@ -18,6 +18,8 @@ import {
   TrendingUp,
   Fuel,
   Droplets,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { T } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -96,6 +98,52 @@ function StatusBadge({ ok, text }) {
     }}>
       <Icon size={14} />
       <span>{text}</span>
+    </div>
+  );
+}
+
+function parseErrorResponse(data, fallbackStatusText, statusCode) {
+  return {
+    ok: false,
+    error: data?.error || fallbackStatusText || `Error ${statusCode}`,
+    code: data?.code || null,
+    detail: data?.detail || null,
+    meta: data?.meta || null,
+    debug: data?.debug || null,
+    statusCode,
+  };
+}
+
+function ErrorDiagnostics({ status }) {
+  if (!status || status.ok !== false) return null;
+
+  const rows = [
+    status.statusCode ? ['HTTP', String(status.statusCode)] : null,
+    status.code ? ['Código', status.code] : null,
+    status.detail ? ['Detalle', status.detail] : null,
+    status.meta?.currentRole ? ['Rol actual', status.meta.currentRole] : null,
+    status.meta?.reason ? ['Motivo auth', status.meta.reason] : null,
+    status.debug?.source ? ['Fuente', status.debug.source] : null,
+    status.debug?.attemptedConfig?.host ? ['Host', status.debug.attemptedConfig.host] : null,
+    status.debug?.attemptedConfig?.port ? ['Puerto', String(status.debug.attemptedConfig.port)] : null,
+    status.debug?.attemptedConfig?.database ? ['Base', status.debug.attemptedConfig.database] : null,
+    status.debug?.attemptedConfig?.user ? ['Usuario', status.debug.attemptedConfig.user] : null,
+    typeof status.debug?.attemptedConfig?.ssl === 'boolean' ? ['SSL', status.debug.attemptedConfig.ssl ? 'Sí' : 'No'] : null,
+    typeof status.debug?.attemptedConfig?.passwordPresent === 'boolean' ? ['Contraseña', status.debug.attemptedConfig.passwordPresent ? 'Presente' : 'Vacía'] : null,
+    status.debug?.hint ? ['Sugerencia', status.debug.hint] : null,
+  ].filter(Boolean);
+
+  return (
+    <div style={{ padding: 16, borderRadius: 12, background: T.card2, border: `1px solid ${T.bdr}`, color: T.sub }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: T.txt, marginBottom: 10 }}>Diagnóstico del error</div>
+      <div style={{ display: 'grid', gap: 8 }}>
+        {rows.map(([label, value]) => (
+          <div key={label} style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 10, fontSize: 12 }}>
+            <div style={{ color: T.mute, fontWeight: 700 }}>{label}</div>
+            <div style={{ color: T.sub, wordBreak: 'break-word' }}>{value}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -456,7 +504,7 @@ function PlaceholderContent({ subtabId }) {
 }
 
 function DatabaseConfigPanel() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [form, setForm] = useState(EMPTY_DB_FORM);
   const [source, setSource] = useState('sin-configurar');
   const [status, setStatus] = useState(null);
@@ -480,7 +528,10 @@ function DatabaseConfigPanel() {
         fetch('/api/system/db-config/status', { headers: authHeaders }),
       ]);
 
-      const configData = await configRes.json();
+      const configData = await configRes.json().catch(() => ({}));
+      if (!configRes.ok) {
+        throw parseErrorResponse(configData, `Error ${configRes.status} al cargar configuración`, configRes.status);
+      }
       setForm(configData.config || EMPTY_DB_FORM);
       setSource(configData.source || 'sin-configurar');
 
@@ -488,11 +539,14 @@ function DatabaseConfigPanel() {
         setStatus(await statusRes.json());
       } else {
         const errorData = await statusRes.json().catch(() => ({}));
-        setStatus({ ok: false, error: errorData.error || 'No se pudo validar la conexión actual.' });
+        setStatus(parseErrorResponse(errorData, 'No se pudo validar la conexión actual.', statusRes.status));
       }
     } catch (error) {
-      setStatus({ ok: false, error: error.message || 'No se pudo consultar el estado de la conexión.' });
-      setMessage('No se pudo cargar la configuración actual.');
+      const normalized = error?.statusCode
+        ? error
+        : { ok: false, error: error.message || 'No se pudo consultar el estado de la conexión.' };
+      setStatus(normalized);
+      setMessage(normalized.error || 'No se pudo cargar la configuración actual.');
     } finally {
       setLoading(false);
     }
@@ -515,14 +569,17 @@ function DatabaseConfigPanel() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(data.error || `Error ${res.status} al probar conexión`);
+        throw parseErrorResponse(data, `Error ${res.status} al probar conexión`, res.status);
       }
 
       setStatus(data);
       setMessage('La prueba terminó correctamente.');
     } catch (error) {
-      setStatus({ ok: false, error: error.message });
-      setMessage(error.message || 'La prueba de conexión falló.');
+      const normalized = error?.statusCode
+        ? error
+        : { ok: false, error: error.message || 'La prueba de conexión falló.' };
+      setStatus(normalized);
+      setMessage(normalized.error || 'La prueba de conexión falló.');
     } finally {
       setTesting(false);
     }
@@ -541,7 +598,7 @@ function DatabaseConfigPanel() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.success) {
-        throw new Error(data.error || `Error ${res.status} al guardar la configuración`);
+        throw parseErrorResponse(data, `Error ${res.status} al guardar la configuración`, res.status);
       }
 
       setSource('archivo-local');
@@ -549,8 +606,11 @@ function DatabaseConfigPanel() {
       setForm(data.config || form);
       setMessage('Configuración guardada y aplicada.');
     } catch (error) {
-      setStatus({ ok: false, error: error.message });
-      setMessage(error.message || 'No se pudo guardar la configuración.');
+      const normalized = error?.statusCode
+        ? error
+        : { ok: false, error: error.message || 'No se pudo guardar la configuración.' };
+      setStatus(normalized);
+      setMessage(normalized.error || 'No se pudo guardar la configuración.');
     } finally {
       setSaving(false);
     }
@@ -578,6 +638,9 @@ function DatabaseConfigPanel() {
           )}
           <div style={{ fontSize: 12, color: T.mute, marginTop: 8 }}>
             Fuente actual: {source}
+          </div>
+          <div style={{ fontSize: 12, color: T.mute, marginTop: 4 }}>
+            Usuario actual: {user?.nombre || 'Sin usuario'} · rol {user?.rol || 'desconocido'}
           </div>
         </div>
 
@@ -617,6 +680,8 @@ function DatabaseConfigPanel() {
           {status.error}
         </div>
       )}
+
+      <ErrorDiagnostics status={status} />
 
       {message && (
         <div style={{ fontSize: 13, color: status?.ok ? T.GRN : T.sub }}>
@@ -714,6 +779,8 @@ function ApiKeysPanel() {
   const { token } = useAuth();
   const [groqApiKey, setGroqApiKey] = useState('');
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState('');
+  const [showGroqApiKey, setShowGroqApiKey] = useState(false);
+  const [showGoogleMapsApiKey, setShowGoogleMapsApiKey] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -791,6 +858,13 @@ function ApiKeysPanel() {
     }
   };
 
+  const renderKeyPreview = (value = '') => {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return 'Sin llave cargada';
+    if (trimmed.length <= 10) return trimmed;
+    return `${trimmed.slice(0, 6)}...${trimmed.slice(-6)}`;
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{
@@ -851,29 +925,79 @@ function ApiKeysPanel() {
             label="Groq API Key"
             hint="Usa esta llave para las funciones de voz, transcripción e interpretación de solicitudes. Puedes dejar el campo vacío y guardar si quieres removerla."
           >
-            <input
-              type="password"
-              value={groqApiKey}
-              onChange={e => setGroqApiKey(e.target.value)}
-              placeholder="gsk_..."
-              style={{ ...inputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace' }}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showGroqApiKey ? 'text' : 'password'}
+                value={groqApiKey}
+                onChange={e => setGroqApiKey(e.target.value)}
+                placeholder="gsk_..."
+                style={{ ...inputStyle, paddingRight: 46, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowGroqApiKey(prev => !prev)}
+                aria-label={showGroqApiKey ? 'Ocultar llave de Groq' : 'Mostrar llave de Groq'}
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  right: 10,
+                  transform: 'translateY(-50%)',
+                  border: 'none',
+                  background: 'transparent',
+                  color: T.mute,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 4,
+                }}
+              >
+                {showGroqApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </Field>
 
           <div style={{ height: 24 }} />
 
           <Field
             label="Google Maps API Key"
-            hint="Se usa para el Route Designer (diseño de rutas). Requiere clave con APIs habilitadas: Maps JavaScript, Places y Directions."
+            hint="Se usa para el Route Designer. Requiere al menos Maps JavaScript API, Places API, Directions API y Routes API en el mismo proyecto."
           >
-            <input
-              type="password"
-              value={googleMapsApiKey}
-              onChange={e => setGoogleMapsApiKey(e.target.value)}
-              placeholder="AIza..."
-              style={{ ...inputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace' }}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showGoogleMapsApiKey ? 'text' : 'password'}
+                value={googleMapsApiKey}
+                onChange={e => setGoogleMapsApiKey(e.target.value)}
+                placeholder="AIza..."
+                style={{ ...inputStyle, paddingRight: 46, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowGoogleMapsApiKey(prev => !prev)}
+                aria-label={showGoogleMapsApiKey ? 'Ocultar llave de Google Maps' : 'Mostrar llave de Google Maps'}
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  right: 10,
+                  transform: 'translateY(-50%)',
+                  border: 'none',
+                  background: 'transparent',
+                  color: T.mute,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 4,
+                }}
+              >
+                {showGoogleMapsApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </Field>
+
+          <div style={{ marginTop: -6, fontSize: 12, color: T.mute }}>
+            Llave cargada en el sistema: <span style={{ color: T.sub, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace' }}>{renderKeyPreview(googleMapsApiKey)}</span>
+          </div>
 
           {hasGoogleMapsKey && (
             <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: T.grnDim, display: 'flex', alignItems: 'center', gap: 8 }}>

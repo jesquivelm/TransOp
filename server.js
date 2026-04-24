@@ -44,16 +44,52 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-    if (!token) return res.sendStatus(401);
+    if (!token) {
+        return res.status(401).json({
+            success: false,
+            code: 'AUTH_MISSING_TOKEN',
+            error: 'No hay sesión activa para esta solicitud.',
+            detail: 'Debes iniciar sesión nuevamente para acceder a esta configuración.',
+        });
+    }
     jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) return res.sendStatus(403);
+        if (err) {
+            console.warn('Autenticación rechazada:', {
+                path: req.path,
+                method: req.method,
+                reason: err.message,
+                name: err.name,
+            });
+            return res.status(403).json({
+                success: false,
+                code: 'AUTH_INVALID_TOKEN',
+                error: 'La sesión fue rechazada por el servidor.',
+                detail: err.name === 'TokenExpiredError'
+                    ? 'El token expiró y debes iniciar sesión otra vez.'
+                    : 'El token es inválido o ya no corresponde a este entorno.',
+                meta: {
+                    reason: err.message,
+                    expiredAt: err.expiredAt || null,
+                },
+            });
+        }
         req.user = user;
         next();
     });
 }
 
 function requireAdmin(req, res, next) {
-    if (req.user?.rol !== 'admin') return res.sendStatus(403);
+    if (req.user?.rol !== 'admin') {
+        return res.status(403).json({
+            success: false,
+            code: 'AUTH_ADMIN_REQUIRED',
+            error: 'Esta acción requiere permisos de administrador.',
+            detail: 'El servidor recibió la solicitud, pero el usuario autenticado no tiene rol admin.',
+            meta: {
+                currentRole: req.user?.rol || null,
+            },
+        });
+    }
     next();
 }
 
@@ -71,6 +107,28 @@ function formatDbError(error) {
     }
 
     return error?.message || 'Error interno del servidor';
+}
+
+function maskDbConfig(config = {}) {
+    return {
+        host: config.host || '',
+        port: Number(config.port || 5432),
+        database: config.database || '',
+        user: config.user || '',
+        ssl: Boolean(config.ssl),
+        passwordPresent: Boolean(config.password),
+    };
+}
+
+function buildDbDebugPayload(error, config = null, extra = {}) {
+    return {
+        category: extra.category || 'database',
+        code: error?.code || extra.code || null,
+        detail: error?.message || extra.detail || null,
+        attemptedConfig: config ? maskDbConfig(config) : null,
+        hint: extra.hint || null,
+        source: extra.source || null,
+    };
 }
 
 function getCurrentMonthKey() {
@@ -1106,6 +1164,13 @@ async function ensureDatabaseCompatibility() {
         `);
 
         await pgQuery(`
+            ALTER TABLE usuarios
+            ADD COLUMN IF NOT EXISTS telefono VARCHAR(50);
+            ALTER TABLE usuarios
+            ADD COLUMN IF NOT EXISTS recordar_tabs BOOLEAN DEFAULT FALSE
+        `);
+
+        await pgQuery(`
             CREATE TABLE IF NOT EXISTS tms_conductor_ausencias (
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
                 conductor_id UUID NOT NULL REFERENCES conductores(id) ON DELETE CASCADE,
@@ -1465,8 +1530,10 @@ app.post('/api/auth/login', async (req, res) => {
                 nombre: user.nombre,
                 username: user.username,
                 email: user.email,
+                telefono: user.telefono,
                 rol: user.rol,
-                foto_url: user.foto_url
+                foto_url: user.foto_url,
+                recordar_tabs: Boolean(user.recordar_tabs),
             }
         });
     } catch (error) {
@@ -1476,24 +1543,65 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.get('/api/system/db-config', authenticateToken, requireAdmin, async (req, res) => {
-    res.json(getDatabaseConfig());
+    const config = getDatabaseConfig();
+    res.json({
+        success: true,
+        ...config,
+        debug: {
+            category: 'database-config',
+            source: config.source,
+            attemptedConfig: maskDbConfig(config.config),
+            currentRole: req.user?.rol || null,
+        },
+    });
 });
 
 app.get('/api/system/db-config/status', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const result = await testConnection();
-        res.json(result);
+        res.json({
+            ...result,
+            debug: {
+                category: 'database-status',
+                source: getDatabaseConfig().source,
+                attemptedConfig: maskDbConfig(result.config),
+            },
+        });
     } catch (error) {
-        res.status(500).json({ ok: false, error: formatDbError(error) });
+        const effective = getDatabaseConfig();
+        res.status(500).json({
+            ok: false,
+            error: formatDbError(error),
+            debug: buildDbDebugPayload(error, effective.config, {
+                category: 'database-status',
+                source: effective.source,
+                hint: 'Verifica host, puerto, SSL y accesibilidad de red antes de guardar.',
+            }),
+        });
     }
 });
 
 app.post('/api/system/db-config/test', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const result = await testConnection(req.body);
-        res.json(result);
+        res.json({
+            ...result,
+            debug: {
+                category: 'database-test',
+                attemptedConfig: maskDbConfig(result.config),
+                source: 'formulario',
+            },
+        });
     } catch (error) {
-        res.status(500).json({ ok: false, error: formatDbError(error) });
+        res.status(500).json({
+            ok: false,
+            error: formatDbError(error),
+            debug: buildDbDebugPayload(error, req.body, {
+                category: 'database-test',
+                source: 'formulario',
+                hint: 'Si estás fuera de Render, usa el External Database URL o el host externo.',
+            }),
+        });
     }
 });
 
@@ -1502,9 +1610,28 @@ app.post('/api/system/db-config', authenticateToken, requireAdmin, async (req, r
         const result = await testConnection(req.body);
         const config = await saveDatabaseConfig(req.body);
         await ensureDatabaseCompatibility();
-        res.json({ success: true, config, test: result });
+        res.json({
+            success: true,
+            config,
+            test: {
+                ...result,
+                debug: {
+                    category: 'database-save',
+                    attemptedConfig: maskDbConfig(config),
+                    source: 'archivo-local',
+                },
+            },
+        });
     } catch (error) {
-        res.status(500).json({ success: false, error: formatDbError(error) });
+        res.status(500).json({
+            success: false,
+            error: formatDbError(error),
+            debug: buildDbDebugPayload(error, req.body, {
+                category: 'database-save',
+                source: 'formulario',
+                hint: 'Si el backend respondió 403, el problema es autenticación/rol; si respondió 500, revisa la conexión a PostgreSQL.',
+            }),
+        });
     }
 });
 
@@ -1515,7 +1642,7 @@ app.get('/api/tms/usuarios', authenticateToken, async (req, res) => {
     if (req.user.rol !== 'admin') return res.sendStatus(403);
     try {
         const result = await pgQuery(
-            `SELECT id, nombre, username, email, rol, activo, foto_url, created_at
+            `SELECT id, nombre, username, email, telefono, rol, activo, foto_url, recordar_tabs AS "recordarTabs", created_at
              FROM usuarios
              WHERE activo = TRUE
              ORDER BY nombre ASC`
@@ -1527,7 +1654,7 @@ app.get('/api/tms/usuarios', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/tms/usuarios', authenticateToken, requireAdmin, async (req, res) => {
-    const { nombre, username, email, password, rol, foto_url } = req.body || {};
+    const { nombre, username, email, telefono, password, rol, foto_url, recordarTabs } = req.body || {};
 
     if (!nombre?.trim() || !username?.trim() || !email?.trim() || !password?.trim()) {
         return res.status(400).json({ error: 'Nombre, usuario, email y contraseña son obligatorios.' });
@@ -1539,16 +1666,18 @@ app.post('/api/tms/usuarios', authenticateToken, requireAdmin, async (req, res) 
     try {
         const passwordHash = await bcrypt.hash(password, 10);
         const result = await pgQuery(
-            `INSERT INTO usuarios (nombre, username, email, password_hash, rol, foto_url)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING id, nombre, username, email, rol, activo, foto_url, created_at`,
+            `INSERT INTO usuarios (nombre, username, email, telefono, password_hash, rol, foto_url, recordar_tabs)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING id, nombre, username, email, telefono, rol, activo, foto_url, recordar_tabs AS "recordarTabs", created_at`,
             [
                 nombre.trim(),
                 username.trim(),
                 email.trim().toLowerCase(),
+                telefono?.trim() || null,
                 passwordHash,
                 normalizedRole,
                 foto_url?.trim() || null,
+                Boolean(recordarTabs),
             ]
         );
 
@@ -1557,6 +1686,147 @@ app.post('/api/tms/usuarios', authenticateToken, requireAdmin, async (req, res) 
         if (error?.code === '23505') {
             return res.status(409).json({ error: 'El usuario o el correo ya existen.' });
         }
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/tms/usuarios/me', authenticateToken, async (req, res) => {
+    try {
+        const result = await pgQuery(
+            `SELECT id, nombre, username, email, telefono, rol, activo, foto_url, recordar_tabs AS "recordarTabs", created_at
+             FROM usuarios
+             WHERE id = $1
+             LIMIT 1`,
+            [req.user.id]
+        );
+        if (!result.rows[0]) {
+            return res.status(404).json({ error: 'Usuario no encontrado.' });
+        }
+        res.json(result.rows[0]);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/tms/usuarios/me', authenticateToken, async (req, res) => {
+    const { nombre, email, telefono, foto_url, recordarTabs } = req.body || {};
+    try {
+        const result = await pgQuery(
+            `UPDATE usuarios
+             SET nombre = COALESCE($1, nombre),
+                 email = COALESCE($2, email),
+                 telefono = COALESCE($3, telefono),
+                 foto_url = COALESCE($4, foto_url),
+                 recordar_tabs = COALESCE($5, recordar_tabs),
+                 updated_at = NOW()
+             WHERE id = $6
+             RETURNING id, nombre, username, email, telefono, rol, activo, foto_url, recordar_tabs AS "recordarTabs", created_at`,
+            [
+                nombre?.trim() || null,
+                email?.trim()?.toLowerCase() || null,
+                telefono?.trim() || null,
+                foto_url?.trim() || null,
+                typeof recordarTabs === 'boolean' ? recordarTabs : null,
+                req.user.id,
+            ]
+        );
+        res.json({ success: true, user: result.rows[0] });
+    } catch (error) {
+        if (error?.code === '23505') {
+            return res.status(409).json({ error: 'El correo ya está en uso.' });
+        }
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.patch('/api/tms/usuarios/me/password', authenticateToken, async (req, res) => {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword?.trim() || !newPassword?.trim()) {
+        return res.status(400).json({ error: 'La contraseña actual y la nueva son obligatorias.' });
+    }
+    try {
+        const result = await pgQuery(
+            `SELECT id, password_hash
+             FROM usuarios
+             WHERE id = $1
+             LIMIT 1`,
+            [req.user.id]
+        );
+        const user = result.rows[0];
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+        const validPassword = await bcrypt.compare(currentPassword, user.password_hash);
+        if (!validPassword) {
+            return res.status(400).json({ error: 'La contraseña actual no coincide.' });
+        }
+        const passwordHash = await bcrypt.hash(newPassword, 10);
+        await pgQuery(
+            `UPDATE usuarios
+             SET password_hash = $1,
+                 updated_at = NOW()
+             WHERE id = $2`,
+            [passwordHash, req.user.id]
+        );
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/tms/usuarios/:id', authenticateToken, requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { nombre, email, telefono, rol, foto_url, recordarTabs } = req.body || {};
+    const allowedRoles = new Set(['admin', 'operador', 'supervisor', 'conductor']);
+    try {
+        const result = await pgQuery(
+            `UPDATE usuarios
+             SET nombre = COALESCE($1, nombre),
+                 email = COALESCE($2, email),
+                 telefono = COALESCE($3, telefono),
+                 rol = COALESCE($4, rol),
+                 foto_url = COALESCE($5, foto_url),
+                 recordar_tabs = COALESCE($6, recordar_tabs),
+                 updated_at = NOW()
+             WHERE id = $7
+             RETURNING id, nombre, username, email, telefono, rol, activo, foto_url, recordar_tabs AS "recordarTabs", created_at`,
+            [
+                nombre?.trim() || null,
+                email?.trim()?.toLowerCase() || null,
+                telefono?.trim() || null,
+                allowedRoles.has(rol) ? rol : null,
+                foto_url?.trim() || null,
+                typeof recordarTabs === 'boolean' ? recordarTabs : null,
+                id,
+            ]
+        );
+        if (!result.rows[0]) return res.status(404).json({ error: 'Usuario no encontrado.' });
+        res.json({ success: true, user: result.rows[0] });
+    } catch (error) {
+        if (error?.code === '23505') {
+            return res.status(409).json({ error: 'El correo ya está en uso.' });
+        }
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.patch('/api/tms/usuarios/:id/password', authenticateToken, requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { newPassword } = req.body || {};
+    if (!newPassword?.trim()) {
+        return res.status(400).json({ error: 'La nueva contraseña es obligatoria.' });
+    }
+    try {
+        const passwordHash = await bcrypt.hash(newPassword, 10);
+        const result = await pgQuery(
+            `UPDATE usuarios
+             SET password_hash = $1,
+                 updated_at = NOW()
+             WHERE id = $2
+             RETURNING id`,
+            [passwordHash, id]
+        );
+        if (!result.rowCount) return res.status(404).json({ error: 'Usuario no encontrado.' });
+        res.json({ success: true });
+    } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
@@ -2121,6 +2391,33 @@ app.post('/api/tms/gastos', authenticateToken, async (req, res) => {
         }
 
         res.json({ success: true, id: gastoId });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/tms/gastos/:id/adjuntos', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { adjuntos } = req.body || {};
+    try {
+        await ensureDatabaseCompatibility();
+        if (!id) {
+            return res.status(400).json({ error: 'Falta el identificador del gasto.' });
+        }
+        if (!Array.isArray(adjuntos) || adjuntos.length === 0) {
+            return res.status(400).json({ error: 'No se recibieron adjuntos para agregar.' });
+        }
+
+        for (const adjunto of adjuntos) {
+            if (!adjunto?.archivoPath) continue;
+            await pgQuery(
+                `INSERT INTO tms_gasto_adjuntos (gasto_id, nombre_original, archivo_path, mime_type)
+                 VALUES ($1, $2, $3, $4)`,
+                [id, adjunto?.nombreOriginal || null, adjunto.archivoPath, adjunto?.mimeType || null]
+            );
+        }
+
+        res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -3431,8 +3728,13 @@ ensureTipoCambioTable().then(async () => {
 // ─────────────────────────────────────────────────────────────
 // STATIC FILES
 // ─────────────────────────────────────────────────────────────
+app.get('/route-designer.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'route-designer.html'));
+});
+
 app.get('/designroute.html', (req, res) => {
-    res.sendFile(path.join(__dirname, 'designroute.html'));
+    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    res.redirect(302, `/route-designer.html${query}`);
 });
 
 // ─────────────────────────────────────────────────────────────

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Bus, Lock, User, AlertCircle, Loader2 } from 'lucide-react';
-import { T } from '../../theme';
+import { Lock, User, AlertCircle, Loader2 } from 'lucide-react';
 
 export default function LoginView() {
   const [username, setUsername] = useState('');
@@ -51,7 +50,7 @@ export default function LoginView() {
       display: 'flex', 
       alignItems: 'center', 
       justifyContent: 'center', 
-      background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)',
+      background: 'radial-gradient(circle at top, rgba(245, 158, 11, 0.18), transparent 28%), linear-gradient(135deg, #0b1120 0%, #111827 58%, #0f172a 100%)',
       padding: 20
     }}>
       <div style={{ 
@@ -66,11 +65,16 @@ export default function LoginView() {
       }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{ 
-            width: 64, height: 64, borderRadius: 16, background: '#f59e0b',
+            width: 64, height: 64,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 16px', boxShadow: '0 0 20px rgba(245, 158, 11, 0.4)'
+            margin: '0 auto 16px',
+            filter: 'drop-shadow(0 14px 20px rgba(0, 0, 0, 0.28))'
           }}>
-            <Bus size={32} color="#000" />
+            <img
+              src="/transop-icon.svg"
+              alt="TransOP"
+              style={{ width: 64, height: 64, display: 'block' }}
+            />
           </div>
           <h1 style={{ color: '#fff', fontSize: 24, fontWeight: 700, margin: 0 }}>TransOP</h1>
           <p style={{ color: '#94a3b8', fontSize: 14, marginTop: 8 }}>Sistema de Gestión de Transporte</p>
@@ -90,7 +94,7 @@ export default function LoginView() {
 
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 20 }}>
-            <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, fontWeight: 600, marginBottom: 8, marginLeft: 4 }}>USUARIO</label>
+            <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, fontWeight: 600, marginBottom: 8, marginLeft: 4 }}>Usuario</label>
             <div style={{ position: 'relative' }}>
               <User size={18} color="#64748b" style={{ position: 'absolute', left: 14, top: 14 }} />
               <input 
@@ -109,7 +113,7 @@ export default function LoginView() {
           </div>
 
           <div style={{ marginBottom: 32 }}>
-            <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, fontWeight: 600, marginBottom: 8, marginLeft: 4 }}>CONTRASEÑA</label>
+            <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, fontWeight: 600, marginBottom: 8, marginLeft: 4 }}>Contraseña</label>
             <div style={{ position: 'relative' }}>
               <Lock size={18} color="#64748b" style={{ position: 'absolute', left: 14, top: 14 }} />
               <input 

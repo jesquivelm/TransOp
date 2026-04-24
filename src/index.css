@@ -1,5 +1,6 @@
 :root {
-  font-family: inherit;
+  --font-sans: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-sans);
   
   /* LIGTH MODE (default in many places, but TransOP was strictly dark)
      We will define the TransOP original as dark, and create a light variant.
@@ -50,6 +51,7 @@ body {
   margin: 0;
   background-color: var(--bg);
   color: var(--txt);
+  font-family: var(--font-sans);
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
@@ -57,10 +59,40 @@ body {
   display: flex;
   min-height: 100vh;
   width: 100%;
+  font-family: var(--font-sans);
 }
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--AMB) var(--card2);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--card2);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--AMB), var(--ORG));
+  border-radius: 999px;
+  border: 2px solid var(--card2);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--card2);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
 
 /* Cotizador styles adapted for TransOP */
