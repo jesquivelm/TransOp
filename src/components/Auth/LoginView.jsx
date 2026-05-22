@@ -1,17 +1,21 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Lock, User, AlertCircle, Loader2 } from 'lucide-react';
+import { Lock, User, AlertCircle, Loader2, Database } from 'lucide-react';
+import EmergencyDbConfig from './EmergencyDbConfig';
 
 export default function LoginView() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showEmergencyDb, setShowEmergencyDb] = useState(false);
+  const [isDbError, setIsDbError] = useState(false);
   const { login } = useAuth();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setIsDbError(false);
     setLoading(true);
 
     try {
@@ -26,11 +30,14 @@ export default function LoginView() {
       if (contentType && contentType.indexOf("application/json") !== -1) {
         data = await resp.json();
       } else {
-        // El servidor devolvió algo que no es JSON (ej: un error 404 o 500 HTML)
         throw new Error('El servidor no respondió correctamente. Verifica que el backend esté corriendo en el puerto 3020.');
       }
 
-      if (!resp.ok) throw new Error(data.error || 'Acceso denegado');
+      if (!resp.ok) {
+        const isDb = data?.code === 'DB_CONNECTION_ERROR';
+        setIsDbError(isDb);
+        throw new Error(data.error || 'Acceso denegado');
+      }
 
       login(data.user, data.token);
     } catch (err) {
@@ -43,6 +50,10 @@ export default function LoginView() {
       setLoading(false);
     }
   };
+
+  if (showEmergencyDb) {
+    return <EmergencyDbConfig onBack={() => setShowEmergencyDb(false)} />;
+  }
 
   return (
     <div style={{ 
@@ -144,7 +155,30 @@ export default function LoginView() {
           </button>
         </form>
 
-        <div style={{ marginTop: 32, textAlign: 'center' }}>
+        <div style={{ marginTop: 24, textAlign: 'center' }}>
+          {isDbError && (
+            <button onClick={() => setShowEmergencyDb(true)} style={{
+              background: 'transparent',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              borderRadius: 10,
+              padding: '10px 16px',
+              color: '#f87171',
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 16,
+              transition: '0.2s',
+            }}
+              onMouseEnter={e => e.target.style.borderColor = 'rgba(239,68,68,0.5)'}
+              onMouseLeave={e => e.target.style.borderColor = 'rgba(239,68,68,0.2)'}
+            >
+              <Database size={16} />
+              Configuración de Base de Datos
+            </button>
+          )}
           <p style={{ color: '#64748b', fontSize: 11 }}>© 2026 TransOP · Advanced Transport Systems</p>
         </div>
       </div>

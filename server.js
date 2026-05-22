@@ -1501,6 +1501,85 @@ async function generateClientCode() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// EMERGENCIA — Configuración de DB sin autenticación
+// ─────────────────────────────────────────────────────────────
+app.get('/api/system/db-emergency/status', async (req, res) => {
+    try {
+        const config = getDatabaseConfig();
+        let connectionOk = false;
+        let connectionMeta = null;
+        let connectionError = null;
+
+        try {
+            const result = await testConnection();
+            connectionOk = true;
+            connectionMeta = result.meta;
+        } catch (err) {
+            connectionError = err.message;
+        }
+
+        res.json({
+            ok: connectionOk,
+            source: config.source,
+            config: maskDbConfig(config.config),
+            meta: connectionMeta,
+            error: connectionError,
+        });
+    } catch (error) {
+        res.status(500).json({
+            ok: false,
+            error: error.message,
+        });
+    }
+});
+
+app.post('/api/system/db-emergency/test', async (req, res) => {
+    try {
+        const result = await testConnection(req.body);
+        res.json({
+            ok: true,
+            ...result,
+        });
+    } catch (error) {
+        res.status(500).json({
+            ok: false,
+            error: formatDbError(error),
+            debug: buildDbDebugPayload(error, req.body, {
+                category: 'database-emergency-test',
+                source: 'formulario-emergencia',
+                hint: 'Verifica host, puerto, usuario y contraseña.',
+            }),
+        });
+    }
+});
+
+app.post('/api/system/db-emergency/save', async (req, res) => {
+    try {
+        await testConnection(req.body);
+        const config = await saveDatabaseConfig(req.body);
+        try {
+            await ensureDatabaseCompatibility();
+        } catch (e) {
+            console.warn('ensureDatabaseCompatibility after emergency save:', e.message);
+        }
+        res.json({
+            success: true,
+            config: maskDbConfig(config),
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: formatDbError(error),
+            debug: buildDbDebugPayload(error, req.body, {
+                category: 'database-emergency-save',
+                source: 'formulario-emergencia',
+                hint: 'Revisa la conexión e intenta de nuevo.',
+            }),
+        });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
 // AUTENTICACIÓN
 // ─────────────────────────────────────────────────────────────
 app.post('/api/auth/login', async (req, res) => {
@@ -1538,7 +1617,17 @@ app.post('/api/auth/login', async (req, res) => {
         });
     } catch (error) {
         console.error('Error en login:', error);
-        res.status(500).json({ error: 'Error interno del servidor' });
+        const isDbError = error.code === 'ECONNREFUSED'
+            || error.code === 'ECONNRESET'
+            || error.message?.toLowerCase().includes('connection')
+            || error.message?.toLowerCase().includes('database')
+            || error.message?.includes('Pool')
+            || error.message?.includes('getaddrinfo');
+        res.status(500).json({
+            error: isDbError ? 'No se pudo conectar con la base de datos. Verifica la configuración.' : 'Error interno del servidor',
+            code: isDbError ? 'DB_CONNECTION_ERROR' : 'INTERNAL_ERROR',
+            detail: isDbError ? 'La base de datos no está accesible con la configuración actual.' : null,
+        });
     }
 });
 
