@@ -9,13 +9,11 @@ export default function LoginView() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showEmergencyDb, setShowEmergencyDb] = useState(false);
-  const [isDbError, setIsDbError] = useState(false);
   const { login } = useAuth();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    setIsDbError(false);
     setLoading(true);
 
     try {
@@ -34,8 +32,6 @@ export default function LoginView() {
       }
 
       if (!resp.ok) {
-        const isDb = data?.code === 'DB_CONNECTION_ERROR';
-        setIsDbError(isDb);
         throw new Error(data.error || 'Acceso denegado');
       }
 
@@ -156,29 +152,27 @@ export default function LoginView() {
         </form>
 
         <div style={{ marginTop: 24, textAlign: 'center' }}>
-          {isDbError && (
-            <button onClick={() => setShowEmergencyDb(true)} style={{
-              background: 'transparent',
-              border: '1px solid rgba(239, 68, 68, 0.2)',
-              borderRadius: 10,
-              padding: '10px 16px',
-              color: '#f87171',
-              cursor: 'pointer',
-              fontSize: 12,
-              fontWeight: 600,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              marginBottom: 16,
-              transition: '0.2s',
-            }}
-              onMouseEnter={e => e.target.style.borderColor = 'rgba(239,68,68,0.5)'}
-              onMouseLeave={e => e.target.style.borderColor = 'rgba(239,68,68,0.2)'}
-            >
-              <Database size={16} />
-              Configuración de Base de Datos
-            </button>
-          )}
+          <button onClick={() => setShowEmergencyDb(true)} style={{
+            background: 'transparent',
+            border: '1px solid rgba(100, 116, 139, 0.2)',
+            borderRadius: 10,
+            padding: '8px 14px',
+            color: '#64748b',
+            cursor: 'pointer',
+            fontSize: 12,
+            fontWeight: 500,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: 16,
+            transition: '0.2s',
+          }}
+            onMouseEnter={e => { e.target.style.borderColor = 'rgba(245,158,11,0.4)'; e.target.style.color = '#f59e0b'; }}
+            onMouseLeave={e => { e.target.style.borderColor = 'rgba(100,116,139,0.2)'; e.target.style.color = '#64748b'; }}
+          >
+            <Database size={14} />
+            Configuración de Base de Datos
+          </button>
           <p style={{ color: '#64748b', fontSize: 11 }}>© 2026 TransOP · Advanced Transport Systems</p>
         </div>
       </div>

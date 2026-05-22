@@ -1617,16 +1617,26 @@ app.post('/api/auth/login', async (req, res) => {
         });
     } catch (error) {
         console.error('Error en login:', error);
-        const isDbError = error.code === 'ECONNREFUSED'
-            || error.code === 'ECONNRESET'
-            || error.message?.toLowerCase().includes('connection')
-            || error.message?.toLowerCase().includes('database')
-            || error.message?.includes('Pool')
-            || error.message?.includes('getaddrinfo');
+        const msg = (error.message || '').toLowerCase();
+        const code = error.code || '';
+        const isDbError = !!(error.code
+            || msg.includes('database')
+            || msg.includes('connection')
+            || msg.includes('password')
+            || msg.includes('authentication')
+            || msg.includes('exist')
+            || msg.includes('pool')
+            || msg.includes('timeout')
+            || msg.includes('refused')
+            || msg.includes('reset')
+            || msg.includes('getaddrinfo')
+            || msg.includes('socket')
+            || msg.includes('ssl')
+            || msg.includes('no hay configuración'));
         res.status(500).json({
-            error: isDbError ? 'No se pudo conectar con la base de datos. Verifica la configuración.' : 'Error interno del servidor',
-            code: isDbError ? 'DB_CONNECTION_ERROR' : 'INTERNAL_ERROR',
-            detail: isDbError ? 'La base de datos no está accesible con la configuración actual.' : null,
+            error: 'No se pudo conectar con la base de datos. Verifica la configuración.',
+            code: 'DB_CONNECTION_ERROR',
+            detail: isDbError ? error.message : null,
         });
     }
 });
