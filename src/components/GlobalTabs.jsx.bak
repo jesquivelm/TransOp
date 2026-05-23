@@ -90,7 +90,7 @@ export default function GlobalTabs() {
         padding: '0 28px',
         boxSizing: 'border-box',
         minWidth: 0,
-        overflow: 'hidden',
+        overflow: 'visible',
       }}>
       <div
         style={{
@@ -99,7 +99,7 @@ export default function GlobalTabs() {
           gap: 8,
           flex: '1 1 auto',
           minWidth: 0,
-          overflow: 'hidden',
+          overflow: 'visible',
         }}>
         <div
           style={{
@@ -110,8 +110,8 @@ export default function GlobalTabs() {
             minWidth: 0,
             maxWidth: '100%',
             overflowX: 'auto',
-            overflowY: 'hidden',
-          padding: '0 0 2px',
+            overflowY: 'visible',
+          padding: '0 0 1px',
           boxSizing: 'border-box',
           position: 'relative',
         }}>

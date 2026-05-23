@@ -3348,7 +3348,7 @@ const ROOT_TAB_ITEMS = [
 ];
 const APP_TOP_BAR_HEIGHT = 68;
 
-function Sidebar({ active, onOpenView, user, onLogout, onOpenUserMenu, theme, onToggleTheme, token, onVoiceInterpretation }) {
+function Sidebar({ active, onOpenView, user, onLogout, onOpenUserMenu }) {
   const items = ROOT_TAB_ITEMS;
 
   const filteredItems = items.filter(item => !item.role || item.role === user?.rol);
@@ -3403,23 +3403,6 @@ function Sidebar({ active, onOpenView, user, onLogout, onOpenUserMenu, theme, on
             <div style={{ fontSize:10, color:T.mute }}>{user?.rol === 'admin' ? 'Administrador' : 'Operador'}</div>
           </div>
         </button>
-        <div style={{ display:'flex', gap:8, marginBottom:10, justifyContent:'center' }}>
-          <button
-            onClick={onToggleTheme}
-            style={{
-              width: 36, height: 36, borderRadius: 10,
-              border: `1px solid ${T.AMB}44`,
-              background: `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
-              color: T.AMB, cursor:'pointer',
-              display:'flex', alignItems:'center', justifyContent:'center',
-              flex:1, maxWidth: 48,
-            }}
-            title={theme === 'dark' ? 'Tema claro' : 'Tema oscuro'}
-          >
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-          <VoiceAssistantButton token={token} onInterpretation={onVoiceInterpretation} sidebar />
-        </div>
         <button onClick={onLogout}
           style={{ width:'100%', padding:'6px', background:'rgba(239,68,68,0.1)', color:T.RED,
             border:'none', borderRadius:6, fontSize:11, fontWeight:600, cursor:'pointer' }}>
@@ -4392,7 +4375,7 @@ function AppContent() {
   return (
     <div style={{ display:'flex', width:'100%', minHeight:'100vh', background:T.bg, fontFamily:'var(--font-sans)',
       color:T.txt, fontSize:14, lineHeight:1.5 }}>
-      <Sidebar active={view} onOpenView={openRootView} user={user} onLogout={logout} onOpenUserMenu={() => setUserMenuOpen(true)} theme={theme} onToggleTheme={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')} token={token} onVoiceInterpretation={handleVoiceInterpretation} />
+      <Sidebar active={view} onOpenView={openRootView} user={user} onLogout={logout} onOpenUserMenu={() => setUserMenuOpen(true)} />
 
       <div style={{ flex:'1 1 auto', width:'100%', display:'flex', flexDirection:'column', minWidth:0 }}>
         <AlertBar tareas={tareas} />
@@ -4400,7 +4383,38 @@ function AppContent() {
           <GlobalTabs />
         </div>
 
-
+        <div
+          style={{
+            position: 'fixed',
+            top: 13,
+            right: 22,
+            zIndex: 80,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <VoiceAssistantButton token={token} onInterpretation={handleVoiceInterpretation} />
+          <button
+            onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: 12,
+              border: `1px solid ${T.AMB}44`,
+              background: `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
+              color: T.AMB,
+              cursor:'pointer',
+              display:'flex',
+              alignItems:'center',
+              justifyContent:'center',
+              boxShadow: '0 10px 30px rgba(15,23,42,0.12)',
+            }}
+            title={theme === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'}
+          >
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        </div>
 
         <div style={{ flex:1, padding:28, overflowY:'auto', overflowX:'hidden', scrollbarGutter:'stable' }}>
           {rootTabs.length === 0 ? (

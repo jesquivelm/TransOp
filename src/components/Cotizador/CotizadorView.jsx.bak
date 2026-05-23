@@ -942,40 +942,18 @@ function fmtCRC(v) {
   return formatMoney(v, 'CRC');
 }
 
-function smartVal(v) {
-  return (v === 0 || v === '0' || v === null || v === undefined) ? '' : v;
-}
-
-function NumberInput({ suffix, style = {}, inputStyle: customInputStyle = {}, ...props }) {
-  return (
-    <div style={{ position: 'relative', ...style }}>
-      <input
-        type="number"
-        step="0.01"
-        min="0"
-        {...props}
-        value={smartVal(props.value)}
-        style={{ ...inputStyle, paddingRight: suffix ? 42 : 11, ...customInputStyle }}
-      />
-      {suffix && (
-        <span style={{
-          position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)',
-          color: T.mute, fontSize: 12, pointerEvents: 'none',
-        }}>
-          {suffix}
-        </span>
-      )}
-    </div>
-  );
-}
-
 function MonetaryInput({ symbol = '₡', style = {}, inputStyle: customInputStyle = {}, ...props }) {
   return (
     <div style={{ position: 'relative', ...style }}>
       <span
         style={{
-          position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)',
-          color: T.mute, fontSize: 13, pointerEvents: 'none',
+          position: 'absolute',
+          left: 11,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          color: T.mute,
+          fontSize: 13,
+          pointerEvents: 'none',
         }}
       >
         {symbol}
@@ -985,7 +963,6 @@ function MonetaryInput({ symbol = '₡', style = {}, inputStyle: customInputStyl
         step="0.01"
         min="0"
         {...props}
-        value={smartVal(props.value)}
         style={{ ...inputStyle, paddingLeft: 28, ...customInputStyle }}
       />
     </div>
@@ -1000,13 +977,17 @@ function PercentInput({ style = {}, inputStyle: customInputStyle = {}, ...props 
         step="0.01"
         min="0"
         {...props}
-        value={smartVal(props.value)}
         style={{ ...inputStyle, paddingRight: 28, ...customInputStyle }}
       />
       <span
         style={{
-          position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)',
-          color: T.mute, fontSize: 13, pointerEvents: 'none',
+          position: 'absolute',
+          right: 11,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          color: T.mute,
+          fontSize: 13,
+          pointerEvents: 'none',
         }}
       >
         %
@@ -4272,19 +4253,22 @@ export default function CotizadorView({
 
                                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 10 }}>
                                         <Field label="PAX unidad" style={{ gridColumn: 'span 4' }}>
-                                          <input value={smartVal(unitCapacity)} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} />
+                                          <input value={unitCapacity || 0} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} />
                                         </Field>
                                         <Field label="Kilómetros" style={{ gridColumn: 'span 4' }}>
-                                          <NumberInput suffix="km" value={activeUnit.km} onChange={e => updateUnit(activeUnit.id, 'km', e.target.value)} onBlur={handleGuardar} min="0" />
+                                          <input type="number" value={activeUnit.km || 0} onChange={e => updateUnit(activeUnit.id, 'km', e.target.value)} onBlur={handleGuardar} style={inputStyle} min="0" />
                                         </Field>
                                         <Field label="Rendimiento" style={{ gridColumn: 'span 4' }}>
-                                          <NumberInput suffix="km/l" step="0.01" min="0" value={activeUnit.rendimiento} onChange={e => updateUnit(activeUnit.id, 'rendimiento', e.target.value)} onBlur={handleGuardar} />
+                                          <div style={{ position: 'relative' }}>
+                                            <input type="number" step="0.01" min="0" value={activeUnit.rendimiento || 0} onChange={e => updateUnit(activeUnit.id, 'rendimiento', e.target.value)} onBlur={handleGuardar} style={{ ...inputStyle, paddingRight: 42 }} />
+                                            <span style={{ position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 12, pointerEvents: 'none' }}>km/l</span>
+                                          </div>
                                         </Field>
                                         <Field label={`Precio ${activeUnit.tipoCombustible || 'Diésel'} / litro`} style={{ gridColumn: 'span 6' }}>
-                                          <MonetaryInput value={activeUnit.precioCombustibleLitro} onChange={e => updateUnit(activeUnit.id, 'precioCombustibleLitro', e.target.value)} onBlur={handleGuardar} symbol="₡" />
+                                          <MonetaryInput value={activeUnit.precioCombustibleLitro || 0} onChange={e => updateUnit(activeUnit.id, 'precioCombustibleLitro', e.target.value)} onBlur={handleGuardar} symbol={getCurrencyMeta(BASE_CURRENCY).symbol} />
                                         </Field>
                                         <Field label="Faltan por cubrir" style={{ gridColumn: 'span 6' }}>
-                                          <input value={remainingPax > 0 ? `${remainingPax} pax` : 'Completo'} readOnly style={{ ...inputStyle, color: remainingPax > 0 ? T.AMB : T.GRN, fontWeight: 700, cursor: 'default' }} />
+                                          <input value={`${remainingPax} pax`} readOnly style={{ ...inputStyle, color: remainingPax > 0 ? T.AMB : T.GRN, fontWeight: 700, cursor: 'default' }} />
                                         </Field>
                                       </div>
 
@@ -4366,25 +4350,25 @@ export default function CotizadorView({
                                             </label>
                                             {item.readOnly ? (
                                               <input
-                                                value={formatMoney(item.value || 0, BASE_CURRENCY)}
+                                                value={formatMoney(item.value || 0, displayCurrency, moneyExchange)}
                                                 readOnly
                                                 style={{ ...inputStyle, color: T.sub, cursor: 'default', textAlign: 'right', fontWeight: 700 }}
                                               />
                                             ) : (
                                               <MonetaryInput
-                                                value={activeUnit[item.field]}
+                                                value={activeUnit[item.field] || 0}
                                                 onChange={e => updateUnit(activeUnit.id, item.field, e.target.value)}
                                                 onBlur={handleGuardar}
-                                                symbol="₡"
+                                                symbol={getCurrencyMeta(BASE_CURRENCY).symbol}
                                                 inputStyle={{ textAlign: 'right', fontWeight: 700 }}
                                               />
                                             )}
                                           </div>
                                         ))}
                                         <div style={{ display: 'grid', gridTemplateColumns: '92px minmax(0,1fr)', gap: 10, alignItems: 'center', marginTop: 2 }}>
-                                          <div style={{ fontSize: 12, fontWeight: 700, color: T.mute, textAlign: 'right' }}>Total ₡</div>
+                                          <div style={{ fontSize: 12, fontWeight: 700, color: T.mute, textAlign: 'right' }}>Total</div>
                                           <input
-                                            value={formatMoney(unitSubtotal, BASE_CURRENCY)}
+                                            value={formatMoney(unitSubtotal, displayCurrency, moneyExchange)}
                                             readOnly
                                             style={{ ...inputStyle, color: T.AMB, cursor: 'default', textAlign: 'right', fontWeight: 800 }}
                                           />
@@ -4409,8 +4393,8 @@ export default function CotizadorView({
                   </label>
                   {params.chkDia && (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 12 }}>
-                      <Field label="Adicional colaborador" style={{ gridColumn: 'span 6' }}><MonetaryInput name="adicCol" value={params.adicCol} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                      <Field label="Adicional viaticos" style={{ gridColumn: 'span 6' }}><MonetaryInput name="adicViat" value={params.adicViat} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
+                      <Field label="Adicional colaborador" style={{ gridColumn: 'span 6' }}><MonetaryInput name="adicCol" value={params.adicCol || 0} onChange={pChange} onBlur={handleGuardar} symbol={getCurrencyMeta(BASE_CURRENCY).symbol} /></Field>
+                      <Field label="Adicional viaticos" style={{ gridColumn: 'span 6' }}><MonetaryInput name="adicViat" value={params.adicViat || 0} onChange={pChange} onBlur={handleGuardar} symbol={getCurrencyMeta(BASE_CURRENCY).symbol} /></Field>
                     </div>
                   )}
                 </div>
@@ -4425,10 +4409,10 @@ export default function CotizadorView({
                 actions={<div style={{ padding: '6px 10px', borderRadius: 999, background: T.ambDim, color: T.AMB, fontSize: 11, fontWeight: 800 }}>{formatMoney(resData.subtotalTransfer, displayCurrency, moneyExchange)}</div>}
               >
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
-                  <Field label="Tarifa diaria GAM" style={{ gridColumn: 'span 3' }}><MonetaryInput name="tarifaGAM" value={params.tarifaGAM} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                  <Field label="Dias GAM" style={{ gridColumn: 'span 3' }}><NumberInput name="diasGAM" value={smartVal(params.diasGAM)} onChange={pChange} onBlur={handleGuardar} /></Field>
-                  <Field label="Tarifa media" style={{ gridColumn: 'span 3' }}><MonetaryInput name="mediaTarifa" value={params.mediaTarifa} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                  <Field label="Dias sin movimiento" style={{ gridColumn: 'span 3' }}><NumberInput name="diasSM" value={smartVal(params.diasSM)} onChange={pChange} onBlur={handleGuardar} /></Field>
+                  <Field label="Tarifa diaria GAM" style={{ gridColumn: 'span 3' }}><MonetaryInput name="tarifaGAM" value={params.tarifaGAM || 0} onChange={pChange} onBlur={handleGuardar} symbol={getCurrencyMeta(BASE_CURRENCY).symbol} /></Field>
+                  <Field label="Dias GAM" style={{ gridColumn: 'span 3' }}><input type="number" name="diasGAM" value={params.diasGAM || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                  <Field label="Tarifa media" style={{ gridColumn: 'span 3' }}><MonetaryInput name="mediaTarifa" value={params.mediaTarifa || 0} onChange={pChange} onBlur={handleGuardar} symbol={getCurrencyMeta(BASE_CURRENCY).symbol} /></Field>
+                  <Field label="Dias sin movimiento" style={{ gridColumn: 'span 3' }}><input type="number" name="diasSM" value={params.diasSM || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: T.sub }}>Transfers configurados</div>
@@ -4461,14 +4445,14 @@ export default function CotizadorView({
                 actions={<div style={{ padding: '6px 10px', borderRadius: 999, background: T.ambDim, color: T.AMB, fontSize: 11, fontWeight: 800 }}>{formatMoney(resData.subtotalExtras, displayCurrency, moneyExchange)}</div>}
               >
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
-                  <Field label="Hospedaje por noche" style={{ gridColumn: 'span 3' }}><MonetaryInput name="hospedaje" value={params.hospedaje} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                  <Field label="Numero de noches" style={{ gridColumn: 'span 3' }}><input type="number" name="noches" value={smartVal(params.noches)} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
-                  <Field label="Personas con hospedaje" style={{ gridColumn: 'span 3' }}><input type="number" name="persHosp" value={smartVal(params.persHosp)} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
-                  <Field label="Hospedaje total manual" style={{ gridColumn: 'span 3' }}><MonetaryInput name="hospedajeTotalManual" value={params.hospedajeTotalManual} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
+                  <Field label="Hospedaje por noche" style={{ gridColumn: 'span 3' }}><MonetaryInput name="hospedaje" value={params.hospedaje || 0} onChange={pChange} onBlur={handleGuardar} symbol={getCurrencyMeta(BASE_CURRENCY).symbol} /></Field>
+                  <Field label="Numero de noches" style={{ gridColumn: 'span 3' }}><input type="number" name="noches" value={params.noches || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                  <Field label="Personas con hospedaje" style={{ gridColumn: 'span 3' }}><input type="number" name="persHosp" value={params.persHosp || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                  <Field label="Hospedaje total manual" style={{ gridColumn: 'span 3' }}><MonetaryInput name="hospedajeTotalManual" value={params.hospedajeTotalManual || 0} onChange={pChange} onBlur={handleGuardar} symbol={getCurrencyMeta(BASE_CURRENCY).symbol} /></Field>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 14 }}>
-                  <Field label="Viatico diario por persona" style={{ gridColumn: 'span 3' }}><MonetaryInput name="viatDiario" value={params.viatDiario} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                  <Field label="Personas con viaticos" style={{ gridColumn: 'span 3' }}><input type="number" name="persViat" value={smartVal(params.persViat)} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                  <Field label="Viatico diario por persona" style={{ gridColumn: 'span 3' }}><MonetaryInput name="viatDiario" value={params.viatDiario || 0} onChange={pChange} onBlur={handleGuardar} symbol={getCurrencyMeta(BASE_CURRENCY).symbol} /></Field>
+                  <Field label="Personas con viaticos" style={{ gridColumn: 'span 3' }}><input type="number" name="persViat" value={params.persViat || 0} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
                 </div>
               </AccordionSection>
 
