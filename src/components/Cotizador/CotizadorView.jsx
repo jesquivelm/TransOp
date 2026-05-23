@@ -43,7 +43,7 @@ const ESTADOS = [
 
 function getUnitPanelTabs(servicioTipo) {
   return servicioTipo === 'transfer'
-    ? [{ id: 'operacion', label: 'Operación' }, { id: 'transfer', label: 'Transfer' }]
+    ? [{ id: 'operacion', label: 'Operación' }]
     : [{ id: 'operacion', label: 'Operación' }, { id: 'itinerario', label: 'Itinerario' }];
 }
 
@@ -929,27 +929,32 @@ function convertCrcToDisplay(value, currency = BASE_CURRENCY, exchange = {}) {
 function formatMoney(value, currency = BASE_CURRENCY, exchange = {}) {
   const safeCurrency = getCurrencyMeta(currency).code;
   const amount = convertCrcToDisplay(value, safeCurrency, exchange);
-  try {
-    return new Intl.NumberFormat('es-CR', {
-      style: 'currency',
-      currency: safeCurrency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${getCurrencyMeta(safeCurrency).symbol}${roundMoney(amount).toFixed(2)}`;
-  }
+  return `${getCurrencyMeta(safeCurrency).symbol}${formatPlainNumber(amount)}`;
 }
 
 function fmtCRC(v) {
   return formatMoney(v, 'CRC');
 }
 
+function formatPlainNumber(value) {
+  const rounded = roundMoney(value);
+  const sign = rounded < 0 ? '-' : '';
+  const abs = Math.abs(rounded);
+  const fixed = Number.isInteger(abs) ? String(abs) : abs.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  const [integer, decimal] = fixed.split('.');
+  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `${sign}${grouped}${decimal ? `,${decimal}` : ''}`;
+}
+
 function smartVal(v) {
   return (v === 0 || v === '0' || v === null || v === undefined) ? '' : v;
 }
 
-function NumberInput({ suffix, style = {}, inputStyle: customInputStyle = {}, ...props }) {
+function NumberInput({ suffix, style = {}, inputStyle: customInputStyle = {}, onFocus, onBlur, ...props }) {
+  const [focused, setFocused] = useState(false);
+  const rawValue = smartVal(props.value);
+  const showOverlay = suffix && rawValue !== '' && !focused;
+  const textAlign = customInputStyle.textAlign || 'left';
   return (
     <div style={{ position: 'relative', ...style }}>
       <input
@@ -957,10 +962,18 @@ function NumberInput({ suffix, style = {}, inputStyle: customInputStyle = {}, ..
         step="0.01"
         min="0"
         {...props}
-        value={smartVal(props.value)}
-        style={{ ...inputStyle, paddingRight: suffix ? 42 : 11, ...customInputStyle }}
+        value={rawValue}
+        onFocus={event => {
+          setFocused(true);
+          onFocus?.(event);
+        }}
+        onBlur={event => {
+          setFocused(false);
+          onBlur?.(event);
+        }}
+        style={{ ...inputStyle, paddingRight: suffix ? 42 : 11, ...customInputStyle, color: showOverlay ? 'transparent' : (customInputStyle.color || inputStyle.color), caretColor: customInputStyle.color || inputStyle.color }}
       />
-      {suffix && (
+      {suffix && focused && (
         <span style={{
           position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)',
           color: T.mute, fontSize: 12, pointerEvents: 'none',
@@ -968,29 +981,110 @@ function NumberInput({ suffix, style = {}, inputStyle: customInputStyle = {}, ..
           {suffix}
         </span>
       )}
+      {showOverlay && (
+        <span style={{
+          position: 'absolute',
+          inset: 0,
+          padding: inputStyle.padding,
+          paddingRight: 11,
+          color: customInputStyle.color || inputStyle.color,
+          fontSize: customInputStyle.fontSize || inputStyle.fontSize,
+          fontWeight: customInputStyle.fontWeight || inputStyle.fontWeight || 400,
+          textAlign,
+          pointerEvents: 'none',
+          boxSizing: 'border-box',
+        }}>
+          {formatPlainNumber(rawValue)} {suffix}
+        </span>
+      )}
     </div>
   );
 }
 
-function MonetaryInput({ symbol = '₡', style = {}, inputStyle: customInputStyle = {}, ...props }) {
+function MonetaryInput({ symbol = '₡', style = {}, inputStyle: customInputStyle = {}, onFocus, onBlur, ...props }) {
+  const [focused, setFocused] = useState(false);
+  const rawValue = smartVal(props.value);
+  const showOverlay = rawValue !== '' && !focused;
+  const textAlign = customInputStyle.textAlign || 'left';
   return (
     <div style={{ position: 'relative', ...style }}>
-      <span
-        style={{
-          position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)',
-          color: T.mute, fontSize: 13, pointerEvents: 'none',
-        }}
-      >
-        {symbol}
-      </span>
+      {focused && (
+        <span
+          style={{
+            position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)',
+            color: T.mute, fontSize: 13, pointerEvents: 'none',
+          }}
+        >
+          {symbol}
+        </span>
+      )}
       <input
         type="number"
         step="0.01"
         min="0"
         {...props}
-        value={smartVal(props.value)}
-        style={{ ...inputStyle, paddingLeft: 28, ...customInputStyle }}
+        value={rawValue}
+        onFocus={event => {
+          setFocused(true);
+          onFocus?.(event);
+        }}
+        onBlur={event => {
+          setFocused(false);
+          onBlur?.(event);
+        }}
+        style={{ ...inputStyle, paddingLeft: 28, ...customInputStyle, color: showOverlay ? 'transparent' : (customInputStyle.color || inputStyle.color), caretColor: customInputStyle.color || inputStyle.color }}
       />
+      {showOverlay && (
+        <span
+          style={{
+            position: 'absolute',
+            inset: 0,
+            padding: inputStyle.padding,
+            paddingLeft: 11,
+            paddingRight: 11,
+            color: customInputStyle.color || inputStyle.color,
+            fontSize: customInputStyle.fontSize || inputStyle.fontSize,
+            fontWeight: customInputStyle.fontWeight || inputStyle.fontWeight || 400,
+            textAlign,
+            pointerEvents: 'none',
+            boxSizing: 'border-box',
+          }}
+        >
+          {symbol}{formatPlainNumber(rawValue)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ReadOnlyFormattedInput({ value, suffix = '', monetary = false, inputStyle: customInputStyle = {} }) {
+  const displayValue = monetary ? formatMoney(value || 0, BASE_CURRENCY) : `${formatPlainNumber(value || 0)}${suffix ? ` ${suffix}` : ''}`;
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        value=""
+        readOnly
+        style={{
+          ...inputStyle,
+          ...customInputStyle,
+          color: 'transparent',
+          caretColor: 'transparent',
+          cursor: 'default',
+        }}
+      />
+      <span style={{
+        position: 'absolute',
+        inset: 0,
+        padding: inputStyle.padding,
+        color: customInputStyle.color || inputStyle.color,
+        fontSize: customInputStyle.fontSize || inputStyle.fontSize,
+        fontWeight: customInputStyle.fontWeight || inputStyle.fontWeight || 400,
+        textAlign: customInputStyle.textAlign || 'left',
+        pointerEvents: 'none',
+        boxSizing: 'border-box',
+      }}>
+        {displayValue}
+      </span>
     </div>
   );
 }
@@ -4187,15 +4281,15 @@ const updateItineraryRow = (rowId, field, value) => {
                       })}
                     </div>
                   </div>
-                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <div style={{ gridColumn: 'span 3', display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <Field label="PAX total">
                       <NumberInput name="sPax" value={socio.sPax} onChange={sChange} onBlur={handleGuardar} min="1" step="1" />
                     </Field>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: remainingPax > 0 ? T.AMB : T.GRN, paddingLeft: 2 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: remainingPax > 0 ? T.AMB : T.GRN, paddingLeft: 2, whiteSpace: 'nowrap' }}>
                       Falta por cubrir: {remainingPax > 0 ? `${remainingPax} pax` : 'Completo'}
                     </div>
                   </div>
-                  <Field label="Descripcion" style={{ gridColumn: 'span 10' }}>
+                  <Field label="Descripcion" style={{ gridColumn: 'span 9' }}>
                     <div style={{ position: 'relative' }}>
                       <textarea
                         name="cfDescripcion"
@@ -4302,6 +4396,8 @@ const updateItineraryRow = (rowId, field, value) => {
                         + (activeUnit.cobrarCarga !== false ? Number(activeUnit.carga || 0) : 0)
                         + (activeUnit.cobrarFerry !== false ? Number(activeUnit.ferry || 0) : 0);
                       const itinerarySummary = summarizeItineraryRows(activeUnit.itineraryRows || []) || (activeUnit.itinerary ? summarizeItinerary(activeUnit.itinerary) : null);
+                      const unitPanelTabs = getUnitPanelTabs(socio.sTipoServicio);
+                      const resolvedUnitTab = unitPanelTabs.some(tab => tab.id === activeUnitTab) ? activeUnitTab : 'operacion';
 
                       return (
                         <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 14 }}>
@@ -4334,8 +4430,8 @@ const updateItineraryRow = (rowId, field, value) => {
                                   </div>
                                 </div>
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: 4, borderRadius: 999, background: T.card2, border: `1px solid ${T.bdr}` }}>
-                                  {getUnitPanelTabs(socio.sTipoServicio).map(tab => {
-                                    const isCurrentTab = activeUnitTab === tab.id;
+                                  {unitPanelTabs.map(tab => {
+                                    const isCurrentTab = resolvedUnitTab === tab.id;
                                     return (
                                       <button
                                         key={tab.id}
@@ -4361,7 +4457,7 @@ const updateItineraryRow = (rowId, field, value) => {
                             </div>
 
                             <div style={{ gridColumn: '1 / -1', minWidth: 0 }}>
-                              {activeUnitTab === 'itinerario' ? (
+                              {resolvedUnitTab === 'itinerario' ? (
                                 <ItineraryTabContent
                                   unit={activeUnit}
                                   googleMapsApiKey={googleMapsApiKey}
@@ -4383,20 +4479,6 @@ const updateItineraryRow = (rowId, field, value) => {
                                   showRouteDesigner={showRouteDesigner && routeDesignerUnitId === activeUnit.id}
                                   esViaje={socio.sTipoServicio === 'viaje'}
                                 />
-                              ) : activeUnitTab === 'transfer' ? (
-                                <div style={{ padding: 12, borderRadius: 12, background: T.card2, border: `1px solid ${T.bdr}`, fontSize: 13, color: T.sub }}>
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: T.sub }}>Transfers configurados</div>
-                                    {(params.selectedTransfers || []).length > 0 ? (params.selectedTransfers || []).map(item => (
-                                      <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 8, background: T.card, border: `1px solid ${T.bdr}` }}>
-                                        <span style={{ fontSize: 12 }}>{item.descripcion}</span>
-                                        <span style={{ color: T.AMB, fontWeight: 700 }}>{fmtCRC(item.costo)}</span>
-                                      </div>
-                                    )) : (
-                                      <div style={{ color: T.mute, fontSize: 12 }}>No hay transfers seleccionados. Configura desde la secci&oacute;n de Tarifa Transfer.</div>
-                                    )}
-                                  </div>
-                                </div>
                               ) : (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                                   <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.15fr) minmax(240px,.85fr)', gap: 14, alignItems: 'start' }}>
@@ -4412,16 +4494,16 @@ const updateItineraryRow = (rowId, field, value) => {
 
                                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 10 }}>
                                         <Field label="PAX unidad" style={{ gridColumn: 'span 4' }}>
-                                          <input value={smartVal(unitCapacity)} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} />
+                                          <ReadOnlyFormattedInput value={unitCapacity} suffix="pax" inputStyle={{ color: T.txt }} />
                                         </Field>
                                         <Field label="Kilómetros" style={{ gridColumn: 'span 4' }}>
-                                          <NumberInput suffix="km" value={activeUnit.km} onChange={e => updateUnit(activeUnit.id, 'km', e.target.value)} onBlur={handleGuardar} min="0" />
+                                          <NumberInput suffix="km" value={activeUnit.km} onChange={e => updateUnit(activeUnit.id, 'km', e.target.value)} onBlur={handleGuardar} min="0" inputStyle={{ color: T.txt }} />
                                         </Field>
                                         <Field label="Rendimiento" style={{ gridColumn: 'span 4' }}>
-                                          <NumberInput suffix="km/l" step="0.01" min="0" value={activeUnit.rendimiento} onChange={e => updateUnit(activeUnit.id, 'rendimiento', e.target.value)} onBlur={handleGuardar} />
+                                          <NumberInput suffix="km/l" step="0.01" min="0" value={activeUnit.rendimiento} onChange={e => updateUnit(activeUnit.id, 'rendimiento', e.target.value)} onBlur={handleGuardar} inputStyle={{ color: T.txt }} />
                                         </Field>
                                         <Field label={`Precio ${activeUnit.tipoCombustible || 'Diésel'} / litro`} style={{ gridColumn: 'span 6' }}>
-                                          <MonetaryInput value={activeUnit.precioCombustibleLitro} onChange={e => updateUnit(activeUnit.id, 'precioCombustibleLitro', e.target.value)} onBlur={handleGuardar} symbol="₡" />
+                                          <MonetaryInput value={activeUnit.precioCombustibleLitro} onChange={e => updateUnit(activeUnit.id, 'precioCombustibleLitro', e.target.value)} onBlur={handleGuardar} symbol="₡" inputStyle={{ color: T.txt }} />
                                         </Field>
                                       </div>
 
@@ -4502,24 +4584,20 @@ const updateItineraryRow = (rowId, field, value) => {
                                               <span>{item.label}</span>
                                             </label>
                                             {item.readOnly ? (
-                                              <input
-                                                value={formatMoney(item.value || 0, BASE_CURRENCY)}
-                                                readOnly
-                                                style={{ ...inputStyle, color: T.sub, cursor: 'default', textAlign: 'right', fontWeight: 700 }}
-                                              />
+                                              <ReadOnlyFormattedInput value={item.value || 0} monetary inputStyle={{ color: T.txt, textAlign: 'right' }} />
                                             ) : (
                                               <MonetaryInput
                                                 value={activeUnit[item.field]}
                                                 onChange={e => updateUnit(activeUnit.id, item.field, e.target.value)}
                                                 onBlur={handleGuardar}
                                                 symbol="₡"
-                                                inputStyle={{ textAlign: 'right', fontWeight: 700 }}
+                                                inputStyle={{ color: T.txt, textAlign: 'right' }}
                                               />
                                             )}
                                           </div>
                                         ))}
                                         <div style={{ display: 'grid', gridTemplateColumns: '92px minmax(0,1fr)', gap: 10, alignItems: 'center', marginTop: 2 }}>
-                                          <div style={{ fontSize: 12, fontWeight: 700, color: T.mute, textAlign: 'right' }}>Total ₡</div>
+                                          <div style={{ fontSize: 12, fontWeight: 700, color: T.mute, textAlign: 'right' }}>Total</div>
                                           <input
                                             value={formatMoney(unitSubtotal, BASE_CURRENCY)}
                                             readOnly
@@ -4538,7 +4616,7 @@ const updateItineraryRow = (rowId, field, value) => {
                     })()}
                   </div>
 
-                {socio.sTipoServicio !== 'transfer' && (
+                {(
                   <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${T.bdr}` }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 12 }}>Tarifa Transfer</div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14 }}>
