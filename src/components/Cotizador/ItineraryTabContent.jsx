@@ -93,8 +93,25 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
   const [mapsReady, setMapsReady] = useState(false);
   const [calculating, setCalculating] = useState(false);
   const inputRefs = useRef({});
+  const initializedRef = useRef(false);
 
   const days = unit.itineraryDays || [];
+
+  useEffect(() => {
+    if (initializedRef.current) return;
+    if (days.length > 0) { initializedRef.current = true; return; }
+    initializedRef.current = true;
+    const today = new Date().toISOString().split('T')[0];
+    onAddDay({
+      id: `day-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      fecha: today,
+      open: true,
+      rows: [
+        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}1`, tipo: 'salida', lugar: '', hora: '07:00', km: 0, coords: null },
+        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}2`, tipo: 'regreso', lugar: '', hora: '17:00', km: 0, coords: null },
+      ],
+    });
+  }, []);
 
   const kmTotal = useMemo(() => totalKm(days), [days]);
   const paradas = useMemo(() => countStops(days), [days]);
@@ -291,9 +308,11 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
       )}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button type="button" onClick={() => { const newDay = createDefaultDay(days[days.length - 1]); onAddDay(newDay); }} style={{ padding: '5px 12px', borderRadius: 8, border: `0.5px solid #5DCAA5`, background: 'transparent', color: '#085041', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Plus size={13} /> Agregar d&iacute;a
-        </button>
+        {!esViaje && (
+          <button type="button" onClick={() => onAddDay(createDefaultDay(days[days.length - 1]))} style={{ padding: '5px 12px', borderRadius: 8, border: `0.5px solid #5DCAA5`, background: 'transparent', color: '#085041', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Plus size={13} /> Agregar d&iacute;a
+          </button>
+        )}
         {!esViaje && days.length > 1 && (
           <button type="button" onClick={onRemoveLastDay} style={{ padding: '5px 12px', borderRadius: 8, border: `0.5px solid #F0997B`, background: 'transparent', color: '#993C1D', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
             <Trash2 size={13} /> Quitar &uacute;ltimo d&iacute;a

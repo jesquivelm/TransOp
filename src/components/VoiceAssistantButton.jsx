@@ -45,16 +45,13 @@ export default function VoiceAssistantButton({ token, onInterpretation, sidebar 
   );
 
   useEffect(() => {
-    if (!open) return undefined;
-    const handleClickOutside = (event) => {
-      if (sidebar && popoverRef.current && !popoverRef.current.contains(event.target)) {
-        const btn = document.querySelector('[data-va-button]');
-        if (btn && btn.contains(event.target)) return;
-        closePopover();
-      }
+    if (!sidebar) return;
+    if (!open) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') closePopover();
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [open, sidebar]);
 
   useEffect(() => {
@@ -246,7 +243,7 @@ export default function VoiceAssistantButton({ token, onInterpretation, sidebar 
             borderRadius: 18,
             boxShadow,
             overflow: 'hidden',
-            zIndex: 9999,
+            zIndex: 999999,
           }}
         >
           <div

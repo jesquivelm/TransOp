@@ -1,9 +1,0 @@
-{
-  "host": "localhost",
-  "port": 5432,
-  "database": "db_transop",
-  "user": "postgres",
-  "password": "Calg.1984",
-  "ssl": false,
-  "connectionString": "postgres://postgres:Calg.1984@localhost:5432/db_transop"
-}

@@ -81,16 +81,10 @@ function getEnvConfig() {
     return normalizeConfig({ connectionString: process.env.DATABASE_URL });
 }
 
-// ─────────────────────────────────────────────────────────────
-// FIX: DATABASE_URL siempre tiene prioridad si está definida.
-// Esto resuelve el problema en Render/producción donde el archivo
-// local config/db-connection.json apuntaba a localhost y ganaba
-// sobre la variable de entorno.
-// ─────────────────────────────────────────────────────────────
 function getEffectiveConfig() {
-    const envConfig = getEnvConfig();
-    if (envConfig) return envConfig;           // DATABASE_URL gana siempre
-    return readStoredConfig();                 // fallback: archivo local
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (isProduction) return getEnvConfig() || readStoredConfig();
+    return readStoredConfig() || getEnvConfig();
 }
 
 function createPool(config) {
@@ -98,14 +92,11 @@ function createPool(config) {
         throw new Error('No hay configuración de base de datos. Configure la conexión desde Ajustes o defina DATABASE_URL.');
     }
 
-    const needsSsl = config.ssl
-        || process.env.NODE_ENV === 'production'
-        || config.connectionString.includes('render.com')
-        || config.connectionString.includes('aivencloud.com');
+    const isProduction = process.env.NODE_ENV === 'production' || config.connectionString.includes('render.com');
 
     return new Pool({
         connectionString: config.connectionString,
-        ssl: needsSsl ? { rejectUnauthorized: false } : false,
+        ssl: config.ssl || isProduction ? { rejectUnauthorized: false } : false,
     });
 }
 
@@ -119,19 +110,22 @@ async function ensurePool() {
 }
 
 export function getDatabaseConfig() {
-    const envConfig = getEnvConfig();
+    const isProduction = process.env.NODE_ENV === 'production';
     const stored = readStoredConfig();
+    const envConfig = getEnvConfig();
 
     let effective;
     let source;
 
-    // DATABASE_URL tiene prioridad absoluta
-    if (envConfig) {
+    if (isProduction && envConfig) {
         effective = envConfig;
         source = 'env';
     } else if (stored) {
         effective = stored;
         source = 'archivo-local';
+    } else if (envConfig) {
+        effective = envConfig;
+        source = 'env';
     } else {
         effective = {
             host: 'localhost',

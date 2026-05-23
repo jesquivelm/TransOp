@@ -3386,6 +3386,23 @@ function Sidebar({ active, onOpenView, user, onLogout, onOpenUserMenu, theme, on
       </nav>
 
       <div style={{ padding:'16px', borderTop:`1px solid ${T.bdr}`, background:T.card2 }}>
+        <div style={{ display:'flex', gap:8, marginBottom:12, justifyContent:'center' }}>
+          <button
+            onClick={onToggleTheme}
+            style={{
+              width: 36, height: 36, borderRadius: 10,
+              border: `1px solid ${T.AMB}44`,
+              background: `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
+              color: T.AMB, cursor:'pointer',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              flex:1, maxWidth: 48,
+            }}
+            title={theme === 'dark' ? 'Tema claro' : 'Tema oscuro'}
+          >
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          <VoiceAssistantButton token={token} onInterpretation={onVoiceInterpretation} sidebar />
+        </div>
         <button
           type="button"
           onClick={onOpenUserMenu}
@@ -3403,23 +3420,6 @@ function Sidebar({ active, onOpenView, user, onLogout, onOpenUserMenu, theme, on
             <div style={{ fontSize:10, color:T.mute }}>{user?.rol === 'admin' ? 'Administrador' : 'Operador'}</div>
           </div>
         </button>
-        <div style={{ display:'flex', gap:8, marginBottom:10, justifyContent:'center' }}>
-          <button
-            onClick={onToggleTheme}
-            style={{
-              width: 36, height: 36, borderRadius: 10,
-              border: `1px solid ${T.AMB}44`,
-              background: `linear-gradient(135deg, ${T.ambDim}, ${T.card2})`,
-              color: T.AMB, cursor:'pointer',
-              display:'flex', alignItems:'center', justifyContent:'center',
-              flex:1, maxWidth: 48,
-            }}
-            title={theme === 'dark' ? 'Tema claro' : 'Tema oscuro'}
-          >
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-          <VoiceAssistantButton token={token} onInterpretation={onVoiceInterpretation} sidebar />
-        </div>
         <button onClick={onLogout}
           style={{ width:'100%', padding:'6px', background:'rgba(239,68,68,0.1)', color:T.RED,
             border:'none', borderRadius:6, fontSize:11, fontWeight:600, cursor:'pointer' }}>

@@ -1953,6 +1953,15 @@ export default function CotizadorView({
   const [routeDesignerViewportHeight, setRouteDesignerViewportHeight] = useState(null);
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState('');
 
+  const remainingPax = useMemo(() => {
+    const requiredPax = Number(socio?.sPax || 0);
+    const totalAssignedCapacity = units.reduce((sum, unit) => {
+      const v = (vehiculos || []).find(item => item.id === unit.vehiculoId);
+      return sum + (Number(v?.cap || 0) || 0);
+    }, 0);
+    return Math.max(requiredPax - totalAssignedCapacity, 0);
+  }, [socio?.sPax, units, vehiculos]);
+
   const autosaveTimer = useRef(null);
   const lastSavedSignature = useRef('');
   const savingRef = useRef(false);
@@ -4143,7 +4152,7 @@ const updateItineraryRow = (rowId, field, value) => {
               >
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
                   <div style={{ gridColumn: 'span 12', marginBottom: 4 }}>
-                    <div style={{ display: 'inline-flex', borderRadius: 12, background: '#1a1a2e', border: '1px solid #2a2a4a', padding: 3 }}>
+                    <div style={{ display: 'flex', borderRadius: 12, background: T.card2, border: `1px solid ${T.bdr}`, padding: 3, boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.12)' }}>
                       {[
                         { value: 'viaje', label: 'Viaje de un d\u00eda' },
                         { value: 'transfer', label: 'Transfer' },
@@ -4159,7 +4168,8 @@ const updateItineraryRow = (rowId, field, value) => {
                               setAutoSaveEnabled(true);
                             }}
                             style={{
-                              padding: '8px 20px',
+                              flex: 1,
+                              padding: '10px 20px',
                               borderRadius: 10,
                               border: 'none',
                               background: active ? '#f97316' : 'transparent',
@@ -4168,6 +4178,7 @@ const updateItineraryRow = (rowId, field, value) => {
                               fontWeight: active ? 800 : 600,
                               cursor: 'pointer',
                               transition: 'all 0.15s',
+                              boxShadow: active ? '0 2px 8px rgba(249,115,22,0.3)' : 'none',
                             }}
                           >
                             {opt.label}
@@ -4176,9 +4187,14 @@ const updateItineraryRow = (rowId, field, value) => {
                       })}
                     </div>
                   </div>
-                  <Field label="PAX total" style={{ gridColumn: 'span 2' }}>
-                    <NumberInput name="sPax" value={socio.sPax} onChange={sChange} onBlur={handleGuardar} min="1" step="1" />
-                  </Field>
+                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <Field label="PAX total">
+                      <NumberInput name="sPax" value={socio.sPax} onChange={sChange} onBlur={handleGuardar} min="1" step="1" />
+                    </Field>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: remainingPax > 0 ? T.AMB : T.GRN, paddingLeft: 2 }}>
+                      Falta por cubrir: {remainingPax > 0 ? `${remainingPax} pax` : 'Completo'}
+                    </div>
+                  </div>
                   <Field label="Descripcion" style={{ gridColumn: 'span 10' }}>
                     <div style={{ position: 'relative' }}>
                       <textarea
@@ -4256,17 +4272,7 @@ const updateItineraryRow = (rowId, field, value) => {
                       </button>
                     </div>
 
-                    {(() => {
-                      const requiredPax = Number(socio.sPax || 0);
-                      const totalAssignedCapacity = units.reduce((sum, unit) => {
-                        const currentVehicle = vehiculos.find(item => item.id === unit.vehiculoId);
-                        return sum + (Number(currentVehicle?.cap || 0) || 0);
-                      }, 0);
-                      const remainingPax = Math.max(requiredPax - totalAssignedCapacity, 0);
-
-                      return (
-                        <>
-                      {activeUnit && (() => {
+                    {activeUnit && (() => {
                       const vehiculo = vehiculos.find(item => item.id === activeUnit.vehiculoId);
                       const activeUnitFuelCostPerKm = calcFuelCostPerKm(activeUnit.precioCombustibleLitro, activeUnit.rendimiento);
                       const activeUnitFuelTotal = roundMoney((Number(activeUnit.km || 0) || 0) * activeUnitFuelCostPerKm);
@@ -4363,7 +4369,7 @@ const updateItineraryRow = (rowId, field, value) => {
                                   onUpdateStop={(dayId, stopId, field, value) => updateItineraryStop(dayId, stopId, field, value)}
                                   onAddStop={(dayId) => addStop(dayId)}
                                   onRemoveStop={(dayId, stopId) => removeStop(dayId, stopId)}
-                                  onAddDay={() => addDay()}
+                                  onAddDay={addDay}
                                   onRemoveLastDay={() => removeLastDay()}
                                   onClearItinerary={clearActiveUnitItinerary}
                                   onOpenRouteDesigner={() => {
@@ -4530,83 +4536,57 @@ const updateItineraryRow = (rowId, field, value) => {
                         </div>
                       );
                     })()}
-                          <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
-                            <span style={{ fontSize: 12, color: T.sub }}>PAX total: <strong style={{ color: T.txt }}>{requiredPax}</strong></span>
-                            <span style={{ fontSize: 12, color: T.sub }}>
-                              Capacidad asignada: <strong style={{ color: T.txt }}>{totalAssignedCapacity}</strong>
-                            </span>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: remainingPax > 0 ? T.AMB : T.GRN }}>
-                              Faltan por cubrir: {remainingPax > 0 ? `${remainingPax} pax` : 'Completo'}
-                            </span>
-                          </div>
-                        </>
-                      );
-                    })()}
                   </div>
-                </div>
 
-
-              </AccordionSection>
-
-              {socio.sTipoServicio !== 'transfer' && (
-              <AccordionSection
-                id="transfer"
-                label="Tarifa Transfer"
-                summary={transferResumen}
-                open={openSection === 'transfer'}
-                onToggle={toggleSection}
-                actions={<div style={{ padding: '6px 10px', borderRadius: 999, background: T.ambDim, color: T.AMB, fontSize: 11, fontWeight: 800 }}>{formatMoney(resData.subtotalTransfer, displayCurrency, moneyExchange)}</div>}
-              >
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
-                  <Field label="Tarifa diaria GAM" style={{ gridColumn: 'span 3' }}><MonetaryInput name="tarifaGAM" value={params.tarifaGAM} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                  <Field label="Dias GAM" style={{ gridColumn: 'span 3' }}><NumberInput name="diasGAM" value={smartVal(params.diasGAM)} onChange={pChange} onBlur={handleGuardar} /></Field>
-                  <Field label="Tarifa media" style={{ gridColumn: 'span 3' }}><MonetaryInput name="mediaTarifa" value={params.mediaTarifa} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                  <Field label="Dias sin movimiento" style={{ gridColumn: 'span 3' }}><NumberInput name="diasSM" value={smartVal(params.diasSM)} onChange={pChange} onBlur={handleGuardar} /></Field>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: T.sub }}>Transfers configurados</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 10 }}>
-                    {transferCatalog.filter(item => item.activo !== false).map(item => {
-                      const checked = (params.selectedTransfers || []).some(selected => selected.id === item.id);
-                      return (
-                        <label key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, color: T.sub, fontSize: 13, padding: '10px 12px', borderRadius: 10, border: `1px solid ${checked ? `${T.AMB}44` : T.bdr}`, background: checked ? T.ambDim : T.card }}>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <input type="checkbox" checked={checked} onChange={() => toggleTransfer(item)} />
-                            <span>{item.descripcion}</span>
-                          </span>
-                          <span style={{ color: T.txt, fontWeight: 700 }}>{fmtCRC(item.costo)}</span>
-                        </label>
-                      );
-                    })}
+                {socio.sTipoServicio !== 'transfer' && (
+                  <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${T.bdr}` }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 12 }}>Tarifa Transfer</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14 }}>
+                      <Field label="Tarifa diaria GAM" style={{ gridColumn: 'span 3' }}><MonetaryInput name="tarifaGAM" value={params.tarifaGAM} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
+                      <Field label="Dias GAM" style={{ gridColumn: 'span 3' }}><NumberInput name="diasGAM" value={smartVal(params.diasGAM)} onChange={pChange} onBlur={handleGuardar} /></Field>
+                      <Field label="Tarifa media" style={{ gridColumn: 'span 3' }}><MonetaryInput name="mediaTarifa" value={params.mediaTarifa} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
+                      <Field label="Dias sin movimiento" style={{ gridColumn: 'span 3' }}><NumberInput name="diasSM" value={smartVal(params.diasSM)} onChange={pChange} onBlur={handleGuardar} /></Field>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: T.sub }}>Transfers configurados</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 10 }}>
+                        {transferCatalog.filter(item => item.activo !== false).map(item => {
+                          const checked = (params.selectedTransfers || []).some(selected => selected.id === item.id);
+                          return (
+                            <label key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, color: T.sub, fontSize: 13, padding: '10px 12px', borderRadius: 10, border: `1px solid ${checked ? `${T.AMB}44` : T.bdr}`, background: checked ? T.ambDim : T.card }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <input type="checkbox" checked={checked} onChange={() => toggleTransfer(item)} />
+                                <span>{item.descripcion}</span>
+                              </span>
+                              <span style={{ color: T.txt, fontWeight: 700 }}>{fmtCRC(item.costo)}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {transferCatalog.filter(item => item.activo !== false).length === 0 && (
+                        <div style={{ fontSize: 12, color: T.mute }}>No hay transfers activos configurados en Ajustes {'>'} Cotizaciones.</div>
+                      )}
+                    </div>
                   </div>
-                  {transferCatalog.filter(item => item.activo !== false).length === 0 && (
-                    <div style={{ fontSize: 12, color: T.mute }}>No hay transfers activos configurados en Ajustes {'>'} Cotizaciones.</div>
-                  )}
-                </div>
-              </AccordionSection>
-              )}
+                )}
 
-              {socio.sTipoServicio === 'gira' && (
-              <AccordionSection
-                id="extras"
-                label="Hospedaje y Viáticos"
-                summary={extrasResumen}
-                open={openSection === 'extras'}
-                onToggle={toggleSection}
-                actions={<div style={{ padding: '6px 10px', borderRadius: 999, background: T.ambDim, color: T.AMB, fontSize: 11, fontWeight: 800 }}>{formatMoney(resData.subtotalExtras, displayCurrency, moneyExchange)}</div>}
-              >
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
-                  <Field label="Hospedaje por noche" style={{ gridColumn: 'span 3' }}><MonetaryInput name="hospedaje" value={params.hospedaje} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                  <Field label="Numero de noches" style={{ gridColumn: 'span 3' }}><input type="number" name="noches" value={smartVal(params.noches)} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
-                  <Field label="Personas con hospedaje" style={{ gridColumn: 'span 3' }}><input type="number" name="persHosp" value={smartVal(params.persHosp)} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
-                  <Field label="Hospedaje total manual" style={{ gridColumn: 'span 3' }}><MonetaryInput name="hospedajeTotalManual" value={params.hospedajeTotalManual} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 14 }}>
-                  <Field label="Viatico diario por persona" style={{ gridColumn: 'span 3' }}><MonetaryInput name="viatDiario" value={params.viatDiario} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                  <Field label="Personas con viaticos" style={{ gridColumn: 'span 3' }}><input type="number" name="persViat" value={smartVal(params.persViat)} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                {socio.sTipoServicio === 'gira' && (
+                  <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${T.bdr}` }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 12 }}>Hospedaje y Vi\u00e1ticos</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14 }}>
+                      <Field label="Hospedaje por noche" style={{ gridColumn: 'span 3' }}><MonetaryInput name="hospedaje" value={params.hospedaje} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
+                      <Field label="Numero de noches" style={{ gridColumn: 'span 3' }}><input type="number" name="noches" value={smartVal(params.noches)} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                      <Field label="Personas con hospedaje" style={{ gridColumn: 'span 3' }}><input type="number" name="persHosp" value={smartVal(params.persHosp)} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                      <Field label="Hospedaje total manual" style={{ gridColumn: 'span 3' }}><MonetaryInput name="hospedajeTotalManual" value={params.hospedajeTotalManual} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 14 }}>
+                      <Field label="Viatico diario por persona" style={{ gridColumn: 'span 3' }}><MonetaryInput name="viatDiario" value={params.viatDiario} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
+                      <Field label="Personas con viaticos" style={{ gridColumn: 'span 3' }}><input type="number" name="persViat" value={smartVal(params.persViat)} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
+                    </div>
+                  </div>
+                )}
                 </div>
               </AccordionSection>
-              )}
 
               <AccordionSection id="comentarios" label="Comentarios" summary={commentsResumen} open={openSection === 'comentarios'} onToggle={toggleSection}>
                 <div style={{ marginTop: 16 }}>

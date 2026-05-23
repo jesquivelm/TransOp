@@ -1706,14 +1706,19 @@ app.post('/api/system/db-config/test', authenticateToken, requireAdmin, async (r
 
 app.post('/api/system/db-config', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const result = await testConnection(req.body);
         const config = await saveDatabaseConfig(req.body);
-        await ensureDatabaseCompatibility();
+        let test;
+        try {
+            test = await testConnection(req.body);
+            await ensureDatabaseCompatibility().catch(() => {});
+        } catch (testError) {
+            test = { ok: false, error: formatDbError(testError) };
+        }
         res.json({
             success: true,
             config,
             test: {
-                ...result,
+                ...test,
                 debug: {
                     category: 'database-save',
                     attemptedConfig: maskDbConfig(config),

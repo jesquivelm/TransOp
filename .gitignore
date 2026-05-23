@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Database config (user-modified via UI, don't track in git)
+config/db-connection.json
