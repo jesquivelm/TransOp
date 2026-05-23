@@ -63,9 +63,16 @@ function calcDistancesBetweenPoints(maps, points) {
   });
 }
 
+function stopRouteValue(stop = {}) {
+  const lat = Number(stop.coords?.lat);
+  const lng = Number(stop.coords?.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+  return String(stop.lugar || '').trim();
+}
+
 function Metric({ label, value, color }) {
   return (
-    <div style={{ background: T.card2, borderRadius: 10, padding: '8px 12px' }}>
+    <div style={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, padding: '8px 12px' }}>
       <div style={{ fontSize: 10, fontWeight: 700, color: T.mute, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.3 }}>{label}</div>
       <div style={{ fontSize: 16, fontWeight: 700, color: color || T.txt }}>{value}</div>
     </div>
@@ -78,9 +85,9 @@ function Pill({ tipo }) {
   return (
     <span style={{
       display: 'inline-block', borderRadius: 20, padding: '1px 7px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
-      background: isSalida ? '#9FE1CB' : isRegreso ? '#F5C4B3' : T.card3,
-      color: isSalida ? '#085041' : isRegreso ? '#4A1B0C' : T.sub,
-      border: isSalida || isRegreso ? 'none' : `0.5px solid ${T.bdr2}`,
+      background: T.card2,
+      color: isSalida ? T.GRN : isRegreso ? T.AMB : T.sub,
+      border: `1px solid ${isSalida ? `${T.GRN}55` : isRegreso ? `${T.AMB}55` : T.bdr2}`,
     }}>
       {isSalida ? 'Salida' : isRegreso ? 'Regreso' : 'Parada'}
     </span>
@@ -133,16 +140,18 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
     try {
       const autocomplete = new mapsApiRef.current.places.Autocomplete(inputNode, {
         componentRestrictions: { country: 'cr' },
+        fields: ['formatted_address', 'geometry', 'name'],
       });
       autocomplete.addListener('place_changed', () => {
         const place = autocomplete.getPlace();
         if (place?.geometry?.location) {
           const lat = place.geometry.location.lat();
           const lng = place.geometry.location.lng();
-          const coords = { lat: lat.toFixed(6), lng: lng.toFixed(6) };
+          const coords = { lat: Number(lat.toFixed(6)), lng: Number(lng.toFixed(6)) };
+          const label = place.formatted_address || place.name || inputNode.value;
           onUpdateStop(dayId, stopId, 'coords', coords);
-          onUpdateStop(dayId, stopId, 'lugar', inputNode.value);
-          recalcDayDistances(dayId);
+          onUpdateStop(dayId, stopId, 'lugar', label);
+          recalcDayDistances(dayId, { stopId, coords, lugar: label });
         }
       });
       inputRefs.current[key] = { input: inputNode, autocomplete };
@@ -151,12 +160,16 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
     }
   }, [onUpdateStop]);
 
-  const recalcDayDistances = useCallback(async (dayId) => {
+  const recalcDayDistances = useCallback(async (dayId, overrideStop = null) => {
     const day = days.find(d => d.id === dayId);
     if (!day || !mapsApiRef.current) return;
-    const rows = day.rows || [];
+    const rows = (day.rows || []).map(row => (
+      overrideStop && row.id === overrideStop.stopId
+        ? { ...row, coords: overrideStop.coords, lugar: overrideStop.lugar }
+        : row
+    ));
     if (rows.length < 2) return;
-    const places = rows.map(r => r.lugar).filter(Boolean);
+    const places = rows.map(stopRouteValue).filter(Boolean);
     if (places.length < 2) return;
     setCalculating(true);
     const kms = await calcDistancesBetweenPoints(mapsApiRef.current, places);
@@ -185,7 +198,7 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
         <Metric label="D&iacute;as" value={days.length} />
-        <Metric label="Paradas totales" value={paradas} color="#085041" />
+        <Metric label="Paradas totales" value={paradas} color={T.GRN} />
         <Metric label="Km totales" value={`${kmTotal} km`} />
         <Metric label="Km promedio/d&iacute;a" value={`${promKm} km`} />
       </div>
@@ -198,12 +211,12 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
           const paradasCount = (day.rows || []).filter(r => r.tipo === 'inter').length;
 
           return (
-            <div key={day.id} style={{ border: `0.5px solid ${T.bdr2}`, borderRadius: 12, overflow: 'hidden' }}>
+            <div key={day.id} style={{ border: `1px solid ${T.bdr}`, borderRadius: 12, overflow: 'hidden', background: T.card }}>
               <div
                 onClick={() => onUpdateDay(day.id, 'open', !day.open)}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', background: T.card2, cursor: 'pointer', userSelect: 'none' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', background: T.card2, cursor: 'pointer', userSelect: 'none', borderBottom: day.open ? `1px solid ${T.bdr}` : 'none' }}
               >
-                <div style={{ width: 26, height: 26, borderRadius: '50%', background: '#E1F5EE', color: '#085041', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{di + 1}</div>
+                <div style={{ width: 26, height: 26, borderRadius: '50%', background: T.grnDim, color: T.GRN, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{di + 1}</div>
                 <input
                   type="date"
                   value={day.fecha || ''}
@@ -211,16 +224,16 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
                   onChange={e => onUpdateDay(day.id, 'fecha', e.target.value)}
                   style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, color: T.txt, fontFamily: 'inherit', width: 130 }}
                 />
-                <div style={{ display: 'flex', gap: 14, marginLeft: 'auto', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 14, marginLeft: 'auto', alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
                   <span style={{ fontSize: 11, color: T.mute, whiteSpace: 'nowrap' }}><span style={{ fontWeight: 600, color: T.txt }}>{dkm}</span> km</span>
                   <span style={{ fontSize: 11, color: T.mute, whiteSpace: 'nowrap' }}><span style={{ fontWeight: 600, color: T.txt }}>{paradasCount}</span> parada{paradasCount !== 1 ? 's' : ''}</span>
-                  <span style={{ fontSize: 10, color: T.sub }}>{salida} &rarr; {regreso}</span>
+                  <span style={{ fontSize: 10, color: T.sub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{salida} &rarr; {regreso}</span>
                 </div>
                 <ChevronDown size={16} style={{ color: T.sub, transform: day.open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }} />
               </div>
 
               {day.open && (
-                <div style={{ padding: '10px 14px 12px', background: T.bg || '#fafafa' }}>
+                <div style={{ padding: '10px 14px 12px', background: T.card }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
                       <tr>
@@ -237,12 +250,11 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
                         let acum = 0;
                         return (day.rows || []).map((stop, si) => {
                           if (si > 0) acum += Number(stop.km) || 0;
-                          const cls = stop.tipo === 'salida' ? '#E1F5EE' : stop.tipo === 'regreso' ? '#FAECE7' : 'transparent';
-                          const txtCls = stop.tipo === 'salida' ? '#085041' : stop.tipo === 'regreso' ? '#4A1B0C' : 'inherit';
+                          const txtCls = T.txt;
                           const isLugar = si > 0;
                           const canDel = stop.tipo === 'inter';
                           return (
-                            <tr key={stop.id} style={{ borderBottom: si < (day.rows || []).length - 1 ? `0.5px solid ${T.bdr2}` : 'none', background: cls }}>
+                            <tr key={stop.id} style={{ borderBottom: si < (day.rows || []).length - 1 ? `0.5px solid ${T.bdr2}` : 'none', background: 'transparent' }}>
                               <td style={{ padding: '4px 6px' }}><Pill tipo={stop.tipo} /></td>
                               <td style={{ padding: '4px 6px' }}>
                                 <input
@@ -251,11 +263,11 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
                                   value={stop.lugar}
                                   onChange={e => onUpdateStop(day.id, stop.id, 'lugar', e.target.value)}
                                   placeholder={stop.tipo === 'salida' ? 'Lugar de salida' : stop.tipo === 'regreso' ? 'Lugar de regreso' : 'Parada intermedia'}
-                                  style={{ border: 'none', outline: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 12, color: txtCls, width: '100%' }}
+                                  style={{ border: `1px solid ${T.bdr2}`, outline: 'none', background: T.card2, borderRadius: 8, padding: '7px 9px', fontFamily: 'inherit', fontSize: 12, color: txtCls, width: '100%', boxSizing: 'border-box' }}
                                 />
                               </td>
                               <td style={{ padding: '4px 6px' }}>
-                                <input type="time" value={stop.hora || ''} onChange={e => onUpdateStop(day.id, stop.id, 'hora', e.target.value)} style={{ border: 'none', outline: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 12, color: txtCls, width: 60 }} />
+                                <input type="time" value={stop.hora || ''} onChange={e => onUpdateStop(day.id, stop.id, 'hora', e.target.value)} style={{ border: `1px solid ${T.bdr2}`, outline: 'none', background: T.card2, borderRadius: 8, padding: '7px 6px', fontFamily: 'inherit', fontSize: 12, color: txtCls, width: 76, boxSizing: 'border-box' }} />
                               </td>
                               <td style={{ padding: '4px 6px', textAlign: 'right' }}>
                                 {si === 0 ? (
@@ -266,7 +278,7 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
                                     min="0"
                                     value={stop.km}
                                     onChange={e => onUpdateStop(day.id, stop.id, 'km', e.target.value)}
-                                    style={{ border: 'none', outline: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 12, color: txtCls, width: 52, textAlign: 'right' }}
+                                    style={{ border: `1px solid ${T.bdr2}`, outline: 'none', background: T.card2, borderRadius: 8, padding: '7px 6px', fontFamily: 'inherit', fontSize: 12, color: txtCls, width: 62, textAlign: 'right', boxSizing: 'border-box' }}
                                   />
                                 )}
                               </td>
@@ -285,14 +297,14 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
                       <tr>
                         <td colSpan="3" style={{ textAlign: 'right', fontSize: 11, fontWeight: 600, color: T.sub, padding: '5px 6px', borderTop: `0.5px solid ${T.bdr2}`, background: T.card2 }}>Total d&iacute;a {di + 1}</td>
                         <td style={{ textAlign: 'right', fontSize: 11, fontWeight: 600, color: T.txt, padding: '5px 6px', borderTop: `0.5px solid ${T.bdr2}`, background: T.card2 }}>{dkm} km</td>
-                        <td colSpan="2" style={{ textAlign: 'right', fontSize: 11, fontWeight: 600, color: '#085041', padding: '5px 6px', borderTop: `0.5px solid ${T.bdr2}`, background: T.card2 }}>{dkm} km</td>
+                        <td colSpan="2" style={{ textAlign: 'right', fontSize: 11, fontWeight: 600, color: T.GRN, padding: '5px 6px', borderTop: `0.5px solid ${T.bdr2}`, background: T.card2 }}>{dkm} km</td>
                       </tr>
                     </tfoot>
                   </table>
 
                   <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <button type="button" onClick={() => onAddStop(day.id)} style={{ padding: '5px 12px', borderRadius: 8, border: `0.5px solid #5DCAA5`, background: 'transparent', color: '#085041', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}>+ Parada</button>
-                    <button type="button" onClick={() => { const interIdx = (day.rows || []).map((r, i) => r.tipo === 'inter' ? i : -1).filter(i => i >= 0); if (interIdx.length > 0) onRemoveStop(day.id, (day.rows || [])[interIdx[interIdx.length - 1]].id); }} style={{ padding: '5px 12px', borderRadius: 8, border: `0.5px solid #F0997B`, background: 'transparent', color: '#993C1D', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}>Quitar parada</button>
+                    <button type="button" onClick={() => onAddStop(day.id)} style={{ padding: '5px 12px', borderRadius: 8, border: `1px solid ${T.GRN}55`, background: T.grnDim, color: T.GRN, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}>+ Parada</button>
+                    <button type="button" onClick={() => { const interIdx = (day.rows || []).map((r, i) => r.tipo === 'inter' ? i : -1).filter(i => i >= 0); if (interIdx.length > 0) onRemoveStop(day.id, (day.rows || [])[interIdx[interIdx.length - 1]].id); }} style={{ padding: '5px 12px', borderRadius: 8, border: `1px solid ${T.RED}44`, background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}>Quitar parada</button>
                   </div>
                 </div>
               )}
@@ -309,12 +321,12 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         {!esViaje && (
-          <button type="button" onClick={() => onAddDay(createDefaultDay(days[days.length - 1]))} style={{ padding: '5px 12px', borderRadius: 8, border: `0.5px solid #5DCAA5`, background: 'transparent', color: '#085041', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button type="button" onClick={() => onAddDay(createDefaultDay(days[days.length - 1]))} style={{ padding: '5px 12px', borderRadius: 8, border: `1px solid ${T.GRN}55`, background: T.grnDim, color: T.GRN, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
             <Plus size={13} /> Agregar d&iacute;a
           </button>
         )}
         {!esViaje && days.length > 1 && (
-          <button type="button" onClick={onRemoveLastDay} style={{ padding: '5px 12px', borderRadius: 8, border: `0.5px solid #F0997B`, background: 'transparent', color: '#993C1D', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button type="button" onClick={onRemoveLastDay} style={{ padding: '5px 12px', borderRadius: 8, border: `1px solid ${T.RED}44`, background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
             <Trash2 size={13} /> Quitar &uacute;ltimo d&iacute;a
           </button>
         )}
