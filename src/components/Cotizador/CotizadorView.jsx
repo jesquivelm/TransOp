@@ -1189,6 +1189,8 @@ function createProformaUnit(base = {}, vehiculos = [], preferredVehiculoId = nul
     sOrigenCoords: base.sOrigenCoords || null,
     sDestino: base.sDestino || '',
     sDestinoCoords: base.sDestinoCoords || null,
+    sRegreso: base.sRegreso || '',
+    sRegresoCoords: base.sRegresoCoords || null,
     km: Number(base.km || 0),
     combustible: Number(hasBaseValue('combustible') ? normalizedBase.combustible : defaults.combustible),
     precioCombustibleLitro: Number(hasBaseValue('precioCombustibleLitro') ? normalizedBase.precioCombustibleLitro : defaults.precioCombustibleLitro),
@@ -1228,6 +1230,8 @@ function createUnitDraftFromSource(sourceUnit = {}, vehiculos = [], fuelPrices =
     sOrigenCoords: sourceUnit.sOrigenCoords || null,
     sDestino: sourceUnit.sDestino || '',
     sDestinoCoords: sourceUnit.sDestinoCoords || null,
+    sRegreso: sourceUnit.sRegreso || '',
+    sRegresoCoords: sourceUnit.sRegresoCoords || null,
     km: Number(sourceUnit.km || 0),
     combustible: Number(sourceUnit.combustible || 0),
     precioCombustibleLitro: Number(sourceUnit.precioCombustibleLitro || 0),
@@ -1271,6 +1275,8 @@ function hydrateProformaUnits({ savedUnits = [], socioData = {}, paramsData = {}
     sOrigenCoords: socioData.sOrigenCoords || null,
     sDestino: socioData.sDestino || '',
     sDestinoCoords: socioData.sDestinoCoords || null,
+    sRegreso: socioData.sRegreso || '',
+    sRegresoCoords: socioData.sRegresoCoords || null,
     km: paramsData.km || 0,
     combustible: paramsData.combustible,
     precioCombustibleLitro: paramsData.precioCombustibleLitro,
@@ -1425,6 +1431,9 @@ function syncUnitFromItineraryDays(unit = {}, days = [], itinerary = unit.itiner
   const firstStop = firstDay?.rows?.[0] || null;
   const lastDay = safeDays[safeDays.length - 1] || null;
   const lastStop = lastDay?.rows?.[lastDay.rows.length - 1] || null;
+  const flatStops = safeDays.flatMap(day => day.rows || []);
+  const destinoStop = [...flatStops].reverse().find(stop => stop.tipo === 'destino') || lastStop;
+  const regresoStop = [...flatStops].reverse().find(stop => stop.tipo === 'regreso') || null;
   return applyFuelMetrics({
     ...unit,
     itinerary,
@@ -1434,7 +1443,11 @@ function syncUnitFromItineraryDays(unit = {}, days = [], itinerary = unit.itiner
     sFecha: firstDay?.fecha || unit.sFecha || '',
     sHora: firstStop?.hora || unit.sHora || '',
     sOrigen: firstStop?.lugar || unit.sOrigen || '',
-    sDestino: lastStop?.lugar || unit.sDestino || '',
+    sOrigenCoords: firstStop?.coords || unit.sOrigenCoords || null,
+    sDestino: destinoStop?.lugar || unit.sDestino || '',
+    sDestinoCoords: destinoStop?.coords || unit.sDestinoCoords || null,
+    sRegreso: regresoStop?.lugar || unit.sRegreso || '',
+    sRegresoCoords: regresoStop?.coords || unit.sRegresoCoords || null,
   });
 }
 
@@ -1643,10 +1656,11 @@ function buildItineraryDaysFromRouteResults(routeResults, { initialTime = '', fa
       const points = [routeResult?.origin, ...(routeResult?.waypoints || []), routeResult?.destination].filter(Boolean);
       if (points.length < 2) return;
       const descriptions = [routeResult?.originDesc, ...(routeResult?.waypointsDesc || []), routeResult?.destinationDesc];
+      const waypointKinds = Array.isArray(routeResult?.waypointsKind) ? routeResult.waypointsKind : [];
       const legs = routeResult?.result?.legs || [];
       const rows = points.map((point, pointIndex) => ({
         id: `stop-${Date.now()}-${routeIndex}-0-${pointIndex}`,
-        tipo: pointIndex === 0 ? 'salida' : pointIndex === points.length - 1 ? 'regreso' : 'inter',
+        tipo: pointIndex === 0 ? 'salida' : pointIndex === points.length - 1 ? 'regreso' : (waypointKinds[pointIndex - 1] || 'inter'),
         lugar: descriptions[pointIndex] || point || '',
         hora: days.length === 0 && pointIndex === 0 ? (normalizeTimeInput(initialTime || '') || '') : '',
         km: pointIndex === 0 ? 0 : Math.round((Number(legs[pointIndex - 1]?.distance?.value ?? legs[pointIndex - 1]?.distance ?? 0) || 0) / 1000),
@@ -1664,6 +1678,7 @@ function buildItineraryDaysFromRouteResults(routeResults, { initialTime = '', fa
     if (!itinerary?.days?.length) return;
     itinerary.days.forEach((day, dayIndex) => {
       const segments = day.segments || [];
+      const waypointKinds = Array.isArray(routeResult?.waypointsKind) ? routeResult.waypointsKind : [];
       if (!segments.length) return;
       const first = segments[0];
       const rows = [{
@@ -1677,7 +1692,7 @@ function buildItineraryDaysFromRouteResults(routeResults, { initialTime = '', fa
       segments.forEach((segment, segmentIndex) => {
         rows.push({
           id: `stop-${Date.now()}-${routeIndex}-${dayIndex}-${segmentIndex + 1}`,
-          tipo: segmentIndex === segments.length - 1 ? 'regreso' : 'inter',
+          tipo: segmentIndex === segments.length - 1 ? 'regreso' : (waypointKinds[segmentIndex] || 'inter'),
           lugar: segment.toDesc || segment.to || '',
           hora: '',
           km: Math.round((Number(segment.distance_m) || 0) / 1000),
@@ -1796,6 +1811,7 @@ function buildDesignerItineraryFromUnit(unit = {}) {
         destinationDesc: destination.lugar || '',
         waypoints: stops.slice(1, -1).map(stopRouteValue).filter(Boolean),
         waypointsDesc: stops.slice(1, -1).map(stop => stop.lugar || ''),
+        waypointsKind: stops.slice(1, -1).map(stop => stop.tipo === 'destino' ? 'destino' : 'inter'),
       };
     })
     .filter(Boolean);
@@ -3735,9 +3751,11 @@ const updateItineraryRow = (rowId, field, value) => {
       if (u.id !== activeUnit.id) return u;
       const days = (u.itineraryDays || []).map(d => {
         if (d.id !== dayId) return d;
+        const destinoIdx = d.rows.findIndex(r => r.tipo === 'destino');
         const regresoIdx = d.rows.findIndex(r => r.tipo === 'regreso');
         const newStop = { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, tipo: 'inter', lugar: '', hora: '10:00', km: 0, coords: null };
-        const rows = regresoIdx >= 0 ? [...d.rows.slice(0, regresoIdx), newStop, ...d.rows.slice(regresoIdx)] : [...d.rows, newStop];
+        const insertIdx = destinoIdx >= 0 ? destinoIdx : regresoIdx;
+        const rows = insertIdx >= 0 ? [...d.rows.slice(0, insertIdx), newStop, ...d.rows.slice(insertIdx)] : [...d.rows, newStop];
         return { ...d, rows };
       });
       return syncUnitFromItineraryDays(u, days);

@@ -36,7 +36,7 @@ function createDefaultDay(prevDay) {
     open: true,
     rows: [
       { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}1`, tipo: 'salida', lugar: lastPlace, hora: '07:00', km: 0, coords: null },
-      { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}2`, tipo: 'inter', lugar: '', hora: '10:00', km: 0, coords: null },
+      { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}2`, tipo: 'destino', lugar: '', hora: '10:00', km: 0, coords: null },
       { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}3`, tipo: 'regreso', lugar: '', hora: '17:00', km: 0, coords: null },
     ],
   };
@@ -81,15 +81,16 @@ function Metric({ label, value, color }) {
 
 function Pill({ tipo }) {
   const isSalida = tipo === 'salida';
+  const isDestino = tipo === 'destino';
   const isRegreso = tipo === 'regreso';
   return (
     <span style={{
       display: 'inline-block', borderRadius: 20, padding: '1px 7px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
       background: T.card2,
-      color: isSalida ? T.GRN : isRegreso ? T.AMB : T.sub,
-      border: `1px solid ${isSalida ? `${T.GRN}55` : isRegreso ? `${T.AMB}55` : T.bdr2}`,
+      color: isSalida ? T.GRN : isDestino ? T.BLU : isRegreso ? T.AMB : T.sub,
+      border: `1px solid ${isSalida ? `${T.GRN}55` : isDestino ? `${T.BLU}55` : isRegreso ? `${T.AMB}55` : T.bdr2}`,
     }}>
-      {isSalida ? 'Salida' : isRegreso ? 'Regreso' : 'Parada'}
+      {isSalida ? 'Salida' : isDestino ? 'Destino' : isRegreso ? 'Regreso' : 'Parada'}
     </span>
   );
 }
@@ -115,10 +116,28 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
       open: true,
       rows: [
         { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}1`, tipo: 'salida', lugar: '', hora: '07:00', km: 0, coords: null },
-        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}2`, tipo: 'regreso', lugar: '', hora: '17:00', km: 0, coords: null },
+        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}2`, tipo: 'destino', lugar: '', hora: '10:00', km: 0, coords: null },
+        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}3`, tipo: 'regreso', lugar: '', hora: '17:00', km: 0, coords: null },
       ],
     });
   }, []);
+
+  useEffect(() => {
+    days.forEach(day => {
+      const rows = day.rows || [];
+      if (!rows.length || rows.some(row => row.tipo === 'destino')) return;
+      const regresoIdx = rows.findIndex(row => row.tipo === 'regreso');
+      if (regresoIdx < 0) return;
+      const regreso = rows[regresoIdx];
+      const nextRows = [
+        ...rows.slice(0, regresoIdx),
+        { ...regreso, tipo: 'destino' },
+        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, tipo: 'regreso', lugar: '', hora: regreso.hora || '17:00', km: 0, coords: null },
+        ...rows.slice(regresoIdx + 1),
+      ];
+      onUpdateDay(day.id, 'rows', nextRows);
+    });
+  }, [days, onUpdateDay]);
 
   const kmTotal = useMemo(() => totalKm(days), [days]);
   const paradas = useMemo(() => countStops(days), [days]);
@@ -290,7 +309,7 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
                                     onUpdateStop(day.id, stop.id, 'coords', null);
                                   }}
                                   onBlur={e => geocodeStopAndRecalc(day.id, stop.id, e.target.value)}
-                                  placeholder={stop.tipo === 'salida' ? 'Lugar de salida' : stop.tipo === 'regreso' ? 'Lugar de regreso' : 'Parada intermedia'}
+                                  placeholder={stop.tipo === 'salida' ? 'Lugar de salida' : stop.tipo === 'destino' ? 'Lugar de destino' : stop.tipo === 'regreso' ? 'Lugar de regreso' : 'Parada intermedia'}
                                   style={{ border: `1px solid ${T.bdr2}`, outline: 'none', background: T.card2, borderRadius: 8, padding: '7px 9px', fontFamily: 'inherit', fontSize: 12, color: txtCls, width: '100%', boxSizing: 'border-box' }}
                                 />
                               </td>
