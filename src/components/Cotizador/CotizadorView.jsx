@@ -28,6 +28,8 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { pdfGen } from '../../utils/pdfGenerator';
 import { normalizeTimeInput } from '../../utils/voiceDrafts';
+import { loadGoogleMapsApi } from '../../utils/googleMapsLoader';
+import ItineraryTabContent from './ItineraryTabContent';
 import { useSocios } from '../../hooks/useSocios';
 import { T } from '../../theme';
 
@@ -39,10 +41,11 @@ const ESTADOS = [
   { id: 'rechazada', label: 'Rechazada', color: T.RED, bg: T.redDim },
 ];
 
-const UNIT_PANEL_TABS = [
-  { id: 'operacion', label: 'Operación' },
-  { id: 'itinerario', label: 'Itinerario' },
-];
+function getUnitPanelTabs(servicioTipo) {
+  return servicioTipo === 'transfer'
+    ? [{ id: 'operacion', label: 'Operación' }, { id: 'transfer', label: 'Transfer' }]
+    : [{ id: 'operacion', label: 'Operación' }, { id: 'itinerario', label: 'Itinerario' }];
+}
 
 const MONEY_SCHEMA_VERSION = 'crc_v2';
 const DEFAULT_CRC_PER_USD = 512;
@@ -1271,6 +1274,46 @@ function createItineraryRow(base = {}) {
 function sanitizeItineraryRows(rows = []) {
   if (!Array.isArray(rows)) return [];
   return rows.map(row => createItineraryRow(row));
+}
+
+function createItineraryDayRow(base = {}) {
+  return {
+    id: base.id || `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    tipo: base.tipo || 'inter',
+    lugar: base.lugar || '',
+    hora: normalizeTimeInput(base.hora || '') || '',
+    km: Number(base.km) || 0,
+    coords: base.coords || null,
+  };
+}
+
+function createItineraryDay(base = {}) {
+  return {
+    id: base.id || `day-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    fecha: base.fecha || '',
+    open: base.open !== false,
+    rows: (base.rows || []).map(r => createItineraryDayRow(r)),
+  };
+}
+
+function itineraryDaysToRows(days) {
+  const rows = [];
+  (days || []).forEach(day => {
+    const stops = day.rows || [];
+    for (let i = 0; i < stops.length - 1; i++) {
+      const from = stops[i];
+      const to = stops[i + 1];
+      rows.push(createItineraryRow({
+        fecha: day.fecha || '',
+        hora: from.hora || '',
+        origen: from.lugar || '',
+        destino: to.lugar || '',
+        recorrido: String(to.km || ''),
+        vehiculoId: null,
+      }));
+    }
+  });
+  return rows;
 }
 
 function itineraryRowComplete(row) {
@@ -3428,6 +3471,95 @@ const updateItineraryRow = (rowId, field, value) => {
     updateActiveUnitItineraryRows(prev => prev.filter(row => row.id !== rowId));
   };
 
+  const syncDaysToRows = useCallback((unitId, days) => {
+    const rows = itineraryDaysToRows(days);
+    setUnits(prev => prev.map(u => {
+      if (u.id !== unitId) return u;
+      return { ...u, itineraryDays: days, itineraryRows: rows };
+    }));
+    setAutoSaveEnabled(true);
+  }, []);
+
+  const updateItineraryDay = useCallback((dayId, field, value) => {
+    if (!activeUnit?.id) return;
+    setUnits(prev => prev.map(u => {
+      if (u.id !== activeUnit.id) return u;
+      const days = (u.itineraryDays || []).map(d => d.id === dayId ? { ...d, [field]: value } : d);
+      const rows = itineraryDaysToRows(days);
+      return { ...u, itineraryDays: days, itineraryRows: rows };
+    }));
+    setAutoSaveEnabled(true);
+  }, [activeUnit?.id]);
+
+  const updateItineraryStop = useCallback((dayId, stopId, field, value) => {
+    if (!activeUnit?.id) return;
+    setUnits(prev => prev.map(u => {
+      if (u.id !== activeUnit.id) return u;
+      const days = (u.itineraryDays || []).map(d => {
+        if (d.id !== dayId) return d;
+        const rows = (d.rows || []).map(r => r.id === stopId ? { ...r, [field]: value } : r);
+        return { ...d, rows };
+      });
+      const rows = itineraryDaysToRows(days);
+      return { ...u, itineraryDays: days, itineraryRows: rows };
+    }));
+    setAutoSaveEnabled(true);
+  }, [activeUnit?.id]);
+
+  const addStop = useCallback((dayId) => {
+    if (!activeUnit?.id) return;
+    setUnits(prev => prev.map(u => {
+      if (u.id !== activeUnit.id) return u;
+      const days = (u.itineraryDays || []).map(d => {
+        if (d.id !== dayId) return d;
+        const regresoIdx = d.rows.findIndex(r => r.tipo === 'regreso');
+        const newStop = { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, tipo: 'inter', lugar: '', hora: '10:00', km: 0, coords: null };
+        const rows = regresoIdx >= 0 ? [...d.rows.slice(0, regresoIdx), newStop, ...d.rows.slice(regresoIdx)] : [...d.rows, newStop];
+        return { ...d, rows };
+      });
+      const rows = itineraryDaysToRows(days);
+      return { ...u, itineraryDays: days, itineraryRows: rows };
+    }));
+    setAutoSaveEnabled(true);
+  }, [activeUnit?.id]);
+
+  const removeStop = useCallback((dayId, stopId) => {
+    if (!activeUnit?.id) return;
+    setUnits(prev => prev.map(u => {
+      if (u.id !== activeUnit.id) return u;
+      const days = (u.itineraryDays || []).map(d => {
+        if (d.id !== dayId) return d;
+        const rows = (d.rows || []).filter(r => r.id !== stopId);
+        return { ...d, rows };
+      });
+      const rows = itineraryDaysToRows(days);
+      return { ...u, itineraryDays: days, itineraryRows: rows };
+    }));
+    setAutoSaveEnabled(true);
+  }, [activeUnit?.id]);
+
+  const addDay = useCallback((newDay) => {
+    if (!activeUnit?.id) return;
+    setUnits(prev => prev.map(u => {
+      if (u.id !== activeUnit.id) return u;
+      const days = [...(u.itineraryDays || []), newDay];
+      const rows = itineraryDaysToRows(days);
+      return { ...u, itineraryDays: days, itineraryRows: rows };
+    }));
+    setAutoSaveEnabled(true);
+  }, [activeUnit?.id]);
+
+  const removeLastDay = useCallback(() => {
+    if (!activeUnit?.id) return;
+    setUnits(prev => prev.map(u => {
+      if (u.id !== activeUnit.id) return u;
+      const days = (u.itineraryDays || []).slice(0, -1);
+      const rows = itineraryDaysToRows(days);
+      return { ...u, itineraryDays: days, itineraryRows: rows };
+    }));
+    setAutoSaveEnabled(true);
+  }, [activeUnit?.id]);
+
   const createOperationFromProforma = async () => {
     if (linkedOperation?.taskId) {
       onFocusTask?.({
@@ -4003,7 +4135,7 @@ const updateItineraryRow = (rowId, field, value) => {
 
               <AccordionSection
                 id="costos"
-                label="Costos operativos"
+                label="Costos Operativos"
                 summary={costosResumen}
                 open={openSection === 'costos'}
                 onToggle={toggleSection}
@@ -4196,7 +4328,7 @@ const updateItineraryRow = (rowId, field, value) => {
                                   </div>
                                 </div>
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: 4, borderRadius: 999, background: T.card2, border: `1px solid ${T.bdr}` }}>
-                                  {UNIT_PANEL_TABS.map(tab => {
+                                  {getUnitPanelTabs(socio.sTipoServicio).map(tab => {
                                     const isCurrentTab = activeUnitTab === tab.id;
                                     return (
                                       <button
@@ -4224,190 +4356,40 @@ const updateItineraryRow = (rowId, field, value) => {
 
                             <div style={{ gridColumn: '1 / -1', minWidth: 0 }}>
                               {activeUnitTab === 'itinerario' ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                  {(() => {
-                                    const grouped = itineraryRowsView.reduce((acc, row) => {
-                                      const key = row.fecha || '_sin_fecha';
-                                      if (!acc[key]) acc[key] = [];
-                                      acc[key].push(row);
-                                      return acc;
-                                    }, {});
-                                    const sortedDays = Object.keys(grouped).sort();
-                                    return (
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxHeight: itineraryRowsView.length > 3 ? 520 : 'none', overflowY: itineraryRowsView.length > 3 ? 'auto' : 'visible', paddingRight: itineraryRowsView.length > 3 ? 4 : 0 }}>
-                                        {sortedDays.length > 0 ? sortedDays.map((fechaKey) => {
-                                          const dayRows = grouped[fechaKey];
-                                          const dateLabel = fechaKey === '_sin_fecha' ? 'Sin fecha' : (() => {
-                                            const [y, m, d] = fechaKey.split('-');
-                                            return `${d}/${m}`;
-                                          })();
-                                          return (
-                                            <div key={fechaKey}>
-                                              <div style={{ fontSize: 11, fontWeight: 800, color: T.AMB, letterSpacing: 0.5, marginBottom: 10, textTransform: 'uppercase' }}>D\u00eda — {dateLabel}</div>
-                                              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                                {dayRows.map((row, index) => {
-                                                  const subtotal = Number(row.costoPorUnidad || 0) * Number(row.unidades || 0);
-                                                  const calculatedIVA = Math.round(subtotal * 0.13);
-                                                  const finalCost = subtotal + (Number(row.iva) || calculatedIVA);
-                                                  return (
-                                                    <div key={row.id} style={{ padding: 12, borderRadius: 12, background: T.card2, border: `1px solid ${T.bdr}` }}>
-                                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-                                                        <div style={{ fontSize: 11, fontWeight: 800, color: T.sub, letterSpacing: 0.3 }}>RUTA {index + 1}</div>
-                                                        <button type="button" onClick={() => removeItineraryRow(row.id)} style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${T.RED}33`, background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>Quitar</button>
-                                                      </div>
-                                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 10 }}>
-                                                        <Field label="Origen" style={{ gridColumn: 'span 4' }}><input value={row.origen} onChange={e => updateItineraryRow(row.id, 'origen', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Origen" /></Field>
-                                                        <Field label="Destino" style={{ gridColumn: 'span 4' }}><input value={row.destino} onChange={e => updateItineraryRow(row.id, 'destino', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Destino" /></Field>
-                                                        <Field label="Waypoints" style={{ gridColumn: 'span 4' }}>
-                                                          <input value={Array.isArray(row.waypoints) ? row.waypoints.join(', ') : ''} onChange={e => updateItineraryRow(row.id, 'waypoints', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} onBlur={handleGuardar} style={inputStyle} placeholder="Puntos intermedios (separados por coma)" />
-                                                        </Field>
-                                                        <Field label="Fecha" style={{ gridColumn: 'span 3' }}><input type="date" value={row.fecha} onChange={e => updateItineraryRow(row.id, 'fecha', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
-                                                        <Field label="Hora salida" style={{ gridColumn: 'span 3' }}><input type="time" value={row.hora} onChange={e => updateItineraryRow(row.id, 'hora', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
-                                                        <Field label="Hora regreso" style={{ gridColumn: 'span 3' }}><input type="time" value={row.horaRegreso || ''} onChange={e => updateItineraryRow(row.id, 'horaRegreso', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
-                                                        <Field label="Distancia" style={{ gridColumn: 'span 3' }}>
-                                                          <div style={{ display: 'flex', gap: 4 }}>
-                                                            <input value={row.distanciaManual || row.recorrido || ''} onChange={e => updateItineraryRow(row.id, 'distanciaManual', e.target.value)} onBlur={handleGuardar} style={{ ...inputStyle, flex: 1 }} placeholder="km" />
-                                                            <span style={{ fontSize: 11, color: T.mute, alignSelf: 'center', whiteSpace: 'nowrap' }}>km</span>
-                                                          </div>
-                                                        </Field>
-                                                      </div>
-                                                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.bdr}`, display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 10 }}>
-                                                        <Field label="PAX" style={{ gridColumn: 'span 2' }}><NumberInput value={row.pax} onChange={e => updateItineraryRow(row.id, 'pax', e.target.value)} onBlur={handleGuardar} min="0" /></Field>
-                                                        <Field label="Unidades" style={{ gridColumn: 'span 2' }}><NumberInput value={row.unidades} onChange={e => updateItineraryRow(row.id, 'unidades', e.target.value)} onBlur={handleGuardar} min="0" /></Field>
-                                                        <Field label="Costo por unidad" style={{ gridColumn: 'span 3' }}><MonetaryInput value={row.costoPorUnidad} onChange={e => updateItineraryRow(row.id, 'costoPorUnidad', e.target.value)} onBlur={handleGuardar} symbol="\u20A1" /></Field>
-                                                        <Field label="IVA" style={{ gridColumn: 'span 2' }}>
-                                                          <MonetaryInput value={row.iva} onChange={e => updateItineraryRow(row.id, 'iva', e.target.value)} onBlur={handleGuardar} symbol="\u20A1" />
-                                                        </Field>
-                                                        <Field label="Costo final" style={{ gridColumn: 'span 3' }}>
-                                                          <input value={formatMoney(finalCost, 'CRC')} readOnly style={{ ...inputStyle, color: T.AMB, cursor: 'default', fontWeight: 800, textAlign: 'right' }} />
-                                                        </Field>
-                                                      </div>
-                                                      <div style={{ marginTop: 8, display: 'flex', gap: 16, alignItems: 'center' }}>
-                                                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.sub, cursor: 'pointer' }}>
-                                                          <input type="checkbox" checked={row.hospedajeActivo} onChange={e => updateItineraryRow(row.id, 'hospedajeActivo', e.target.checked)} />
-                                                          Hospedaje
-                                                          {row.hospedajeActivo && (
-                                                            <MonetaryInput value={row.hospedajeCosto} onChange={e => updateItineraryRow(row.id, 'hospedajeCosto', e.target.value)} onBlur={handleGuardar} symbol="\u20A1" inputStyle={{ width: 90 }} />
-                                                          )}
-                                                        </label>
-                                                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.sub, cursor: 'pointer' }}>
-                                                          <input type="checkbox" checked={row.viaticosActivo} onChange={e => updateItineraryRow(row.id, 'viaticosActivo', e.target.checked)} />
-                                                          Vi\u00e1ticos
-                                                          {row.viaticosActivo && (
-                                                            <MonetaryInput value={row.viaticosCosto} onChange={e => updateItineraryRow(row.id, 'viaticosCosto', e.target.value)} onBlur={handleGuardar} symbol="\u20A1" inputStyle={{ width: 90 }} />
-                                                          )}
-                                                        </label>
-                                                      </div>
-                                                    </div>
-                                                  );
-                                                })}
-                                              </div>
-                                            </div>
-                                          );
-                                        }) : (
-                                          <div style={{ padding: 14, borderRadius: 12, background: T.card2, border: `1px dashed ${T.bdr}`, color: T.mute, fontSize: 13 }}>
-                                            No hay rutas cargadas. Agrega una ruta o usa el mapa para traer el recorrido.
-                                          </div>
-                                        )}
+                                <ItineraryTabContent
+                                  unit={activeUnit}
+                                  googleMapsApiKey={googleMapsApiKey}
+                                  onUpdateDay={(dayId, field, value) => updateItineraryDay(dayId, field, value)}
+                                  onUpdateStop={(dayId, stopId, field, value) => updateItineraryStop(dayId, stopId, field, value)}
+                                  onAddStop={(dayId) => addStop(dayId)}
+                                  onRemoveStop={(dayId, stopId) => removeStop(dayId, stopId)}
+                                  onAddDay={() => addDay()}
+                                  onRemoveLastDay={() => removeLastDay()}
+                                  onClearItinerary={clearActiveUnitItinerary}
+                                  onOpenRouteDesigner={() => {
+                                    if (showRouteDesigner && routeDesignerUnitId === activeUnit.id) {
+                                      closeRouteDesigner();
+                                      return;
+                                    }
+                                    setRouteDesignerUnitId(activeUnit.id);
+                                    setShowRouteDesigner(true);
+                                  }}
+                                  showRouteDesigner={showRouteDesigner && routeDesignerUnitId === activeUnit.id}
+                                  esViaje={socio.sTipoServicio === 'viaje'}
+                                />
+                              ) : activeUnitTab === 'transfer' ? (
+                                <div style={{ padding: 12, borderRadius: 12, background: T.card2, border: `1px solid ${T.bdr}`, fontSize: 13, color: T.sub }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: T.sub }}>Transfers configurados</div>
+                                    {(params.selectedTransfers || []).length > 0 ? (params.selectedTransfers || []).map(item => (
+                                      <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', borderRadius: 8, background: T.card, border: `1px solid ${T.bdr}` }}>
+                                        <span style={{ fontSize: 12 }}>{item.descripcion}</span>
+                                        <span style={{ color: T.AMB, fontWeight: 700 }}>{fmtCRC(item.costo)}</span>
                                       </div>
-                                    );
-                                  })()}
-
-                                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 40px', gap: 10, alignItems: 'stretch' }}>
-                                    <div style={{ padding: '10px 12px', borderRadius: 12, border: `1px solid ${T.bdr}`, background: T.card2 }}>
-                                      <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, marginBottom: 6 }}>TOTAL KM</div>
-                                      <div style={{ fontSize: 16, fontWeight: 800, color: T.txt }}>{formatDistance(sumItineraryDistanceKm(itineraryRowsView) * 1000)}</div>
-                                    </div>
-                                    <div style={{ padding: '10px 12px', borderRadius: 12, border: `1px solid ${T.bdr}`, background: T.card2 }}>
-                                      <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, marginBottom: 6 }}>TOTAL TIEMPO</div>
-                                      <div style={{ fontSize: 16, fontWeight: 800, color: T.txt }}>{formatDuration(sumItineraryDurationSeconds(itineraryRowsView))}</div>
-                                    </div>
-                                    <div style={{ padding: '10px 12px', borderRadius: 12, border: `1px solid ${T.bdr}`, background: T.card2 }}>
-                                      <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, marginBottom: 6 }}>COSTO RUTAS</div>
-                                      <div style={{ fontSize: 16, fontWeight: 800, color: T.AMB }}>
-                                        {(() => {
-                                          const totalCost = itineraryRowsView.reduce((sum, row) => {
-                                            const subtotal = Number(row.costoPorUnidad || 0) * Number(row.unidades || 0);
-                                            const iva = Number(row.iva) || Math.round(subtotal * 0.13);
-                                            return sum + subtotal + iva
-                                              + (row.hospedajeActivo ? Number(row.hospedajeCosto || 0) : 0)
-                                              + (row.viaticosActivo ? Number(row.viaticosCosto || 0) : 0);
-                                          }, 0);
-                                          return formatMoney(totalCost, 'CRC');
-                                        })()}
-                                      </div>
-                                    </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                      <button
-                                        type="button"
-                                        title="Diseñar ruta"
-                                        onClick={() => {
-                                          if (showRouteDesigner && routeDesignerUnitId === activeUnit.id) {
-                                            closeRouteDesigner();
-                                            return;
-                                          }
-                                          setRouteDesignerUnitId(activeUnit.id);
-                                          setShowRouteDesigner(true);
-                                        }}
-                                        style={{
-                                          width: 40,
-                                          height: 40,
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          borderRadius: 10,
-                                          border: `1px solid ${showRouteDesigner && routeDesignerUnitId === activeUnit.id ? `${T.BLU}55` : (googleMapsApiKey ? T.AMB : T.bdr2)}`,
-                                          background: showRouteDesigner && routeDesignerUnitId === activeUnit.id ? T.bluDim : (googleMapsApiKey ? T.ambDim : T.card2),
-                                          color: showRouteDesigner && routeDesignerUnitId === activeUnit.id ? T.BLU : (googleMapsApiKey ? T.AMB : T.mute),
-                                          cursor: 'pointer',
-                                          flexShrink: 0,
-                                        }}
-                                      >
-                                        <Map size={14} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        title="Agregar ruta"
-                                        onClick={addItineraryRow}
-                                        style={{
-                                          width: 40,
-                                          height: 40,
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          borderRadius: 10,
-                                          border: `1px solid ${T.GRN}44`,
-                                          background: T.grnDim,
-                                          color: T.GRN,
-                                          cursor: 'pointer',
-                                          flexShrink: 0,
-                                        }}
-                                      >
-                                        <Plus size={14} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        title="Limpiar itinerario"
-                                        onClick={clearActiveUnitItinerary}
-                                        style={{
-                                          width: 40,
-                                          height: 40,
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          borderRadius: 10,
-                                          border: `1px solid ${T.RED}33`,
-                                          background: T.redDim,
-                                          color: T.RED,
-                                          cursor: 'pointer',
-                                          flexShrink: 0,
-                                        }}
-                                      >
-                                        <Trash2 size={14} />
-                                      </button>
-                                    </div>
+                                    )) : (
+                                      <div style={{ color: T.mute, fontSize: 12 }}>No hay transfers seleccionados. Configura desde la secci&oacute;n de Tarifa Transfer.</div>
+                                    )}
                                   </div>
-
                                 </div>
                               ) : (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -4563,20 +4545,10 @@ const updateItineraryRow = (rowId, field, value) => {
                   </div>
                 </div>
 
-                <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${T.bdr}` }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: T.sub }}>
-                    <input type="checkbox" name="chkDia" checked={params.chkDia} onChange={pChange} />
-                    Incluir adicionales de viaje por dia
-                  </label>
-                  {params.chkDia && (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 12 }}>
-                      <Field label="Adicional colaborador" style={{ gridColumn: 'span 6' }}><MonetaryInput name="adicCol" value={params.adicCol} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                      <Field label="Adicional viaticos" style={{ gridColumn: 'span 6' }}><MonetaryInput name="adicViat" value={params.adicViat} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                    </div>
-                  )}
-                </div>
+
               </AccordionSection>
 
+              {socio.sTipoServicio !== 'transfer' && (
               <AccordionSection
                 id="transfer"
                 label="Tarifa Transfer"
@@ -4612,7 +4584,9 @@ const updateItineraryRow = (rowId, field, value) => {
                   )}
                 </div>
               </AccordionSection>
+              )}
 
+              {socio.sTipoServicio === 'gira' && (
               <AccordionSection
                 id="extras"
                 label="Hospedaje y Viáticos"
@@ -4632,6 +4606,7 @@ const updateItineraryRow = (rowId, field, value) => {
                   <Field label="Personas con viaticos" style={{ gridColumn: 'span 3' }}><input type="number" name="persViat" value={smartVal(params.persViat)} onChange={pChange} onBlur={handleGuardar} style={inputStyle} /></Field>
                 </div>
               </AccordionSection>
+              )}
 
               <AccordionSection id="comentarios" label="Comentarios" summary={commentsResumen} open={openSection === 'comentarios'} onToggle={toggleSection}>
                 <div style={{ marginTop: 16 }}>
@@ -4949,7 +4924,7 @@ const updateItineraryRow = (rowId, field, value) => {
 
               <div>
                 {[
-                  ['Costos operativos', resData.subtotalOperativo],
+                  ['Costos Operativos', resData.subtotalOperativo],
                   resData.subtotalTransfer > 0 ? ['Tarifa transfer', resData.subtotalTransfer] : null,
                   resData.subtotalExtras > 0 ? ['Hospedaje y viaticos', resData.subtotalExtras] : null,
                   resData.utilidadAmt > 0 ? [`Utilidad (${Number(params.utilidadPct || 0).toFixed(2)}%)`, resData.utilidadAmt] : null,
