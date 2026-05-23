@@ -1410,6 +1410,34 @@ function itineraryDaysToRows(days) {
   return rows;
 }
 
+function getItineraryDaysTotalKm(days = []) {
+  return (days || []).reduce((sum, day) => (
+    sum + (day.rows || []).reduce((daySum, row, index) => (
+      index === 0 ? daySum : daySum + (Number(row.km) || 0)
+    ), 0)
+  ), 0);
+}
+
+function syncUnitFromItineraryDays(unit = {}, days = [], itinerary = unit.itinerary) {
+  const safeDays = (days || []).map(day => createItineraryDay(day));
+  const rows = itineraryDaysToRows(safeDays);
+  const firstDay = safeDays[0] || null;
+  const firstStop = firstDay?.rows?.[0] || null;
+  const lastDay = safeDays[safeDays.length - 1] || null;
+  const lastStop = lastDay?.rows?.[lastDay.rows.length - 1] || null;
+  return applyFuelMetrics({
+    ...unit,
+    itinerary,
+    itineraryDays: safeDays,
+    itineraryRows: rows,
+    km: Math.round(getItineraryDaysTotalKm(safeDays)),
+    sFecha: firstDay?.fecha || unit.sFecha || '',
+    sHora: firstStop?.hora || unit.sHora || '',
+    sOrigen: firstStop?.lugar || unit.sOrigen || '',
+    sDestino: lastStop?.lugar || unit.sDestino || '',
+  });
+}
+
 function itineraryRowComplete(row) {
   return Boolean(String(row?.fecha || '').trim() && String(row?.hora || '').trim() && String(row?.origen || '').trim() && String(row?.destino || '').trim());
 }
@@ -1599,6 +1627,72 @@ function buildItineraryRowsFromRouteResults(routeResults, { initialTime = '', de
     rows.push(...nextRows);
   });
   return rows;
+}
+
+function parseRouteCoordinate(value = '') {
+  const match = String(value || '').trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  if (!match) return null;
+  return { lat: Number(match[1]), lng: Number(match[2]) };
+}
+
+function buildItineraryDaysFromRouteResults(routeResults, { initialTime = '', fallbackDate = '' } = {}) {
+  const days = [];
+  (Array.isArray(routeResults) ? routeResults : []).forEach((routeResult, routeIndex) => {
+    const routeDates = Array.isArray(routeResult?.dates) ? routeResult.dates.filter(Boolean) : [];
+    if (!routeDates.length) {
+      const points = [routeResult?.origin, ...(routeResult?.waypoints || []), routeResult?.destination].filter(Boolean);
+      if (points.length < 2) return;
+      const descriptions = [routeResult?.originDesc, ...(routeResult?.waypointsDesc || []), routeResult?.destinationDesc];
+      const legs = routeResult?.result?.legs || [];
+      const rows = points.map((point, pointIndex) => ({
+        id: `stop-${Date.now()}-${routeIndex}-0-${pointIndex}`,
+        tipo: pointIndex === 0 ? 'salida' : pointIndex === points.length - 1 ? 'regreso' : 'inter',
+        lugar: descriptions[pointIndex] || point || '',
+        hora: days.length === 0 && pointIndex === 0 ? (normalizeTimeInput(initialTime || '') || '') : '',
+        km: pointIndex === 0 ? 0 : Math.round((Number(legs[pointIndex - 1]?.distance?.value ?? legs[pointIndex - 1]?.distance ?? 0) || 0) / 1000),
+        coords: parseRouteCoordinate(point),
+      }));
+      days.push(createItineraryDay({
+        id: `day-${Date.now()}-${routeIndex}-0`,
+        fecha: routeResult?.date || fallbackDate || '',
+        open: true,
+        rows,
+      }));
+      return;
+    }
+    const itinerary = buildItineraryFromRouteResult(routeResult);
+    if (!itinerary?.days?.length) return;
+    itinerary.days.forEach((day, dayIndex) => {
+      const segments = day.segments || [];
+      if (!segments.length) return;
+      const first = segments[0];
+      const rows = [{
+        id: `stop-${Date.now()}-${routeIndex}-${dayIndex}-0`,
+        tipo: 'salida',
+        lugar: first.fromDesc || first.from || '',
+        hora: days.length === 0 ? (normalizeTimeInput(initialTime || '') || '') : '',
+        km: 0,
+        coords: parseRouteCoordinate(first.from),
+      }];
+      segments.forEach((segment, segmentIndex) => {
+        rows.push({
+          id: `stop-${Date.now()}-${routeIndex}-${dayIndex}-${segmentIndex + 1}`,
+          tipo: segmentIndex === segments.length - 1 ? 'regreso' : 'inter',
+          lugar: segment.toDesc || segment.to || '',
+          hora: '',
+          km: Math.round((Number(segment.distance_m) || 0) / 1000),
+          coords: parseRouteCoordinate(segment.to),
+        });
+      });
+      days.push(createItineraryDay({
+        id: `day-${Date.now()}-${routeIndex}-${dayIndex}`,
+        fecha: day.date || routeResult?.date || fallbackDate || '',
+        open: true,
+        rows,
+      }));
+    });
+  });
+  return days;
 }
 
 function toSlashDate(isoDate) {
@@ -3604,10 +3698,9 @@ const updateItineraryRow = (rowId, field, value) => {
   };
 
   const syncDaysToRows = useCallback((unitId, days) => {
-    const rows = itineraryDaysToRows(days);
     setUnits(prev => prev.map(u => {
       if (u.id !== unitId) return u;
-      return { ...u, itineraryDays: days, itineraryRows: rows };
+      return syncUnitFromItineraryDays(u, days);
     }));
     setAutoSaveEnabled(true);
   }, []);
@@ -3617,8 +3710,7 @@ const updateItineraryRow = (rowId, field, value) => {
     setUnits(prev => prev.map(u => {
       if (u.id !== activeUnit.id) return u;
       const days = (u.itineraryDays || []).map(d => d.id === dayId ? { ...d, [field]: value } : d);
-      const rows = itineraryDaysToRows(days);
-      return { ...u, itineraryDays: days, itineraryRows: rows };
+      return syncUnitFromItineraryDays(u, days);
     }));
     setAutoSaveEnabled(true);
   }, [activeUnit?.id]);
@@ -3632,8 +3724,7 @@ const updateItineraryRow = (rowId, field, value) => {
         const rows = (d.rows || []).map(r => r.id === stopId ? { ...r, [field]: value } : r);
         return { ...d, rows };
       });
-      const rows = itineraryDaysToRows(days);
-      return { ...u, itineraryDays: days, itineraryRows: rows };
+      return syncUnitFromItineraryDays(u, days);
     }));
     setAutoSaveEnabled(true);
   }, [activeUnit?.id]);
@@ -3649,8 +3740,7 @@ const updateItineraryRow = (rowId, field, value) => {
         const rows = regresoIdx >= 0 ? [...d.rows.slice(0, regresoIdx), newStop, ...d.rows.slice(regresoIdx)] : [...d.rows, newStop];
         return { ...d, rows };
       });
-      const rows = itineraryDaysToRows(days);
-      return { ...u, itineraryDays: days, itineraryRows: rows };
+      return syncUnitFromItineraryDays(u, days);
     }));
     setAutoSaveEnabled(true);
   }, [activeUnit?.id]);
@@ -3664,8 +3754,7 @@ const updateItineraryRow = (rowId, field, value) => {
         const rows = (d.rows || []).filter(r => r.id !== stopId);
         return { ...d, rows };
       });
-      const rows = itineraryDaysToRows(days);
-      return { ...u, itineraryDays: days, itineraryRows: rows };
+      return syncUnitFromItineraryDays(u, days);
     }));
     setAutoSaveEnabled(true);
   }, [activeUnit?.id]);
@@ -3675,8 +3764,7 @@ const updateItineraryRow = (rowId, field, value) => {
     setUnits(prev => prev.map(u => {
       if (u.id !== activeUnit.id) return u;
       const days = [...(u.itineraryDays || []), newDay];
-      const rows = itineraryDaysToRows(days);
-      return { ...u, itineraryDays: days, itineraryRows: rows };
+      return syncUnitFromItineraryDays(u, days);
     }));
     setAutoSaveEnabled(true);
   }, [activeUnit?.id]);
@@ -3686,8 +3774,7 @@ const updateItineraryRow = (rowId, field, value) => {
     setUnits(prev => prev.map(u => {
       if (u.id !== activeUnit.id) return u;
       const days = (u.itineraryDays || []).slice(0, -1);
-      const rows = itineraryDaysToRows(days);
-      return { ...u, itineraryDays: days, itineraryRows: rows };
+      return syncUnitFromItineraryDays(u, days);
     }));
     setAutoSaveEnabled(true);
   }, [activeUnit?.id]);
@@ -3879,6 +3966,10 @@ const updateItineraryRow = (rowId, field, value) => {
         defaultVehiculoId: sourceUnit?.vehiculoId || null,
         defaultVehiculoLabel,
       });
+      const routeDays = buildItineraryDaysFromRouteResults(validRouteResults, {
+        initialTime: sourceUnit?.sHora || socio.sHora || '',
+        fallbackDate: sourceUnit?.sFecha || socio.sFecha || '',
+      });
       const itinerary = {
         unitId: routeDesignerUnitId,
         raw: validRouteResults[0] || null,
@@ -3894,9 +3985,11 @@ const updateItineraryRow = (rowId, field, value) => {
       };
       setUnits(prev => prev.map(unit => {
         if (unit.id === routeDesignerUnitId) {
+          if (routeDays.length) {
+            return syncUnitFromItineraryDays(unit, routeDays, itinerary);
+          }
           const updated = syncUnitFromItineraryRows(unit, routeRows);
-          updated.itinerary = itinerary;
-          return updated;
+          return { ...updated, itinerary };
         }
         return unit;
       }));

@@ -184,6 +184,30 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
     setCalculating(false);
   }, [days, onUpdateDay]);
 
+  const geocodeStopAndRecalc = useCallback((dayId, stopId, value) => {
+    const text = String(value || '').trim();
+    if (!text || !mapsApiRef.current?.Geocoder) return;
+    const coords = stopRouteValue({ coords: days.flatMap(day => day.rows || []).find(row => row.id === stopId)?.coords });
+    if (coords && typeof coords === 'object') {
+      recalcDayDistances(dayId);
+      return;
+    }
+    const geocoder = new mapsApiRef.current.Geocoder();
+    geocoder.geocode({ address: text, componentRestrictions: { country: 'CR' }, region: 'CR' }, (results, status) => {
+      const place = status === 'OK' ? results?.[0] : null;
+      const location = place?.geometry?.location;
+      if (!location) return;
+      const nextCoords = {
+        lat: Number(location.lat().toFixed(6)),
+        lng: Number(location.lng().toFixed(6)),
+      };
+      const label = place.formatted_address || text;
+      onUpdateStop(dayId, stopId, 'coords', nextCoords);
+      onUpdateStop(dayId, stopId, 'lugar', label);
+      recalcDayDistances(dayId, { stopId, coords: nextCoords, lugar: label });
+    });
+  }, [days, onUpdateStop, recalcDayDistances]);
+
   const setLugarRef = useCallback((dayId, stopId, node) => {
     if (node && mapsReady) {
       setTimeout(() => bindAutocomplete(node, dayId, stopId), 100);
@@ -261,7 +285,11 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
                                   ref={node => setLugarRef(day.id, stop.id, node)}
                                   type="text"
                                   value={stop.lugar}
-                                  onChange={e => onUpdateStop(day.id, stop.id, 'lugar', e.target.value)}
+                                  onChange={e => {
+                                    onUpdateStop(day.id, stop.id, 'lugar', e.target.value);
+                                    onUpdateStop(day.id, stop.id, 'coords', null);
+                                  }}
+                                  onBlur={e => geocodeStopAndRecalc(day.id, stop.id, e.target.value)}
                                   placeholder={stop.tipo === 'salida' ? 'Lugar de salida' : stop.tipo === 'regreso' ? 'Lugar de regreso' : 'Parada intermedia'}
                                   style={{ border: `1px solid ${T.bdr2}`, outline: 'none', background: T.card2, borderRadius: 8, padding: '7px 9px', fontFamily: 'inherit', fontSize: 12, color: txtCls, width: '100%', boxSizing: 'border-box' }}
                                 />
