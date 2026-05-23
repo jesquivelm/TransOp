@@ -1247,12 +1247,24 @@ function createItineraryRow(base = {}) {
     id: base.id || `itin-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     fecha: base.fecha || '',
     hora: normalizeTimeInput(base.hora || '') || '',
+    horaRegreso: normalizeTimeInput(base.horaRegreso || '') || '',
     origen: base.origen || '',
     destino: base.destino || '',
+    waypoints: Array.isArray(base.waypoints) ? base.waypoints : [],
     recorrido: base.recorrido || '',
+    distanciaManual: base.distanciaManual || '',
     tiempoEstimado: base.tiempoEstimado || '',
     vehiculoId: base.vehiculoId || null,
     vehiculoLabel: base.vehiculoLabel || '',
+    pax: Number(base.pax) || 0,
+    unidades: Number(base.unidades) || 0,
+    costoPorUnidad: Number(base.costoPorUnidad) || 0,
+    iva: Number(base.iva) || 0,
+    costoFinal: Number(base.costoFinal) || 0,
+    hospedajeActivo: base.hospedajeActivo === true,
+    hospedajeCosto: Number(base.hospedajeCosto) || 0,
+    viaticosActivo: base.viaticosActivo === true,
+    viaticosCosto: Number(base.viaticosCosto) || 0,
   };
 }
 
@@ -1372,9 +1384,9 @@ function getUnitServiceDate(unit = {}, fallbackDate = '') {
 
 function sumItineraryDistanceKm(rows = []) {
   return rows.reduce((sum, row) => {
-    const raw = String(row?.recorrido || '').trim().toLowerCase();
-    if (!raw) return sum;
-    const numeric = Number.parseFloat(raw.replace(',', '.'));
+    const distanceRaw = String(row?.distanciaManual || row?.recorrido || '').trim().toLowerCase();
+    if (!distanceRaw) return sum;
+    const numeric = Number.parseFloat(distanceRaw.replace(',', '.'));
     if (!Number.isFinite(numeric)) return sum;
     return sum + numeric;
   }, 0);
@@ -2686,7 +2698,8 @@ export default function CotizadorView({
       cfDescripcionMode: data.cfDescripcionMode || 'auto',
       cfPago: data.cfPago || newSocio().cfPago,
       cfValidez: data.cfValidez || newSocio().cfValidez,
-      _estado: 'borrador',
+    sTipoServicio: 'viaje', // viaje | transfer | gira
+    _estado: 'borrador',
     };
     const nextParams = {
       ...createDraftParams(),
@@ -3403,13 +3416,13 @@ export default function CotizadorView({
     setAutoSaveEnabled(true);
   };
 
-  const updateItineraryRow = (rowId, field, value) => {
-    updateActiveUnitItineraryRows(prev => prev.map(row => (
-      row.id === rowId
-        ? { ...row, [field]: field === 'hora' ? (normalizeTimeInput(value) || '') : value }
-        : row
-    )));
-  };
+const updateItineraryRow = (rowId, field, value) => {
+  updateActiveUnitItineraryRows(prev => prev.map(row => (
+    row.id === rowId
+      ? { ...row, [field]: field === 'hora' || field === 'horaRegreso' ? (normalizeTimeInput(value) || '') : value }
+      : row
+  )));
+};
 
   const removeItineraryRow = (rowId) => {
     updateActiveUnitItineraryRows(prev => prev.filter(row => row.id !== rowId));
@@ -3997,7 +4010,44 @@ export default function CotizadorView({
                 actions={<div style={{ padding: '6px 10px', borderRadius: 999, background: T.ambDim, color: T.AMB, fontSize: 11, fontWeight: 800 }}>{formatMoney(resData.subtotalOperativo, displayCurrency, moneyExchange)}</div>}
               >
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
-                  <Field label="Descripcion" style={{ gridColumn: 'span 12' }}>
+                  <div style={{ gridColumn: 'span 12', marginBottom: 4 }}>
+                    <div style={{ display: 'inline-flex', borderRadius: 12, background: '#1a1a2e', border: '1px solid #2a2a4a', padding: 3 }}>
+                      {[
+                        { value: 'viaje', label: 'Viaje de un d\u00eda' },
+                        { value: 'transfer', label: 'Transfer' },
+                        { value: 'gira', label: 'Gira' },
+                      ].map(opt => {
+                        const active = socio.sTipoServicio === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              setSocio(prev => ({ ...prev, sTipoServicio: opt.value }));
+                              setAutoSaveEnabled(true);
+                            }}
+                            style={{
+                              padding: '8px 20px',
+                              borderRadius: 10,
+                              border: 'none',
+                              background: active ? '#f97316' : 'transparent',
+                              color: active ? '#fff' : '#888',
+                              fontSize: 13,
+                              fontWeight: active ? 800 : 600,
+                              cursor: 'pointer',
+                              transition: 'all 0.15s',
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <Field label="PAX total" style={{ gridColumn: 'span 2' }}>
+                    <NumberInput name="sPax" value={socio.sPax} onChange={sChange} onBlur={handleGuardar} min="1" step="1" />
+                  </Field>
+                  <Field label="Descripcion" style={{ gridColumn: 'span 10' }}>
                     <div style={{ position: 'relative' }}>
                       <textarea
                         name="cfDescripcion"
@@ -4074,18 +4124,22 @@ export default function CotizadorView({
                       </button>
                     </div>
 
-                    {activeUnit && (() => {
-                      const vehiculo = vehiculos.find(item => item.id === activeUnit.vehiculoId);
-                      const activeUnitFuelCostPerKm = calcFuelCostPerKm(activeUnit.precioCombustibleLitro, activeUnit.rendimiento);
-                      const activeUnitFuelTotal = roundMoney((Number(activeUnit.km || 0) || 0) * activeUnitFuelCostPerKm);
-                      const activeIndex = units.findIndex(unit => unit.id === activeUnit.id);
+                    {(() => {
                       const requiredPax = Number(socio.sPax || 0);
-                      const unitCapacity = Number(vehiculo?.cap || 0);
                       const totalAssignedCapacity = units.reduce((sum, unit) => {
                         const currentVehicle = vehiculos.find(item => item.id === unit.vehiculoId);
                         return sum + (Number(currentVehicle?.cap || 0) || 0);
                       }, 0);
                       const remainingPax = Math.max(requiredPax - totalAssignedCapacity, 0);
+
+                      return (
+                        <>
+                      {activeUnit && (() => {
+                      const vehiculo = vehiculos.find(item => item.id === activeUnit.vehiculoId);
+                      const activeUnitFuelCostPerKm = calcFuelCostPerKm(activeUnit.precioCombustibleLitro, activeUnit.rendimiento);
+                      const activeUnitFuelTotal = roundMoney((Number(activeUnit.km || 0) || 0) * activeUnitFuelCostPerKm);
+                      const activeIndex = units.findIndex(unit => unit.id === activeUnit.id);
+                      const unitCapacity = Number(vehiculo?.cap || 0);
                       const serviceDate = getUnitServiceDate(activeUnit, socio.sFecha);
                       const occupiedTasks = serviceDate ? (scheduledTasksByDate[serviceDate] || []) : [];
                       const occupiedVehicleIds = new Set(occupiedTasks.map(getTaskVehicleId).filter(Boolean));
@@ -4171,32 +4225,95 @@ export default function CotizadorView({
                             <div style={{ gridColumn: '1 / -1', minWidth: 0 }}>
                               {activeUnitTab === 'itinerario' ? (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: itineraryRowsView.length > 3 ? 520 : 'none', overflowY: itineraryRowsView.length > 3 ? 'auto' : 'visible', paddingRight: itineraryRowsView.length > 3 ? 4 : 0 }}>
-                                    {itineraryRowsView.map((row, index) => (
-                                      <div key={row.id} style={{ padding: 12, borderRadius: 12, background: T.card2, border: `1px solid ${T.bdr}` }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-                                          <div style={{ fontSize: 11, fontWeight: 800, color: index === 0 ? T.AMB : T.sub, letterSpacing: 0.3 }}>TRAMO {index + 1}</div>
-                                          <button type="button" onClick={() => removeItineraryRow(row.id)} style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${T.RED}33`, background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>Quitar</button>
-                                        </div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 12 }}>
-                                          <Field label="Origen" style={{ gridColumn: 'span 6' }}><input value={row.origen} onChange={e => updateItineraryRow(row.id, 'origen', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Origen" /></Field>
-                                          <Field label="Destino" style={{ gridColumn: 'span 6' }}><input value={row.destino} onChange={e => updateItineraryRow(row.id, 'destino', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Destino" /></Field>
-                                          <Field label="Fecha" style={{ gridColumn: 'span 3' }}><input type="date" value={row.fecha} onChange={e => updateItineraryRow(row.id, 'fecha', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
-                                          <Field label="Hora" style={{ gridColumn: 'span 3' }}><input type="time" value={row.hora} onChange={e => updateItineraryRow(row.id, 'hora', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
-                                          <Field label="Recorrido" style={{ gridColumn: 'span 3' }}><input value={row.recorrido || ''} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} placeholder="0 km" /></Field>
-                                          <Field label="Duración" style={{ gridColumn: 'span 3' }}><input value={row.tiempoEstimado || ''} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} placeholder="0 min" /></Field>
-                                        </div>
+                                  {(() => {
+                                    const grouped = itineraryRowsView.reduce((acc, row) => {
+                                      const key = row.fecha || '_sin_fecha';
+                                      if (!acc[key]) acc[key] = [];
+                                      acc[key].push(row);
+                                      return acc;
+                                    }, {});
+                                    const sortedDays = Object.keys(grouped).sort();
+                                    return (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxHeight: itineraryRowsView.length > 3 ? 520 : 'none', overflowY: itineraryRowsView.length > 3 ? 'auto' : 'visible', paddingRight: itineraryRowsView.length > 3 ? 4 : 0 }}>
+                                        {sortedDays.length > 0 ? sortedDays.map((fechaKey) => {
+                                          const dayRows = grouped[fechaKey];
+                                          const dateLabel = fechaKey === '_sin_fecha' ? 'Sin fecha' : (() => {
+                                            const [y, m, d] = fechaKey.split('-');
+                                            return `${d}/${m}`;
+                                          })();
+                                          return (
+                                            <div key={fechaKey}>
+                                              <div style={{ fontSize: 11, fontWeight: 800, color: T.AMB, letterSpacing: 0.5, marginBottom: 10, textTransform: 'uppercase' }}>D\u00eda — {dateLabel}</div>
+                                              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                                {dayRows.map((row, index) => {
+                                                  const subtotal = Number(row.costoPorUnidad || 0) * Number(row.unidades || 0);
+                                                  const calculatedIVA = Math.round(subtotal * 0.13);
+                                                  const finalCost = subtotal + (Number(row.iva) || calculatedIVA);
+                                                  return (
+                                                    <div key={row.id} style={{ padding: 12, borderRadius: 12, background: T.card2, border: `1px solid ${T.bdr}` }}>
+                                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+                                                        <div style={{ fontSize: 11, fontWeight: 800, color: T.sub, letterSpacing: 0.3 }}>RUTA {index + 1}</div>
+                                                        <button type="button" onClick={() => removeItineraryRow(row.id)} style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${T.RED}33`, background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>Quitar</button>
+                                                      </div>
+                                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 10 }}>
+                                                        <Field label="Origen" style={{ gridColumn: 'span 4' }}><input value={row.origen} onChange={e => updateItineraryRow(row.id, 'origen', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Origen" /></Field>
+                                                        <Field label="Destino" style={{ gridColumn: 'span 4' }}><input value={row.destino} onChange={e => updateItineraryRow(row.id, 'destino', e.target.value)} onBlur={handleGuardar} style={inputStyle} placeholder="Destino" /></Field>
+                                                        <Field label="Waypoints" style={{ gridColumn: 'span 4' }}>
+                                                          <input value={Array.isArray(row.waypoints) ? row.waypoints.join(', ') : ''} onChange={e => updateItineraryRow(row.id, 'waypoints', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} onBlur={handleGuardar} style={inputStyle} placeholder="Puntos intermedios (separados por coma)" />
+                                                        </Field>
+                                                        <Field label="Fecha" style={{ gridColumn: 'span 3' }}><input type="date" value={row.fecha} onChange={e => updateItineraryRow(row.id, 'fecha', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
+                                                        <Field label="Hora salida" style={{ gridColumn: 'span 3' }}><input type="time" value={row.hora} onChange={e => updateItineraryRow(row.id, 'hora', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
+                                                        <Field label="Hora regreso" style={{ gridColumn: 'span 3' }}><input type="time" value={row.horaRegreso || ''} onChange={e => updateItineraryRow(row.id, 'horaRegreso', e.target.value)} onBlur={handleGuardar} style={inputStyle} /></Field>
+                                                        <Field label="Distancia" style={{ gridColumn: 'span 3' }}>
+                                                          <div style={{ display: 'flex', gap: 4 }}>
+                                                            <input value={row.distanciaManual || row.recorrido || ''} onChange={e => updateItineraryRow(row.id, 'distanciaManual', e.target.value)} onBlur={handleGuardar} style={{ ...inputStyle, flex: 1 }} placeholder="km" />
+                                                            <span style={{ fontSize: 11, color: T.mute, alignSelf: 'center', whiteSpace: 'nowrap' }}>km</span>
+                                                          </div>
+                                                        </Field>
+                                                      </div>
+                                                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.bdr}`, display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 10 }}>
+                                                        <Field label="PAX" style={{ gridColumn: 'span 2' }}><NumberInput value={row.pax} onChange={e => updateItineraryRow(row.id, 'pax', e.target.value)} onBlur={handleGuardar} min="0" /></Field>
+                                                        <Field label="Unidades" style={{ gridColumn: 'span 2' }}><NumberInput value={row.unidades} onChange={e => updateItineraryRow(row.id, 'unidades', e.target.value)} onBlur={handleGuardar} min="0" /></Field>
+                                                        <Field label="Costo por unidad" style={{ gridColumn: 'span 3' }}><MonetaryInput value={row.costoPorUnidad} onChange={e => updateItineraryRow(row.id, 'costoPorUnidad', e.target.value)} onBlur={handleGuardar} symbol="\u20A1" /></Field>
+                                                        <Field label="IVA" style={{ gridColumn: 'span 2' }}>
+                                                          <MonetaryInput value={row.iva} onChange={e => updateItineraryRow(row.id, 'iva', e.target.value)} onBlur={handleGuardar} symbol="\u20A1" />
+                                                        </Field>
+                                                        <Field label="Costo final" style={{ gridColumn: 'span 3' }}>
+                                                          <input value={formatMoney(finalCost, 'CRC')} readOnly style={{ ...inputStyle, color: T.AMB, cursor: 'default', fontWeight: 800, textAlign: 'right' }} />
+                                                        </Field>
+                                                      </div>
+                                                      <div style={{ marginTop: 8, display: 'flex', gap: 16, alignItems: 'center' }}>
+                                                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.sub, cursor: 'pointer' }}>
+                                                          <input type="checkbox" checked={row.hospedajeActivo} onChange={e => updateItineraryRow(row.id, 'hospedajeActivo', e.target.checked)} />
+                                                          Hospedaje
+                                                          {row.hospedajeActivo && (
+                                                            <MonetaryInput value={row.hospedajeCosto} onChange={e => updateItineraryRow(row.id, 'hospedajeCosto', e.target.value)} onBlur={handleGuardar} symbol="\u20A1" inputStyle={{ width: 90 }} />
+                                                          )}
+                                                        </label>
+                                                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.sub, cursor: 'pointer' }}>
+                                                          <input type="checkbox" checked={row.viaticosActivo} onChange={e => updateItineraryRow(row.id, 'viaticosActivo', e.target.checked)} />
+                                                          Vi\u00e1ticos
+                                                          {row.viaticosActivo && (
+                                                            <MonetaryInput value={row.viaticosCosto} onChange={e => updateItineraryRow(row.id, 'viaticosCosto', e.target.value)} onBlur={handleGuardar} symbol="\u20A1" inputStyle={{ width: 90 }} />
+                                                          )}
+                                                        </label>
+                                                      </div>
+                                                    </div>
+                                                  );
+                                                })}
+                                              </div>
+                                            </div>
+                                          );
+                                        }) : (
+                                          <div style={{ padding: 14, borderRadius: 12, background: T.card2, border: `1px dashed ${T.bdr}`, color: T.mute, fontSize: 13 }}>
+                                            No hay rutas cargadas. Agrega una ruta o usa el mapa para traer el recorrido.
+                                          </div>
+                                        )}
                                       </div>
-                                    ))}
-                                  </div>
+                                    );
+                                  })()}
 
-                                  {!itineraryRowsView.length && (
-                                    <div style={{ padding: 14, borderRadius: 12, background: T.card2, border: `1px dashed ${T.bdr}`, color: T.mute, fontSize: 13 }}>
-                                      No hay tramos cargados. La nueva unidad copia por defecto el itinerario actual, y desde el mapa puedes volver a traerlo completo.
-                                    </div>
-                                  )}
-
-                                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) 40px', gap: 10, alignItems: 'stretch' }}>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 40px', gap: 10, alignItems: 'stretch' }}>
                                     <div style={{ padding: '10px 12px', borderRadius: 12, border: `1px solid ${T.bdr}`, background: T.card2 }}>
                                       <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, marginBottom: 6 }}>TOTAL KM</div>
                                       <div style={{ fontSize: 16, fontWeight: 800, color: T.txt }}>{formatDistance(sumItineraryDistanceKm(itineraryRowsView) * 1000)}</div>
@@ -4204,6 +4321,21 @@ export default function CotizadorView({
                                     <div style={{ padding: '10px 12px', borderRadius: 12, border: `1px solid ${T.bdr}`, background: T.card2 }}>
                                       <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, marginBottom: 6 }}>TOTAL TIEMPO</div>
                                       <div style={{ fontSize: 16, fontWeight: 800, color: T.txt }}>{formatDuration(sumItineraryDurationSeconds(itineraryRowsView))}</div>
+                                    </div>
+                                    <div style={{ padding: '10px 12px', borderRadius: 12, border: `1px solid ${T.bdr}`, background: T.card2 }}>
+                                      <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, marginBottom: 6 }}>COSTO RUTAS</div>
+                                      <div style={{ fontSize: 16, fontWeight: 800, color: T.AMB }}>
+                                        {(() => {
+                                          const totalCost = itineraryRowsView.reduce((sum, row) => {
+                                            const subtotal = Number(row.costoPorUnidad || 0) * Number(row.unidades || 0);
+                                            const iva = Number(row.iva) || Math.round(subtotal * 0.13);
+                                            return sum + subtotal + iva
+                                              + (row.hospedajeActivo ? Number(row.hospedajeCosto || 0) : 0)
+                                              + (row.viaticosActivo ? Number(row.viaticosCosto || 0) : 0);
+                                          }, 0);
+                                          return formatMoney(totalCost, 'CRC');
+                                        })()}
+                                      </div>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                       <button
@@ -4232,6 +4364,26 @@ export default function CotizadorView({
                                         }}
                                       >
                                         <Map size={14} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        title="Agregar ruta"
+                                        onClick={addItineraryRow}
+                                        style={{
+                                          width: 40,
+                                          height: 40,
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          borderRadius: 10,
+                                          border: `1px solid ${T.GRN}44`,
+                                          background: T.grnDim,
+                                          color: T.GRN,
+                                          cursor: 'pointer',
+                                          flexShrink: 0,
+                                        }}
+                                      >
+                                        <Plus size={14} />
                                       </button>
                                       <button
                                         type="button"
@@ -4282,9 +4434,6 @@ export default function CotizadorView({
                                         </Field>
                                         <Field label={`Precio ${activeUnit.tipoCombustible || 'Diésel'} / litro`} style={{ gridColumn: 'span 6' }}>
                                           <MonetaryInput value={activeUnit.precioCombustibleLitro} onChange={e => updateUnit(activeUnit.id, 'precioCombustibleLitro', e.target.value)} onBlur={handleGuardar} symbol="₡" />
-                                        </Field>
-                                        <Field label="Faltan por cubrir" style={{ gridColumn: 'span 6' }}>
-                                          <input value={remainingPax > 0 ? `${remainingPax} pax` : 'Completo'} readOnly style={{ ...inputStyle, color: remainingPax > 0 ? T.AMB : T.GRN, fontWeight: 700, cursor: 'default' }} />
                                         </Field>
                                       </div>
 
@@ -4397,6 +4546,18 @@ export default function CotizadorView({
                             </div>
                           </div>
                         </div>
+                      );
+                    })()}
+                          <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
+                            <span style={{ fontSize: 12, color: T.sub }}>PAX total: <strong style={{ color: T.txt }}>{requiredPax}</strong></span>
+                            <span style={{ fontSize: 12, color: T.sub }}>
+                              Capacidad asignada: <strong style={{ color: T.txt }}>{totalAssignedCapacity}</strong>
+                            </span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: remainingPax > 0 ? T.AMB : T.GRN }}>
+                              Faltan por cubrir: {remainingPax > 0 ? `${remainingPax} pax` : 'Completo'}
+                            </span>
+                          </div>
+                        </>
                       );
                     })()}
                   </div>
