@@ -647,6 +647,37 @@ function MapLocationPicker({
   );
 }
 
+function ConfirmChoiceModal({ open, title, message, confirmLabel, cancelLabel = 'Cancelar', danger = false, onConfirm, onClose }) {
+  if (!open) return null;
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.62)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 95 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ width: 'min(420px, 100%)', background: T.card, border: `1px solid ${danger ? `${T.RED}44` : T.bdr}`, borderRadius: 18, boxShadow: '0 30px 80px rgba(15,23,42,0.35)', padding: 20 }}
+        onClick={event => event.stopPropagation()}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 12, background: danger ? T.redDim : T.ambDim, color: danger ? T.RED : T.AMB, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {danger ? <Trash2 size={16} /> : <Plus size={16} />}
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: T.txt }}>{title}</div>
+        </div>
+        <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 18 }}>{message}</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button type="button" onClick={onClose} style={{ padding: '10px 14px', borderRadius: 8, border: `1px solid ${T.bdr2}`, background: 'transparent', color: T.sub, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+            {cancelLabel}
+          </button>
+          <button type="button" onClick={onConfirm} style={{ padding: '10px 14px', borderRadius: 8, border: `1px solid ${danger ? T.RED : T.AMB}`, background: danger ? T.redDim : T.AMB, color: danger ? T.RED : '#23180a', cursor: 'pointer', fontSize: 12, fontWeight: 800 }}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function makeProformaNumber() {
   return `PRO-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
 }
@@ -1252,6 +1283,7 @@ function createUnitDraftFromSource(sourceUnit = {}, vehiculos = [], fuelPrices =
       vehiculoId: null,
       vehiculoLabel: '',
     })),
+    itineraryDays: (sourceUnit.itineraryDays || []).map(day => createItineraryDay(day)),
     vehiculoId: null,
   }, vehiculos, null, fuelPrices, tc, { allowSuggestedVehicle: false });
 }
@@ -1383,6 +1415,7 @@ function createItineraryDayRow(base = {}) {
     lugar: base.lugar || '',
     hora: normalizeTimeInput(base.hora || '') || '',
     km: Number(base.km) || 0,
+    durationMin: Number(base.durationMin) || 0,
     coords: base.coords || null,
   };
 }
@@ -1409,6 +1442,7 @@ function itineraryDaysToRows(days) {
         origen: from.lugar || '',
         destino: to.lugar || '',
         recorrido: String(to.km || ''),
+        tiempoEstimado: formatDuration((Number(to.durationMin) || 0) * 60),
         vehiculoId: null,
       }));
     }
@@ -1664,6 +1698,7 @@ function buildItineraryDaysFromRouteResults(routeResults, { initialTime = '', fa
         lugar: descriptions[pointIndex] || point || '',
         hora: days.length === 0 && pointIndex === 0 ? (normalizeTimeInput(initialTime || '') || '') : '',
         km: pointIndex === 0 ? 0 : Math.round((Number(legs[pointIndex - 1]?.distance?.value ?? legs[pointIndex - 1]?.distance ?? 0) || 0) / 1000),
+        durationMin: pointIndex === 0 ? 0 : Math.round((Number(legs[pointIndex - 1]?.duration?.value ?? legs[pointIndex - 1]?.duration ?? 0) || 0) / 60),
         coords: parseRouteCoordinate(point),
       }));
       days.push(createItineraryDay({
@@ -1696,6 +1731,7 @@ function buildItineraryDaysFromRouteResults(routeResults, { initialTime = '', fa
           lugar: segment.toDesc || segment.to || '',
           hora: '',
           km: Math.round((Number(segment.distance_m) || 0) / 1000),
+          durationMin: Math.round((Number(segment.duration_s) || 0) / 60),
           coords: parseRouteCoordinate(segment.to),
         });
       });
@@ -2184,6 +2220,8 @@ export default function CotizadorView({
   const [showRouteDesigner, setShowRouteDesigner] = useState(false);
   const [routeDesignerUnitId, setRouteDesignerUnitId] = useState(null);
   const [routeDesignerViewportHeight, setRouteDesignerViewportHeight] = useState(null);
+  const [unitDeleteTargetId, setUnitDeleteTargetId] = useState(null);
+  const [unitClonePrompt, setUnitClonePrompt] = useState(null);
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState('');
 
   const remainingPax = useMemo(() => {
@@ -3523,6 +3561,7 @@ export default function CotizadorView({
       };
       if (field === 'sOrigen') next.sOrigenCoords = null;
       if (field === 'sDestino') next.sDestinoCoords = null;
+      if (field === 'sRegreso') next.sRegresoCoords = null;
       return applyFuelMetrics(next);
     }));
     setAutoSaveEnabled(true);
@@ -3631,11 +3670,15 @@ export default function CotizadorView({
       next.sHora = firstRow.hora || '';
       next.sOrigen = firstRow.origen || '';
       next.sDestino = lastRow?.destino || firstRow.destino || '';
+      next.sRegreso = '';
+      next.sRegresoCoords = null;
     } else {
       next.sFecha = '';
       next.sHora = '';
       next.sOrigen = '';
       next.sDestino = '';
+      next.sRegreso = '';
+      next.sRegresoCoords = null;
     }
     if (rows.some(row => String(row.recorrido || '').trim())) {
       next.km = totalKm;
@@ -3661,12 +3704,58 @@ export default function CotizadorView({
     setAutoSaveEnabled(true);
   };
 
-  const addUnit = () => {
-    const sourceUnit = activeUnit || units[units.length - 1] || {};
+  const unitHasItinerary = (unit = {}) => (
+    (unit.itineraryDays || []).some(day => (day.rows || []).some(row => String(row.lugar || '').trim()))
+    || sanitizeItineraryRows(unit.itineraryRows || []).some(row => itineraryRowComplete(row))
+    || Boolean(unit.itinerary)
+  );
+
+  const buildUnitFromSource = (sourceUnit = {}, copyItinerary = true) => {
     const nextUnit = createUnitDraftFromSource(sourceUnit, vehiculos, fuelPrices, params.tc);
+    if (copyItinerary) return nextUnit;
+    return applyFuelMetrics({
+      ...nextUnit,
+      itinerary: null,
+      itineraryRows: [],
+      itineraryDays: [],
+      sOrigen: '',
+      sOrigenCoords: null,
+      sDestino: '',
+      sDestinoCoords: null,
+      sRegreso: '',
+      sRegresoCoords: null,
+      km: 0,
+    });
+  };
+
+  const insertNewUnit = (sourceUnit = {}, copyItinerary = true) => {
+    const nextUnit = buildUnitFromSource(sourceUnit, copyItinerary);
     setUnits(prev => [...prev, nextUnit]);
     setActiveUnitId(nextUnit.id);
     setActiveUnitTab('operacion');
+    setAutoSaveEnabled(true);
+  };
+
+  const addUnit = () => {
+    const sourceUnit = activeUnit || units[units.length - 1] || {};
+    if (unitHasItinerary(sourceUnit)) {
+      setUnitClonePrompt(sourceUnit);
+      return;
+    }
+    insertNewUnit(sourceUnit, false);
+  };
+
+  const deleteUnit = (unitId) => {
+    const next = units.filter(unit => unit.id !== unitId);
+    if (next.length) {
+      setUnits(next);
+      if (activeUnitId === unitId) setActiveUnitId(next[0].id);
+    } else {
+      const replacement = createProformaUnit({}, vehiculos, null, fuelPrices, params.tc);
+      setActiveUnitId(replacement.id);
+      setUnits([replacement]);
+    }
+    setUnitDeleteTargetId(null);
     setAutoSaveEnabled(true);
   };
 
@@ -4388,7 +4477,7 @@ const updateItineraryRow = (rowId, field, value) => {
                   <div style={{ gridColumn: 'span 12', marginBottom: 4 }}>
                     <div style={{ display: 'flex', borderRadius: 12, background: T.card2, border: `1px solid ${T.bdr}`, padding: 3, boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.12)' }}>
                       {[
-                        { value: 'viaje', label: 'Viaje de un d\u00eda' },
+                        { value: 'viaje', label: 'One day' },
                         { value: 'transfer', label: 'Transfer' },
                         { value: 'gira', label: 'Gira' },
                       ].map(opt => {
@@ -4569,29 +4658,39 @@ const updateItineraryRow = (rowId, field, value) => {
                                     {unitCapacity ? `${unitCapacity} pax disponibles` : 'Sin capacidad definida'}
                                   </div>
                                 </div>
-                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: 4, borderRadius: 999, background: T.card2, border: `1px solid ${T.bdr}` }}>
-                                  {unitPanelTabs.map(tab => {
-                                    const isCurrentTab = resolvedUnitTab === tab.id;
-                                    return (
-                                      <button
-                                        key={tab.id}
-                                        type="button"
-                                        onClick={() => setActiveUnitTab(tab.id)}
-                                        style={{
-                                          border: 'none',
-                                          borderRadius: 999,
-                                          padding: '8px 12px',
-                                          background: isCurrentTab ? T.ambDim : 'transparent',
-                                          color: isCurrentTab ? T.AMB : T.sub,
-                                          fontSize: 12,
-                                          fontWeight: 800,
-                                          cursor: 'pointer',
-                                        }}
-                                      >
-                                        {tab.label}
-                                      </button>
-                                    );
-                                  })}
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: 4, borderRadius: 999, background: T.card2, border: `1px solid ${T.bdr}` }}>
+                                    {unitPanelTabs.map(tab => {
+                                      const isCurrentTab = resolvedUnitTab === tab.id;
+                                      return (
+                                        <button
+                                          key={tab.id}
+                                          type="button"
+                                          onClick={() => setActiveUnitTab(tab.id)}
+                                          style={{
+                                            border: 'none',
+                                            borderRadius: 999,
+                                            padding: '8px 12px',
+                                            background: isCurrentTab ? T.ambDim : 'transparent',
+                                            color: isCurrentTab ? T.AMB : T.sub,
+                                            fontSize: 12,
+                                            fontWeight: 800,
+                                            cursor: 'pointer',
+                                          }}
+                                        >
+                                          {tab.label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setUnitDeleteTargetId(activeUnit.id)}
+                                    title="Eliminar unidad"
+                                    style={{ width: 34, height: 34, borderRadius: 10, border: `1px solid ${T.RED}44`, background: T.redDim, color: T.RED, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
                                 </div>
                               </div>
                             </div>
@@ -5272,6 +5371,35 @@ const updateItineraryRow = (rowId, field, value) => {
           </>
         )}
       </div>
+
+      <ConfirmChoiceModal
+        open={Boolean(unitClonePrompt)}
+        title="Duplicar itinerario"
+        message="Esta unidad tiene un itinerario cargado. ¿Quieres copiarlo completo a la nueva unidad?"
+        confirmLabel="Copiar itinerario"
+        cancelLabel="Crear vacía"
+        onConfirm={() => {
+          insertNewUnit(unitClonePrompt || {}, true);
+          setUnitClonePrompt(null);
+        }}
+        onClose={() => {
+          insertNewUnit(unitClonePrompt || {}, false);
+          setUnitClonePrompt(null);
+        }}
+      />
+
+      <ConfirmChoiceModal
+        open={Boolean(unitDeleteTargetId)}
+        title="Eliminar unidad"
+        message={`¿Seguro que quieres eliminar ${(() => {
+          const targetIndex = units.findIndex(unit => unit.id === unitDeleteTargetId);
+          return targetIndex >= 0 ? `la unidad ${targetIndex + 1}` : 'esta unidad';
+        })()} de esta proforma? Si la ocupas de nuevo, tendrás que crearla otra vez.`}
+        confirmLabel="Eliminar unidad"
+        danger
+        onConfirm={() => deleteUnit(unitDeleteTargetId)}
+        onClose={() => setUnitDeleteTargetId(null)}
+      />
 
       <MapLocationPicker
         open={Boolean(mapPickerField)}

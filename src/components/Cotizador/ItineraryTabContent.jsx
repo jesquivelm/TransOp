@@ -12,16 +12,29 @@ function dayKm(day) {
   return (day.rows || []).reduce((a, r, i) => i === 0 ? a : a + (Number(r.km) || 0), 0);
 }
 
+function dayMinutes(day) {
+  return (day.rows || []).reduce((a, r, i) => i === 0 ? a : a + (Number(r.durationMin) || 0), 0);
+}
+
 function totalKm(days) {
   return days.reduce((a, d) => a + dayKm(d), 0);
+}
+
+function totalMinutes(days) {
+  return days.reduce((a, d) => a + dayMinutes(d), 0);
 }
 
 function countStops(days) {
   return days.reduce((a, d) => a + (d.rows || []).filter(r => r.tipo === 'inter').length, 0);
 }
 
-function avgKm(days) {
-  return days.length > 0 ? Math.round(totalKm(days) / days.length) : 0;
+function fmtDuration(minutes) {
+  const total = Math.round(Number(minutes) || 0);
+  if (total <= 0) return '-';
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h > 0) return `${h}h ${m}min`;
+  return `${m} min`;
 }
 
 function createDefaultDay(prevDay) {
@@ -35,9 +48,9 @@ function createDefaultDay(prevDay) {
     fecha: nf,
     open: true,
     rows: [
-      { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}1`, tipo: 'salida', lugar: lastPlace, hora: '07:00', km: 0, coords: null },
-      { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}2`, tipo: 'destino', lugar: '', hora: '10:00', km: 0, coords: null },
-      { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}3`, tipo: 'regreso', lugar: '', hora: '17:00', km: 0, coords: null },
+      { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}1`, tipo: 'salida', lugar: lastPlace, hora: '07:00', km: 0, durationMin: 0, coords: null },
+      { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}2`, tipo: 'destino', lugar: '', hora: '10:00', km: 0, durationMin: 0, coords: null },
+      { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}3`, tipo: 'regreso', lugar: '', hora: '17:00', km: 0, durationMin: 0, coords: null },
     ],
   };
 }
@@ -53,8 +66,11 @@ function calcDistancesBetweenPoints(maps, points) {
       { origin, destination, waypoints, travelMode: maps.TravelMode.DRIVING, unitSystem: maps.UnitSystem.METRIC },
       (result, status) => {
         if (status === 'OK' && result?.routes?.[0]?.legs) {
-          const legKms = result.routes[0].legs.map(leg => Math.round((leg.distance?.value || 0) / 1000));
-          resolve(legKms);
+          const legs = result.routes[0].legs.map(leg => ({
+            km: Math.round((leg.distance?.value || 0) / 1000),
+            durationMin: Math.round((leg.duration?.value || 0) / 60),
+          }));
+          resolve(legs);
         } else {
           resolve(null);
         }
@@ -115,9 +131,9 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
       fecha: today,
       open: true,
       rows: [
-        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}1`, tipo: 'salida', lugar: '', hora: '07:00', km: 0, coords: null },
-        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}2`, tipo: 'destino', lugar: '', hora: '10:00', km: 0, coords: null },
-        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}3`, tipo: 'regreso', lugar: '', hora: '17:00', km: 0, coords: null },
+        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}1`, tipo: 'salida', lugar: '', hora: '07:00', km: 0, durationMin: 0, coords: null },
+        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}2`, tipo: 'destino', lugar: '', hora: '10:00', km: 0, durationMin: 0, coords: null },
+        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}3`, tipo: 'regreso', lugar: '', hora: '17:00', km: 0, durationMin: 0, coords: null },
       ],
     });
   }, []);
@@ -132,7 +148,7 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
       const nextRows = [
         ...rows.slice(0, regresoIdx),
         { ...regreso, tipo: 'destino' },
-        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, tipo: 'regreso', lugar: '', hora: regreso.hora || '17:00', km: 0, coords: null },
+        { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, tipo: 'regreso', lugar: '', hora: regreso.hora || '17:00', km: 0, durationMin: 0, coords: null },
         ...rows.slice(regresoIdx + 1),
       ];
       onUpdateDay(day.id, 'rows', nextRows);
@@ -140,8 +156,8 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
   }, [days, onUpdateDay]);
 
   const kmTotal = useMemo(() => totalKm(days), [days]);
+  const minutesTotal = useMemo(() => totalMinutes(days), [days]);
   const paradas = useMemo(() => countStops(days), [days]);
-  const promKm = useMemo(() => avgKm(days), [days]);
 
   useEffect(() => {
     if (!googleMapsApiKey || mapsLoadedRef.current) return;
@@ -191,11 +207,12 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
     const places = rows.map(stopRouteValue).filter(Boolean);
     if (places.length < 2) return;
     setCalculating(true);
-    const kms = await calcDistancesBetweenPoints(mapsApiRef.current, places);
-    if (kms && kms.length === rows.length - 1) {
+    const legs = await calcDistancesBetweenPoints(mapsApiRef.current, places);
+    if (legs && legs.length === rows.length - 1) {
       rows.forEach((r, i) => {
         if (i > 0) {
-          r.km = kms[i - 1] || 0;
+          r.km = legs[i - 1]?.km || 0;
+          r.durationMin = legs[i - 1]?.durationMin || 0;
         }
       });
       onUpdateDay(dayId, 'rows', [...rows]);
@@ -243,12 +260,13 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
         <Metric label="D&iacute;as" value={days.length} />
         <Metric label="Paradas totales" value={paradas} color={T.GRN} />
         <Metric label="Km totales" value={`${kmTotal} km`} />
-        <Metric label="Km promedio/d&iacute;a" value={`${promKm} km`} />
+        <Metric label="Tiempo total" value={fmtDuration(minutesTotal)} />
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: sortedDays.length > 2 ? 460 : 'none', overflowY: sortedDays.length > 2 ? 'auto' : 'visible', paddingRight: sortedDays.length > 2 ? 4 : 0 }}>
         {sortedDays.map((day, di) => {
           const dkm = dayKm(day);
+          const dminutes = dayMinutes(day);
           const salida = day.rows?.[0]?.lugar || '';
           const regreso = day.rows?.[day.rows.length - 1]?.lugar || '';
           const paradasCount = (day.rows || []).filter(r => r.tipo === 'inter').length;
@@ -284,17 +302,14 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
                         <th style={{ color: T.mute, fontWeight: 500, padding: '4px 6px', borderBottom: `0.5px solid ${T.bdr2}`, textAlign: 'left' }}>Lugar</th>
                         <th style={{ width: 62, color: T.mute, fontWeight: 500, padding: '4px 6px', borderBottom: `0.5px solid ${T.bdr2}`, textAlign: 'left' }}>Hora</th>
                         <th style={{ width: 64, color: T.mute, fontWeight: 500, padding: '4px 6px', borderBottom: `0.5px solid ${T.bdr2}`, textAlign: 'right' }}>Km</th>
-                        <th style={{ width: 66, color: T.mute, fontWeight: 500, padding: '4px 6px', borderBottom: `0.5px solid ${T.bdr2}`, textAlign: 'right' }}>Km/d&iacute;a</th>
+                        <th style={{ width: 76, color: T.mute, fontWeight: 500, padding: '4px 6px', borderBottom: `0.5px solid ${T.bdr2}`, textAlign: 'right' }}>Tiempo</th>
                         <th style={{ width: 22, color: T.mute, fontWeight: 500, padding: '4px 6px', borderBottom: `0.5px solid ${T.bdr2}` }}></th>
                       </tr>
                     </thead>
                     <tbody>
                       {(() => {
-                        let acum = 0;
                         return (day.rows || []).map((stop, si) => {
-                          if (si > 0) acum += Number(stop.km) || 0;
                           const txtCls = T.txt;
-                          const isLugar = si > 0;
                           const canDel = stop.tipo === 'inter';
                           return (
                             <tr key={stop.id} style={{ borderBottom: si < (day.rows || []).length - 1 ? `0.5px solid ${T.bdr2}` : 'none', background: 'transparent' }}>
@@ -329,7 +344,7 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
                                   />
                                 )}
                               </td>
-                              <td style={{ padding: '4px 6px', textAlign: 'right', fontSize: 11, color: T.sub }}>{acum} km</td>
+                              <td style={{ padding: '4px 6px', textAlign: 'right', fontSize: 11, color: T.sub, whiteSpace: 'nowrap' }}>{si === 0 ? '-' : fmtDuration(stop.durationMin)}</td>
                               <td style={{ padding: '4px 6px', textAlign: 'center' }}>
                                 {canDel ? (
                                   <button type="button" onClick={() => onRemoveStop(day.id, stop.id)} style={{ padding: 0, border: 'none', background: 'transparent', color: T.sub, cursor: 'pointer', fontSize: 14, lineHeight: 1 }} title="Quitar parada">&times;</button>
@@ -344,7 +359,7 @@ export default function ItineraryTabContent({ unit, googleMapsApiKey, esViaje, o
                       <tr>
                         <td colSpan="3" style={{ textAlign: 'right', fontSize: 11, fontWeight: 600, color: T.sub, padding: '5px 6px', borderTop: `0.5px solid ${T.bdr2}`, background: T.card2 }}>Total d&iacute;a {di + 1}</td>
                         <td style={{ textAlign: 'right', fontSize: 11, fontWeight: 600, color: T.txt, padding: '5px 6px', borderTop: `0.5px solid ${T.bdr2}`, background: T.card2 }}>{dkm} km</td>
-                        <td colSpan="2" style={{ textAlign: 'right', fontSize: 11, fontWeight: 600, color: T.GRN, padding: '5px 6px', borderTop: `0.5px solid ${T.bdr2}`, background: T.card2 }}>{dkm} km</td>
+                        <td colSpan="2" style={{ textAlign: 'right', fontSize: 11, fontWeight: 600, color: T.GRN, padding: '5px 6px', borderTop: `0.5px solid ${T.bdr2}`, background: T.card2 }}>{fmtDuration(dminutes)}</td>
                       </tr>
                     </tfoot>
                   </table>
