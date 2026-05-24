@@ -59,6 +59,39 @@
 
         .map-container { width: 100%; height: 100%; position: relative; }
         #map { width: 100%; height: 100%; }
+        .pac-container {
+            z-index: 2147483647 !important;
+            border: 1px solid rgba(148,163,184,0.35);
+            border-radius: 10px;
+            box-shadow: 0 18px 40px rgba(15,23,42,0.24);
+            font-family: 'Outfit', Calibri, "Carlito", "Segoe UI", Arial, sans-serif;
+        }
+        .places-suggest {
+            position: fixed;
+            z-index: 2147483646;
+            background: var(--panel);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            box-shadow: 0 18px 40px rgba(15,23,42,0.22);
+            overflow: hidden;
+            max-height: 240px;
+            overflow-y: auto;
+        }
+        .places-suggest button {
+            width: 100%;
+            border: 0;
+            border-bottom: 1px solid var(--border);
+            background: transparent;
+            color: inherit;
+            text-align: left;
+            padding: 10px 12px;
+            font: inherit;
+            cursor: pointer;
+        }
+        .places-suggest button:hover {
+            background: rgba(139,195,74,0.14);
+        }
 
         .floating-panel {
             position: absolute;
@@ -907,6 +940,12 @@
                     </svg>
                     Guardar
                 </button>
+                <button class="btn btn-save" id="applyCurrentRouteBtn" onclick="saveRoute({ applyToParent: true })">
+                    <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M5 12h12M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    Usar
+                </button>
             </div>
         </div>
     </div>
@@ -1014,7 +1053,25 @@
             if (trafficToggle) trafficToggle.style.opacity = showTraffic ? '1' : '0.72';
         }
 
-        function initMap() {
+        async function ensureGooglePlaces() {
+            if (window.google?.maps?.places?.Autocomplete) return true;
+            if (window.google?.maps?.importLibrary) {
+                try {
+                    await google.maps.importLibrary('places');
+                    return Boolean(window.google?.maps?.places?.Autocomplete);
+                } catch (error) {
+                    mapsAuthFailureMessage = error.message || 'No se pudo cargar Places API.';
+                    showToast(mapsAuthFailureMessage, 'error');
+                }
+            }
+            return false;
+        }
+
+        async function initMap() {
+            if (!window.google?.maps) {
+                showToast('Google Maps no está disponible. Revisa la API key.', 'error');
+                return;
+            }
             map = new google.maps.Map(document.getElementById('map'), {
                 center: COSTA_RICA_CENTER,
                 zoom: 8,
@@ -1023,6 +1080,7 @@
             });
             syncTrafficLayer();
 
+            await ensureGooglePlaces();
             setupAutocomplete();
             loadInitialState();
             isMapReady = true;
@@ -1121,54 +1179,225 @@
             }
         }
 
-        function setupAutocomplete() {
-            const originInput = document.getElementById('origin');
-            const destInput = document.getElementById('destination');
-            
-            const acOrigin = new google.maps.places.Autocomplete(originInput);
-            const acDest = new google.maps.places.Autocomplete(destInput);
-            const countryRestriction = { country: 'cr' };
-            const crBounds = new google.maps.LatLngBounds(
+        const fallbackPlaceBindings = new WeakMap();
+        let fallbackPlacesService = null;
+        let fallbackGeocoder = null;
+
+        function nativePlacesVisible() {
+            return Array.from(document.querySelectorAll('.pac-container')).some(el => {
+                const style = getComputedStyle(el);
+                return style.display !== 'none' && style.visibility !== 'hidden' && el.getBoundingClientRect().height > 0;
+            });
+        }
+
+        function positionPlacesBox(input, box) {
+            const rect = input.getBoundingClientRect();
+            box.style.left = `${rect.left}px`;
+            box.style.top = `${rect.bottom + 4}px`;
+            box.style.width = `${rect.width}px`;
+        }
+
+        function hidePlacesBox(box) {
+            if (box) box.style.display = 'none';
+        }
+
+        function hideAllPlaceSuggestions() {
+            document.querySelectorAll('.places-suggest').forEach(box => hidePlacesBox(box));
+        }
+
+        function getAutocompleteBounds() {
+            return new google.maps.LatLngBounds(
                 new google.maps.LatLng(COSTA_RICA_BOUNDS.south, COSTA_RICA_BOUNDS.west),
                 new google.maps.LatLng(COSTA_RICA_BOUNDS.north, COSTA_RICA_BOUNDS.east)
             );
-            acOrigin.setComponentRestrictions(countryRestriction);
-            acDest.setComponentRestrictions(countryRestriction);
-            acOrigin.setBounds(crBounds);
-            acDest.setBounds(crBounds);
+        }
 
-        // Auto calculate on place select + autofill description
-        acOrigin.addListener('place_changed', () => {
-            const place = acOrigin.getPlace();
+        function getFallbackPlaceDetails(prediction) {
+            if (prediction._place) return Promise.resolve(prediction._place);
+            if (!fallbackPlacesService && map && google?.maps?.places?.PlacesService) {
+                fallbackPlacesService = new google.maps.places.PlacesService(map);
+            }
+            if (prediction.place_id && fallbackPlacesService) {
+                return new Promise(resolve => {
+                    fallbackPlacesService.getDetails({
+                        placeId: prediction.place_id,
+                        fields: ['name', 'formatted_address', 'geometry', 'address_components']
+                    }, (place, status) => {
+                        if (status === google.maps.places.PlacesServiceStatus.OK && place?.geometry) resolve(place);
+                        else resolve({ name: prediction.description, formatted_address: prediction.description });
+                    });
+                });
+            }
+            return Promise.resolve({ name: prediction.description, formatted_address: prediction.description });
+        }
+
+        function getFallbackPredictions(query) {
+            const text = String(query || '').trim();
+            if (text.length < 3 || !window.google?.maps) return Promise.resolve([]);
+            if (google.maps.places?.AutocompleteService) {
+                const service = new google.maps.places.AutocompleteService();
+                return new Promise(resolve => {
+                    service.getPlacePredictions({
+                        input: text,
+                        componentRestrictions: { country: 'cr' },
+                        bounds: getAutocompleteBounds()
+                    }, (predictions, status) => {
+                        if (status === google.maps.places.PlacesServiceStatus.OK && predictions?.length) {
+                            resolve(predictions.slice(0, 6));
+                            return;
+                        }
+                        resolve([]);
+                    });
+                }).then(async predictions => {
+                    if (predictions.length) return predictions;
+                    return getGeocoderPredictions(text);
+                });
+            }
+            return getGeocoderPredictions(text);
+        }
+
+        function getGeocoderPredictions(query) {
+            if (!fallbackGeocoder && google?.maps?.Geocoder) fallbackGeocoder = new google.maps.Geocoder();
+            if (!fallbackGeocoder) return Promise.resolve([]);
+            return new Promise(resolve => {
+                fallbackGeocoder.geocode({
+                    address: query,
+                    componentRestrictions: { country: 'CR' },
+                    region: 'cr'
+                }, (results, status) => {
+                    if (status !== 'OK' || !results?.length) {
+                        resolve([]);
+                        return;
+                    }
+                    resolve(results.slice(0, 6).map(result => ({
+                        description: result.formatted_address,
+                        place_id: result.place_id,
+                        _place: result
+                    })));
+                });
+            });
+        }
+
+        function bindFallbackPlaces(input, onSelect) {
+            if (!input || fallbackPlaceBindings.has(input)) return;
+            const box = document.createElement('div');
+            box.className = 'places-suggest';
+            box.style.display = 'none';
+            document.body.appendChild(box);
+
+            let timer = null;
+            const render = async () => {
+                const query = input.value;
+                clearTimeout(timer);
+                timer = setTimeout(async () => {
+                    if (nativePlacesVisible()) {
+                        hidePlacesBox(box);
+                        return;
+                    }
+                    const predictions = await getFallbackPredictions(query);
+                    if (!predictions.length) {
+                        hidePlacesBox(box);
+                        return;
+                    }
+                    box.innerHTML = predictions.map((item, index) => `
+                        <button type="button" data-index="${index}">${escapeHtml(item.description || item.name || '')}</button>
+                    `).join('');
+                    positionPlacesBox(input, box);
+                    box.style.display = 'block';
+                    box.querySelectorAll('button').forEach(button => {
+                        button.addEventListener('mousedown', event => event.preventDefault());
+                        button.addEventListener('click', async () => {
+                            const prediction = predictions[Number(button.dataset.index)];
+                            const place = await getFallbackPlaceDetails(prediction);
+                            input.value = place.formatted_address || prediction.description || '';
+                            hidePlacesBox(box);
+                            onSelect(place);
+                        });
+                    });
+                }, 220);
+            };
+
+            input.addEventListener('input', render);
+            input.addEventListener('focus', render);
+            input.addEventListener('keydown', event => {
+                if (event.key === 'Escape') hidePlacesBox(box);
+            });
+            document.addEventListener('pointerdown', event => {
+                if (event.target !== input && !box.contains(event.target)) hidePlacesBox(box);
+            });
+            window.addEventListener('resize', () => positionPlacesBox(input, box));
+            document.addEventListener('scroll', () => positionPlacesBox(input, box), true);
+            fallbackPlaceBindings.set(input, box);
+        }
+
+        function applyOriginPlace(place, originInput) {
             if (place.geometry) {
                 map.setCenter(place.geometry.location);
                 map.setZoom(14);
-                updateMarkers();
-                autoCalculateIfComplete();
-                const descField = document.getElementById('originDesc');
-                if (!descField.value.trim() || descField.dataset.autofill === '1') {
-                    setDescriptionValue(descField, getPlaceDescription(place), { autogenerated: true });
-                    descField.dataset.linkedLocation = String(originInput.value || '').trim();
-                }
-                updateLocationPreview('rowOrigin', 'originDesc');
             }
-        });
-        
-        acDest.addListener('place_changed', () => {
-            const place = acDest.getPlace();
+            updateMarkers();
+            autoCalculateIfComplete();
+            const descField = document.getElementById('originDesc');
+            if (descField && (!descField.value.trim() || descField.dataset.autofill === '1')) {
+                setDescriptionValue(descField, getPlaceDescription(place), { autogenerated: true });
+                descField.dataset.linkedLocation = String(originInput.value || '').trim();
+            }
+            updateLocationPreview('rowOrigin', 'originDesc');
+        }
+
+        function applyDestinationPlace(place, destInput) {
             if (place.geometry) {
                 map.setCenter(place.geometry.location);
                 map.setZoom(14);
-                updateMarkers();
-                autoCalculateIfComplete();
-                const descField = document.getElementById('destinationDesc');
-                if (!descField.value.trim() || descField.dataset.autofill === '1') {
-                    setDescriptionValue(descField, getPlaceDescription(place), { autogenerated: true });
-                    descField.dataset.linkedLocation = String(destInput.value || '').trim();
-                }
-                updateLocationPreview('rowDestination', 'destinationDesc');
             }
-        });
+            updateMarkers();
+            autoCalculateIfComplete();
+            const descField = document.getElementById('destinationDesc');
+            if (descField && (!descField.value.trim() || descField.dataset.autofill === '1')) {
+                setDescriptionValue(descField, getPlaceDescription(place), { autogenerated: true });
+                descField.dataset.linkedLocation = String(destInput.value || '').trim();
+            }
+            updateLocationPreview('rowDestination', 'destinationDesc');
+        }
+
+        function applyWaypointPlace(place, input, descInput, idx) {
+            updateMarkers();
+            autoCalculateIfComplete();
+            if (descInput && (!descInput.value.trim() || descInput.dataset.autofill === '1')) {
+                setDescriptionValue(descInput, getPlaceDescription(place), { autogenerated: true });
+                descInput.dataset.linkedLocation = String(input.value || '').trim();
+            }
+            updateLocationPreview(`rowWp${idx}`, `wpDesc${idx}`);
+        }
+
+        function setupAutocomplete() {
+            const originInput = document.getElementById('origin');
+            const destInput = document.getElementById('destination');
+            bindFallbackPlaces(originInput, place => applyOriginPlace(place, originInput));
+            bindFallbackPlaces(destInput, place => applyDestinationPlace(place, destInput));
+
+            if (window.google?.maps?.places?.Autocomplete) {
+                const acOrigin = new google.maps.places.Autocomplete(originInput);
+                const acDest = new google.maps.places.Autocomplete(destInput);
+                const countryRestriction = { country: 'cr' };
+                const crBounds = getAutocompleteBounds();
+                acOrigin.setComponentRestrictions(countryRestriction);
+                acDest.setComponentRestrictions(countryRestriction);
+                acOrigin.setBounds(crBounds);
+                acDest.setBounds(crBounds);
+
+                acOrigin.addListener('place_changed', () => {
+                    const place = acOrigin.getPlace();
+                    applyOriginPlace(place, originInput);
+                });
+
+                acDest.addListener('place_changed', () => {
+                    const place = acDest.getPlace();
+                    applyDestinationPlace(place, destInput);
+                });
+            } else {
+                showToast('Usando búsqueda básica de ubicaciones.', 'success');
+            }
             
             map.addListener('click', e => {
                 if (locationMode) {
@@ -1185,26 +1414,17 @@
 
         // Also setup autocomplete for waypoints
         function setupWaypointAutocomplete(input, descInput, idx) {
-            const ac = new google.maps.places.Autocomplete(input);
-            const countryRestriction = { country: 'cr' };
-            const crBounds = new google.maps.LatLngBounds(
-                new google.maps.LatLng(COSTA_RICA_BOUNDS.south, COSTA_RICA_BOUNDS.west),
-                new google.maps.LatLng(COSTA_RICA_BOUNDS.north, COSTA_RICA_BOUNDS.east)
-            );
-            ac.setComponentRestrictions(countryRestriction);
-            ac.setBounds(crBounds);
-            ac.addListener('place_changed', () => {
-                const place = ac.getPlace();
-                if (place.geometry) {
-                    updateMarkers();
-                    autoCalculateIfComplete();
-                    if (descInput && (!descInput.value.trim() || descInput.dataset.autofill === '1')) {
-                        setDescriptionValue(descInput, getPlaceDescription(place), { autogenerated: true });
-                        descInput.dataset.linkedLocation = String(input.value || '').trim();
-                    }
-                    updateLocationPreview(`rowWp${idx}`, `wpDesc${idx}`);
-                }
-            });
+            bindFallbackPlaces(input, place => applyWaypointPlace(place, input, descInput, idx));
+            if (window.google?.maps?.places?.Autocomplete) {
+                const ac = new google.maps.places.Autocomplete(input);
+                const countryRestriction = { country: 'cr' };
+                ac.setComponentRestrictions(countryRestriction);
+                ac.setBounds(getAutocompleteBounds());
+                ac.addListener('place_changed', () => {
+                    const place = ac.getPlace();
+                    applyWaypointPlace(place, input, descInput, idx);
+                });
+            }
         }
 
         function searchLocation(fieldId) {
@@ -1513,18 +1733,7 @@
             const descInput = document.getElementById(`wpDesc${idx}`);
             const dragHandle = div.querySelector('.location-row-head');
             
-            const ac = new google.maps.places.Autocomplete(input);
-            ac.addListener('place_changed', () => {
-                const place = ac.getPlace();
-                if (place.geometry) {
-                    updateMarkers();
-                    autoCalculateIfComplete();
-                    if (!descInput.value.trim() || descInput.dataset.autofill === '1') {
-                        setDescriptionValue(descInput, getPlaceDescription(place), { autogenerated: true });
-                    }
-                    updateLocationPreview(`rowWp${idx}`, `wpDesc${idx}`);
-                }
-            });
+            setupWaypointAutocomplete(input, descInput, idx);
             
             waypointInputs.push({ input, descInput, div, dragHandle });
             bindDescriptionInput(descInput, `rowWp${idx}`);
@@ -1748,6 +1957,7 @@ dragHandle.addEventListener('mousedown', e => {
 
         async function calculateRoute(options = {}) {
             const { silent = false } = options;
+            hideAllPlaceSuggestions();
             if (!apiKey) return showToast('Configura tu API Key', 'error');
             const o = document.getElementById('origin').value;
             const d = document.getElementById('destination').value;
@@ -2194,7 +2404,9 @@ dragHandle.addEventListener('mousedown', e => {
             bar.style.display = chips.length ? 'flex' : 'none';
         }
 
-        function saveRoute() {
+        function saveRoute(options = {}) {
+            const { applyToParent = false } = options || {};
+            hideAllPlaceSuggestions();
             if (!currentRouteResult) {
                 return showToast('Calcula una ruta primero', 'error');
             }
@@ -2237,6 +2449,17 @@ dragHandle.addEventListener('mousedown', e => {
                     localStorage.setItem('routes', JSON.stringify(routes));
                 }
                 renderRoutes();
+                if (applyToParent) {
+                    if (window.parent === window) return showToast('Esta acción solo funciona dentro de la proforma', 'error');
+                    window.parent.postMessage({ type: 'route-apply', route: r }, '*');
+                    if (isEmbedded) {
+                        routes = [];
+                        resetRouteForm();
+                        renderRoutes();
+                    }
+                    showToast('Ruta enviada al itinerario', 'success');
+                    return;
+                }
                 resetRouteForm();
                 showToast('Ruta guardada ✓', 'success');
             } catch (e) {
@@ -2522,8 +2745,8 @@ dragHandle.addEventListener('mousedown', e => {
                 };
                 document.head.appendChild(s);
             } else {
-                // Load map anyway with default center
-                initMap();
+                mapsAuthFailureMessage = 'Google Maps API no configurada.';
+                showToast(mapsAuthFailureMessage, 'error');
             }
         }
 
@@ -2532,6 +2755,11 @@ dragHandle.addEventListener('mousedown', e => {
             document.addEventListener('DOMContentLoaded', () => {
                 const handle = document.getElementById('dragHandle');
                 if (handle) handle.style.cursor = 'default';
+            });
+        } else {
+            document.addEventListener('DOMContentLoaded', () => {
+                const applyBtn = document.getElementById('applyCurrentRouteBtn');
+                if (applyBtn) applyBtn.style.display = 'none';
             });
         }
 

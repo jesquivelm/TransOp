@@ -54,7 +54,6 @@ const BASE_CURRENCY = 'CRC';
 const DISPLAY_CURRENCIES = [
   { code: 'CRC', label: 'Colones', symbol: '₡' },
   { code: 'USD', label: 'Dólares', symbol: '$' },
-  { code: 'EUR', label: 'Euros', symbol: '€' },
 ];
 const LEGACY_TRANSFER_PRESETS = [
   { id: 'transfer-in-sjo', descripcion: 'Transfer IN Aeropuerto SJO', legacyUsd: 50 },
@@ -62,6 +61,18 @@ const LEGACY_TRANSFER_PRESETS = [
   { id: 'transfer-in-ctg', descripcion: 'Transfer IN Aeropuerto Cartago', legacyUsd: 65 },
   { id: 'transfer-out-ctg', descripcion: 'Transfer OUT Aeropuerto Cartago', legacyUsd: 60 },
 ];
+const ROUTE_DESIGNER_VERSION = '20260524-places-sync-2';
+const DEFAULT_PROFORMA_OPTIONS = {
+  showRoute: true,
+  showPassengers: true,
+  showUnits: true,
+  showDrivers: true,
+  showUnitImages: true,
+  showUnitPlate: true,
+  showUnitName: true,
+  showDriverPhone: true,
+  showDriverCedula: true,
+};
 
 const PARAMS_DEFAULT = {
   km: 0,
@@ -314,7 +325,7 @@ function MapLocationPicker({
 
   const reverseGeocodePoint = useCallback(async (point, silent = false) => {
     if (!point) return false;
-    if (!silent) setStatus('Resolviendo direccion...');
+    if (!silent) setStatus('Resolviendo dirección...');
 
     try {
       const url = new URL('https://nominatim.openstreetmap.org/reverse');
@@ -336,7 +347,7 @@ function MapLocationPicker({
       return true;
     } catch (error) {
       setResolvedLabel(`${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`);
-      setStatus(error.message || 'No se pudo resolver la direccion.');
+      setStatus(error.message || 'No se pudo resolver la dirección.');
       return false;
     }
   }, []);
@@ -347,7 +358,7 @@ function MapLocationPicker({
       if (!silent) setStatus('Escribe una referencia para ubicarla en el mapa.');
       return false;
     }
-    if (!silent) setStatus('Buscando ubicacion...');
+    if (!silent) setStatus('Buscando ubicación...');
 
     try {
       const url = new URL('https://nominatim.openstreetmap.org/search');
@@ -365,7 +376,7 @@ function MapLocationPicker({
       const results = await response.json().catch(() => []);
       const result = Array.isArray(results) ? results[0] : null;
       if (!result?.lat || !result?.lon) {
-        setStatus('No encontre una ubicacion clara en Costa Rica con ese texto.');
+        setStatus('No encontré una ubicación clara en Costa Rica con ese texto.');
         return false;
       }
 
@@ -381,7 +392,7 @@ function MapLocationPicker({
       }
       return true;
     } catch (error) {
-      setStatus(error.message || 'No se pudo buscar la ubicacion.');
+      setStatus(error.message || 'No se pudo buscar la ubicación.');
       return false;
     }
   }, [placeMarker]);
@@ -536,7 +547,7 @@ function MapLocationPicker({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '18px 20px', borderBottom: `1px solid ${T.bdr}` }}>
           <div>
             <div style={{ fontSize: 16, fontWeight: 800, color: T.txt }}>{title}</div>
-            <div style={{ marginTop: 4, fontSize: 12, color: T.sub }}>Busca por texto, haz clic en el mapa o arrastra el pin para fijar la ubicacion.</div>
+            <div style={{ marginTop: 4, fontSize: 12, color: T.sub }}>Busca por texto, haz clic en el mapa o arrastra el pin para fijar la ubicación.</div>
           </div>
           <button type="button" onClick={onClose} style={{ ...mapIconButtonStyle, width: 36, height: 36, color: T.mute }}>
             <ChevronRight size={16} style={{ transform: 'rotate(180deg)' }} />
@@ -555,7 +566,7 @@ function MapLocationPicker({
                 }
               }}
               style={inputStyle}
-              placeholder="Hotel, aeropuerto, punto de referencia, direccion..."
+              placeholder="Hotel, aeropuerto, punto de referencia, dirección..."
             />
             <button
               type="button"
@@ -588,7 +599,7 @@ function MapLocationPicker({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 8 }}>Ubicacion seleccionada</div>
-                <div style={{ fontSize: 13, color: T.txt, lineHeight: 1.5 }}>{resolvedLabel || 'Todavia no has fijado una ubicacion.'}</div>
+                <div style={{ fontSize: 13, color: T.txt, lineHeight: 1.5 }}>{resolvedLabel || 'Todavía no has fijado una ubicación.'}</div>
                 {selectedPoint && (
                   <div style={{ marginTop: 10, fontSize: 12, color: T.mute }}>
                     {selectedPoint.lat.toFixed(6)}, {selectedPoint.lng.toFixed(6)}
@@ -850,6 +861,13 @@ function normalizeSelectedTransfers(rawTransfers = []) {
   })).filter(item => item.descripcion);
 }
 
+function normalizeProformaOptions(rawOptions = {}) {
+  return {
+    ...DEFAULT_PROFORMA_OPTIONS,
+    ...(rawOptions && typeof rawOptions === 'object' ? rawOptions : {}),
+  };
+}
+
 function legacyFlagsToSelectedTransfers(rawParams = {}, tc = DEFAULT_CRC_PER_USD) {
   const catalog = createDefaultTransferCatalog(tc);
   const picks = [];
@@ -1088,8 +1106,8 @@ function MonetaryInput({ symbol = '₡', style = {}, inputStyle: customInputStyl
   );
 }
 
-function ReadOnlyFormattedInput({ value, suffix = '', monetary = false, inputStyle: customInputStyle = {} }) {
-  const displayValue = monetary ? formatMoney(value || 0, BASE_CURRENCY) : `${formatPlainNumber(value || 0)}${suffix ? ` ${suffix}` : ''}`;
+function ReadOnlyFormattedInput({ value, suffix = '', monetary = false, currency = BASE_CURRENCY, exchange = {}, inputStyle: customInputStyle = {} }) {
+  const displayValue = monetary ? formatMoney(value || 0, currency, exchange) : `${formatPlainNumber(value || 0)}${suffix ? ` ${suffix}` : ''}`;
   return (
     <div style={{ position: 'relative' }}>
       <input
@@ -1143,9 +1161,15 @@ function PercentInput({ style = {}, inputStyle: customInputStyle = {}, ...props 
   );
 }
 
-function shortText(text, fallback = 'Sin informacion') {
+function shortText(text, fallback = 'Sin información') {
   if (!text) return fallback;
   return text.length > 110 ? `${text.slice(0, 107)}...` : text;
+}
+
+function textareaRowsFor(text = '', minRows = 1, maxRows = 5) {
+  const value = String(text || '');
+  const visualRows = value.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 82)), 0);
+  return Math.min(maxRows, Math.max(minRows, visualRows || minRows));
 }
 
 function chooseSuggestedVehicle(vehiculos, pasajeros, currentVehiculoId = null) {
@@ -1211,6 +1235,9 @@ function createProformaUnit(base = {}, vehiculos = [], preferredVehiculoId = nul
         unitId,
       }
     : null;
+  const clonedDays = Array.isArray(base.itineraryDays) && base.itineraryDays.length
+    ? base.itineraryDays.map(day => createItineraryDay(day))
+    : itineraryRowsToDays(clonedRows, base);
   return applyFuelMetrics({
     id: unitId,
     sFecha: base.sFecha || '',
@@ -1249,6 +1276,7 @@ function createProformaUnit(base = {}, vehiculos = [], preferredVehiculoId = nul
     vehiculoId,
     itinerary,
     itineraryRows: clonedRows,
+    itineraryDays: clonedDays,
   });
 }
 
@@ -1335,6 +1363,9 @@ function buildCotizadorStateFromSnapshot(snapshot, options = {}) {
     id: u.id || `unit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     km: Number(u.km) || 0,
     sPax: Number(u.sPax) || 1,
+    itineraryDays: Array.isArray(u.itineraryDays) && u.itineraryDays.length
+      ? u.itineraryDays.map(day => createItineraryDay(day))
+      : itineraryRowsToDays(u.itineraryRows || [], u),
   }));
 
   const safeParams = snapshot.params ? {
@@ -1359,6 +1390,8 @@ function buildCotizadorStateFromSnapshot(snapshot, options = {}) {
     units: nextUnits,
     itineraryRows: sanitizeItineraryRows(snapshot.itineraryRows || []),
     proformaComments: String(snapshot.proformaComments || ''),
+    proformaTerms: String(snapshot.proformaTerms || ''),
+    proformaOptions: normalizeProformaOptions(snapshot.proformaOptions),
     proformaAttachments: normalizeProformaAttachments(snapshot.proformaAttachments || []),
     vehiculoActivo: snapshot.vehiculoActivo || (vehiculos[0]?.id || null),
     activeUnitId: snapshot.activeUnitId || (nextUnits.length ? nextUnits[0].id : null),
@@ -1427,6 +1460,54 @@ function createItineraryDay(base = {}) {
     open: base.open !== false,
     rows: (base.rows || []).map(r => createItineraryDayRow(r)),
   };
+}
+
+function itineraryRowsToDays(rows = [], base = {}) {
+  const safeRows = sanitizeItineraryRows(rows).filter(row => String(row.origen || row.destino || '').trim());
+  if (!safeRows.length) return [];
+  const grouped = safeRows.reduce((acc, row) => {
+    const key = row.fecha || base.sFecha || todayISO();
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(row);
+    return acc;
+  }, {});
+  return Object.entries(grouped).map(([fecha, group], dayIndex) => {
+    const first = group[0] || {};
+    const stops = [{
+      id: `stop-${Date.now()}-${dayIndex}-salida`,
+      tipo: 'salida',
+      lugar: first.origen || base.sOrigen || '',
+      hora: first.hora || base.sHora || '',
+      km: 0,
+      durationMin: 0,
+      coords: base.sOrigenCoords || null,
+    }];
+    group.forEach((row, rowIndex) => {
+      const isLast = rowIndex === group.length - 1;
+      const tipo = group.length === 1 ? 'destino' : isLast ? 'regreso' : rowIndex === group.length - 2 ? 'destino' : 'inter_ida';
+      stops.push({
+        id: `stop-${Date.now()}-${dayIndex}-${rowIndex}`,
+        tipo,
+        lugar: row.destino || '',
+        hora: row.horaRegreso || '',
+        km: Number.parseFloat(String(row.distanciaManual || row.recorrido || '0').replace(',', '.')) || 0,
+        durationMin: Math.round(sumItineraryDurationSeconds([row]) / 60),
+        coords: null,
+      });
+    });
+    if (!stops.some(stop => stop.tipo === 'regreso')) {
+      stops.push({
+        id: `stop-${Date.now()}-${dayIndex}-regreso`,
+        tipo: 'regreso',
+        lugar: base.sRegreso || '',
+        hora: '',
+        km: 0,
+        durationMin: 0,
+        coords: base.sRegresoCoords || null,
+      });
+    }
+    return createItineraryDay({ id: `day-${Date.now()}-${dayIndex}`, fecha, open: true, rows: stops });
+  });
 }
 
 function itineraryDaysToRows(days) {
@@ -1575,7 +1656,8 @@ function formatDuration(seconds) {
   if (!seconds || seconds <= 0) return '0 min';
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  if (h > 0) return `${h}h ${m}min`;
+  if (h > 0 && m > 0) return `${h} h ${m} min`;
+  if (h > 0) return `${h} h`;
   return `${m} min`;
 }
 
@@ -1821,7 +1903,7 @@ function buildListItem(proforma) {
     estado: proforma.data_json?.estado || socio._estado || 'borrador',
     origenDestino: [socio.sOrigen, socio.sDestino].filter(Boolean).join(' -> '),
     clienteLabel: socio.sNombre || proforma.cliente_nombre || 'Sin cliente',
-    clienteCodigo: socio.sCodigoCliente || 'Sin codigo',
+    clienteCodigo: socio.sCodigoCliente || 'Sin código',
   };
 }
 
@@ -1847,7 +1929,7 @@ function buildDesignerItineraryFromUnit(unit = {}) {
         destinationDesc: destination.lugar || '',
         waypoints: stops.slice(1, -1).map(stopRouteValue).filter(Boolean),
         waypointsDesc: stops.slice(1, -1).map(stop => stop.lugar || ''),
-        waypointsKind: stops.slice(1, -1).map(stop => stop.tipo === 'destino' ? 'destino' : 'inter'),
+        waypointsKind: stops.slice(1, -1).map(stop => stop.tipo || 'inter_ida'),
       };
     })
     .filter(Boolean);
@@ -1903,8 +1985,8 @@ function RouteDesignerModal({ unitId, unitItinerary, vehiculoId = null, vehicleL
   };
 
   const iframeSrc = googleMapsApiKey
-    ? `/route-designer.html?apiKey=${encodeURIComponent(googleMapsApiKey)}&mode=embedded`
-    : '/route-designer.html?mode=embedded';
+    ? `/route-designer.html?apiKey=${encodeURIComponent(googleMapsApiKey)}&mode=embedded&v=${ROUTE_DESIGNER_VERSION}`
+    : `/route-designer.html?mode=embedded&v=${ROUTE_DESIGNER_VERSION}`;
 
   return (
     <div
@@ -2084,7 +2166,7 @@ function AccordionSection({ id, label, summary, open, onToggle, children, accent
       </button>
       <div
         style={{
-          maxHeight: open ? 1600 : 0,
+          maxHeight: open ? 'none' : 0,
           opacity: open ? 1 : 0,
           overflow: 'hidden',
           borderTop: `1px solid ${open ? T.bdr : 'transparent'}`,
@@ -2210,6 +2292,8 @@ export default function CotizadorView({
   }));
   const [itineraryRows, setItineraryRows] = useState(() => initialDetailState?.itineraryRows || []);
   const [proformaComments, setProformaComments] = useState(() => initialDetailState?.proformaComments || '');
+  const [proformaTerms, setProformaTerms] = useState(() => initialDetailState?.proformaTerms || '');
+  const [proformaOptions, setProformaOptions] = useState(() => normalizeProformaOptions(initialDetailState?.proformaOptions));
   const [proformaAttachments, setProformaAttachments] = useState(() => initialDetailState?.proformaAttachments || []);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const [attachmentRecording, setAttachmentRecording] = useState(false);
@@ -2292,8 +2376,9 @@ export default function CotizadorView({
   const cargarDatos = useCallback(async () => {
     setLoading(true);
     try {
-      const [vRes, hRes, cRes, tcRes, fRes, eRes, qRes, apiRes] = await Promise.all([
+      const [vRes, condRes, hRes, cRes, tcRes, fRes, eRes, qRes, apiRes] = await Promise.all([
         fetch('/api/tms/vehiculos', { headers: authH }),
+        fetch('/api/tms/conductores', { headers: authH }),
         fetch('/api/tms/proformas', { headers: authH }),
         fetch('/api/tms/config/global', { headers: authH }),
         fetch('/api/tms/tipos-cambio/ultimo', { headers: authH }),
@@ -2308,6 +2393,7 @@ export default function CotizadorView({
         setVehiculos(vData);
         setVehiculoActivo(prev => (prev || !vData.length ? prev : vData[0].id));
       }
+      if (condRes.ok) setConductores(await condRes.json());
 
       if (hRes.ok) setHistorial(await hRes.json());
 
@@ -2464,8 +2550,12 @@ export default function CotizadorView({
       }
 
       const km = Number(payload.km);
+      const durationText = payload.durationSeconds ? formatDuration(Number(payload.durationSeconds)) : '';
       setParams(prev => ({ ...prev, km }));
-      setDistanceStatus(`Distancia estimada: ${km} km.`);
+      if (activeUnit?.id) {
+        setUnits(prev => prev.map(unit => unit.id === activeUnit.id ? applyFuelMetrics({ ...unit, km }) : unit));
+      }
+      setDistanceStatus(`Distancia estimada: ${km} km${durationText ? ` · ${durationText}` : ''}.`);
       return true;
     } catch (error) {
       if (!silent) setDistanceStatus(error.message || 'No se pudo calcular la distancia.');
@@ -2585,6 +2675,8 @@ export default function CotizadorView({
       units: units.map(unit => ({ ...unit })),
       itineraryRows: currentItineraryRows.map(row => ({ ...row })),
       proformaComments,
+      proformaTerms,
+      proformaOptions,
       proformaAttachments: proformaAttachments.map(item => ({ ...item })),
       activeUnitId,
       activeUnitTab,
@@ -2612,6 +2704,8 @@ export default function CotizadorView({
     openSection,
     proformaAttachments,
     proformaComments,
+    proformaOptions,
+    proformaTerms,
     operationMsg,
     params,
     savedMsg,
@@ -2647,6 +2741,8 @@ export default function CotizadorView({
     setUnits(nextState.units);
     setItineraryRows(nextState.itineraryRows);
     setProformaComments(nextState.proformaComments);
+    setProformaTerms(nextState.proformaTerms);
+    setProformaOptions(nextState.proformaOptions);
     setProformaAttachments(nextState.proformaAttachments);
     setVehiculoActivo(nextState.vehiculoActivo);
     setActiveUnitId(nextState.activeUnitId);
@@ -2694,6 +2790,8 @@ export default function CotizadorView({
       units,
       itineraryRows: currentItineraryRows,
       proformaComments,
+      proformaTerms,
+      proformaOptions,
       proformaAttachments,
       voiceFeedback,
       vehiculoId: units[0]?.vehiculoId || vehiculoActivo,
@@ -2704,7 +2802,7 @@ export default function CotizadorView({
         totalDisplay: convertCrcToDisplay(resData.total, displayCurrency, moneyExchange),
       },
     },
-  }), [currentStatus, currentItineraryRows, displayCurrency, moneyExchange, params, proformaAttachments, proformaComments, resData.total, socio, units, vehiculoActivo, voiceFeedback]);
+  }), [currentStatus, currentItineraryRows, displayCurrency, moneyExchange, params, proformaAttachments, proformaComments, proformaOptions, proformaTerms, resData.total, socio, units, vehiculoActivo, voiceFeedback]);
 
   const guardar = useCallback(async (estadoOverride, forceCreate = false, socioOverride = null) => {
     if (savingRef.current) return null;
@@ -2733,6 +2831,8 @@ export default function CotizadorView({
         units: units.map(unit => ({ ...unit, moneySchema: MONEY_SCHEMA_VERSION })),
         itineraryRows: currentItineraryRows,
         proformaComments,
+        proformaTerms,
+        proformaOptions,
         proformaAttachments,
         voiceFeedback,
         vehiculoId: units[0]?.vehiculoId || vehiculoActivo,
@@ -2766,6 +2866,8 @@ export default function CotizadorView({
         units: units.map(unit => ({ ...unit })),
         itineraryRows: itineraryRows.map(row => ({ ...row })),
         proformaComments,
+        proformaTerms,
+        proformaOptions,
         proformaAttachments: proformaAttachments.map(item => ({ ...item })),
         activeUnitId,
         vehiculoActivo,
@@ -2871,6 +2973,8 @@ export default function CotizadorView({
     openSection,
     proformaAttachments,
     proformaComments,
+    proformaOptions,
+    proformaTerms,
     operationMsg,
     params,
     resData.total,
@@ -2921,7 +3025,7 @@ export default function CotizadorView({
     if (!isExternalDetailMode || !onSnapshotChange) return;
     const snapshot = buildCurrentTabSnapshot({ includeUiState: false });
     onSnapshotChange(snapshot);
-  }, [activeTabId, autoSaveEnabled, buildCurrentTabSnapshot, clienteFromBD, isExternalDetailMode, onSnapshotChange, params, selectedId, socio, units, activeUnitId, vehiculoActivo, voiceFeedback, currentItineraryRows, proformaComments, proformaAttachments]);
+  }, [activeTabId, autoSaveEnabled, buildCurrentTabSnapshot, clienteFromBD, isExternalDetailMode, onSnapshotChange, params, selectedId, socio, units, activeUnitId, vehiculoActivo, voiceFeedback, currentItineraryRows, proformaComments, proformaOptions, proformaTerms, proformaAttachments]);
 
   useEffect(() => {
     clearTimeout(autosaveTimer.current);
@@ -2934,6 +3038,8 @@ export default function CotizadorView({
       setMapPickerField('');
       setVoiceFeedback(null);
       setProformaComments('');
+      setProformaTerms('');
+      setProformaOptions(normalizeProformaOptions());
       setProformaAttachments([]);
       setAutoSaveEnabled(false);
       setSavedMsg('');
@@ -2953,8 +3059,25 @@ export default function CotizadorView({
   }, [activeTabId, tabsData, restoreTabSnapshot]);
 
   const toggleSection = (sectionId) => {
-    setOpenSection(prev => (prev === sectionId ? '' : sectionId));
+    setOpenSection(prev => {
+      const openItems = Array.isArray(prev) ? prev : (prev ? [prev] : []);
+      return openItems.includes(sectionId)
+        ? openItems.filter(item => item !== sectionId)
+        : [...openItems, sectionId];
+    });
   };
+
+  const isSectionOpen = (sectionId) => {
+    const openItems = Array.isArray(openSection) ? openSection : (openSection ? [openSection] : []);
+    return openItems.includes(sectionId);
+  };
+
+  const openSectionById = useCallback((sectionId) => {
+    setOpenSection(prev => {
+      const openItems = Array.isArray(prev) ? prev : (prev ? [prev] : []);
+      return openItems.includes(sectionId) ? openItems : [...openItems, sectionId];
+    });
+  }, []);
 
   const upsertDetailTab = useCallback((tabConfig, snapshot, signature = '') => {
     if (onOpenProforma) {
@@ -3111,6 +3234,8 @@ export default function CotizadorView({
         units: nextUnits,
         itineraryRows: previewRows,
         proformaComments: '',
+        proformaTerms: '',
+        proformaOptions: normalizeProformaOptions(),
         proformaAttachments: [],
         activeUnitTab: 'operacion',
         vehiculoActivo: null,
@@ -3155,6 +3280,8 @@ export default function CotizadorView({
         }, vehiculos, null, fuelPrices, draftDefaults.tc, { allowSuggestedVehicle: false })],
         itineraryRows: [],
         proformaComments: '',
+        proformaTerms: '',
+        proformaOptions: normalizeProformaOptions(),
         proformaAttachments: [],
         activeUnitTab: 'operacion',
         vehiculoActivo: null,
@@ -3192,6 +3319,8 @@ export default function CotizadorView({
     const paramsData = data.params || {};
     const nextItineraryRows = sanitizeItineraryRows(data.itineraryRows || []);
     const nextComments = String(data.proformaComments || '');
+    const nextTerms = String(data.proformaTerms || '');
+    const nextOptions = normalizeProformaOptions(data.proformaOptions);
     const nextAttachments = normalizeProformaAttachments(data.proformaAttachments || []);
     const nextVoiceFeedback = normalizeVoiceFeedback(data.voiceFeedback);
     const nextUnits = hydrateProformaUnits({
@@ -3223,6 +3352,8 @@ export default function CotizadorView({
         units: nextUnits,
         itineraryRows: nextItineraryRows,
         proformaComments: nextComments,
+        proformaTerms: nextTerms,
+        proformaOptions: nextOptions,
         proformaAttachments: nextAttachments,
         voiceFeedback: nextVoiceFeedback,
         vehiculoId: data.vehiculoId,
@@ -3238,6 +3369,8 @@ export default function CotizadorView({
         units: nextUnits,
         itineraryRows: nextItineraryRows,
         proformaComments: nextComments,
+        proformaTerms: nextTerms,
+        proformaOptions: nextOptions,
         proformaAttachments: nextAttachments,
         vehiculoActivo: data.vehiculoId || nextUnits[0]?.vehiculoId || vehiculoActivo,
         openSection: '',
@@ -3313,6 +3446,12 @@ export default function CotizadorView({
       config: empresaData,
       seller: user,
       itineraryRows: currentItineraryRows,
+      units,
+      vehiculos,
+      conductores,
+      proformaComments,
+      proformaTerms,
+      proformaOptions,
     });
   };
 
@@ -3332,6 +3471,18 @@ export default function CotizadorView({
   const handleCommentsChange = (value) => {
     if (proformaLocked) return;
     setProformaComments(value);
+    setAutoSaveEnabled(true);
+  };
+
+  const handleTermsChange = (value) => {
+    if (proformaLocked) return;
+    setProformaTerms(value);
+    setAutoSaveEnabled(true);
+  };
+
+  const toggleProformaOption = (key) => {
+    if (proformaLocked) return;
+    setProformaOptions(prev => normalizeProformaOptions({ ...prev, [key]: !prev[key] }));
     setAutoSaveEnabled(true);
   };
 
@@ -3834,7 +3985,7 @@ const updateItineraryRow = (rowId, field, value) => {
     setAutoSaveEnabled(true);
   }, [activeUnit?.id]);
 
-  const addStop = useCallback((dayId) => {
+  const addStop = useCallback((dayId, stopType = 'inter_ida') => {
     if (!activeUnit?.id) return;
     setUnits(prev => prev.map(u => {
       if (u.id !== activeUnit.id) return u;
@@ -3842,8 +3993,11 @@ const updateItineraryRow = (rowId, field, value) => {
         if (d.id !== dayId) return d;
         const destinoIdx = d.rows.findIndex(r => r.tipo === 'destino');
         const regresoIdx = d.rows.findIndex(r => r.tipo === 'regreso');
-        const newStop = { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, tipo: 'inter', lugar: '', hora: '10:00', km: 0, coords: null };
-        const insertIdx = destinoIdx >= 0 ? destinoIdx : regresoIdx;
+        const safeType = stopType === 'inter_regreso' ? 'inter_regreso' : 'inter_ida';
+        const newStop = { id: `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, tipo: safeType, lugar: '', hora: safeType === 'inter_regreso' ? '15:00' : '10:00', km: 0, durationMin: 0, coords: null };
+        const insertIdx = safeType === 'inter_regreso'
+          ? (regresoIdx >= 0 ? regresoIdx : d.rows.length)
+          : (destinoIdx >= 0 ? destinoIdx : regresoIdx);
         const rows = insertIdx >= 0 ? [...d.rows.slice(0, insertIdx), newStop, ...d.rows.slice(insertIdx)] : [...d.rows, newStop];
         return { ...d, rows };
       });
@@ -4038,6 +4192,15 @@ const updateItineraryRow = (rowId, field, value) => {
     setAutoSaveEnabled(true);
   };
 
+  const toggleDisplayCurrency = () => {
+    if (proformaLocked) return;
+    setSocio(prev => ({
+      ...prev,
+      cfMoneda: (prev.cfMoneda || displayCurrency) === 'USD' ? 'CRC' : 'USD',
+    }));
+    setAutoSaveEnabled(true);
+  };
+
   const openMapPicker = (field) => {
     setMapPickerField(field);
   };
@@ -4101,8 +4264,7 @@ const updateItineraryRow = (rowId, field, value) => {
         return unit;
       }));
       setActiveUnitId(routeDesignerUnitId);
-      setActiveUnitTab('operacion');
-      setOpenSection('costos');
+      openSectionById('costos');
       setSavedMsg('Itinerario cargado desde mapas ✓');
       setAutoSaveEnabled(true);
     }
@@ -4213,8 +4375,8 @@ const updateItineraryRow = (rowId, field, value) => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <div style={{ fontSize: 12, color: T.sub }}>
         {socio.sEmpresa
-          ? [socio.sEmpresa, contactoTitulo, socio.sTel || 'Sin telefono', socio.sEmail || 'Sin correo'].join(' | ')
-          : [socio.sNombre || 'Sin cliente', socio.sTel || 'Sin telefono', socio.sEmail || 'Sin correo'].join(' | ')}
+          ? [socio.sEmpresa, contactoTitulo, socio.sTel || 'Sin teléfono', socio.sEmail || 'Sin correo'].join(' | ')
+          : [socio.sNombre || 'Sin cliente', socio.sTel || 'Sin teléfono', socio.sEmail || 'Sin correo'].join(' | ')}
       </div>
       {socio.sCodigoCliente && (
         <div style={{ fontSize: 11, color: T.mute }}>
@@ -4237,8 +4399,8 @@ const updateItineraryRow = (rowId, field, value) => {
   ].filter(Boolean).join(' | ');
 
   const transferResumen = [
-    params.diasGAM > 0 ? `${params.diasGAM} dias GAM` : '',
-    params.diasSM > 0 ? `${params.diasSM} dias sin movimiento` : '',
+    params.diasGAM > 0 ? `${params.diasGAM} días GAM` : '',
+    params.diasSM > 0 ? `${params.diasSM} días sin movimiento` : '',
     ...(resData.selectedTransfers || []).map(item => item.descripcion),
     resData.subtotalTransfer > 0 ? `Subtotal ${formatMoney(resData.subtotalTransfer, displayCurrency, moneyExchange)}` : '',
   ].filter(Boolean).join(' | ') || 'Sin tarifas transfer';
@@ -4249,14 +4411,14 @@ const updateItineraryRow = (rowId, field, value) => {
       ? `Hospedaje total ${formatMoney(params.hospedajeTotalManual, displayCurrency, moneyExchange)}`
       : params.hospedaje ? `Hospedaje ${formatMoney(params.hospedaje, displayCurrency, moneyExchange)}/noche` : '',
     params.persHosp ? `${params.persHosp} personas con hospedaje` : '',
-    params.persViat ? `${params.persViat} con viaticos` : '',
-    params.viatDiario ? `Viatico diario ${formatMoney(params.viatDiario, displayCurrency, moneyExchange)}` : '',
+    params.persViat ? `${params.persViat} con viáticos` : '',
+    params.viatDiario ? `Viático diario ${formatMoney(params.viatDiario, displayCurrency, moneyExchange)}` : '',
     resData.subtotalExtras > 0 ? `Subtotal ${formatMoney(resData.subtotalExtras, displayCurrency, moneyExchange)}` : '',
   ].filter(Boolean).join(' | ');
 
   const commentsResumen = proformaComments.trim()
     ? `${proformaComments.trim().slice(0, 110)}${proformaComments.trim().length > 110 ? '…' : ''}`
-    : 'Sin comentarios internos';
+    : 'Sin comentarios PDF';
 
   const attachmentsResumen = proformaAttachments.length
     ? `${proformaAttachments.length} adjunto${proformaAttachments.length > 1 ? 's' : ''} · ${proformaAttachments.map(item => item.clasificacion || item.tipoArchivo).slice(0, 3).join(', ')}`
@@ -4345,7 +4507,7 @@ const updateItineraryRow = (rowId, field, value) => {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: T.card2, border: `1px solid ${T.bdr2}`, borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>
               <Search size={14} color={T.mute} />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por numero, cliente, codigo o ruta..." style={{ background: 'transparent', border: 'none', outline: 'none', color: T.txt, fontSize: 13, flex: 1 }} />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por número, cliente, código o ruta..." style={{ background: 'transparent', border: 'none', outline: 'none', color: T.txt, fontSize: 13, flex: 1 }} />
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 1.4fr 0.8fr 0.9fr', gap: 12, padding: '0 12px 10px', fontSize: 11, fontWeight: 700, color: T.mute, letterSpacing: 0.3 }}>
@@ -4353,7 +4515,7 @@ const updateItineraryRow = (rowId, field, value) => {
               <div>CLIENTE</div>
               <div>RUTA</div>
               <div>TOTAL</div>
-              <div style={{ textAlign: 'right' }}>ACCION</div>
+              <div style={{ textAlign: 'right' }}>ACCIÓN</div>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -4391,7 +4553,7 @@ const updateItineraryRow = (rowId, field, value) => {
 
               {!loading && historialVista.length === 0 && (
                 <div style={{ textAlign: 'center', color: T.mute, padding: 32, fontSize: 13 }}>
-                  No hay proformas guardadas aun.
+                  No hay proformas guardadas aún.
                 </div>
               )}
             </div>
@@ -4410,7 +4572,7 @@ const updateItineraryRow = (rowId, field, value) => {
                 )
               ) && (
                 <div style={{ background: T.card2, border: `1px solid ${T.AMB}44`, borderRadius: 12, padding: 14 }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: T.AMB, letterSpacing: 0.3, marginBottom: 8 }}>INTERPRETACION ASISTIDA</div>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: T.AMB, letterSpacing: 0.3, marginBottom: 8 }}>INTERPRETACIÓN ASISTIDA</div>
                   {voiceFeedback.message && (
                     <div style={{ fontSize: 13, color: T.txt, lineHeight: 1.5 }}>{voiceFeedback.message}</div>
                   )}
@@ -4426,7 +4588,7 @@ const updateItineraryRow = (rowId, field, value) => {
                   )}
                 </div>
               )}
-              <AccordionSection id="cliente" label="Cliente" summary={contactoResumen} open={openSection === 'cliente'} onToggle={toggleSection}>
+              <AccordionSection id="cliente" label="Cliente" summary={contactoResumen} open={isSectionOpen('cliente')} onToggle={toggleSection}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
                   <Field label="Nombre cliente" style={{ gridColumn: 'span 8' }}>
                     <div ref={clienteSearchWrapperRef} style={{ position: 'relative' }}>
@@ -4445,7 +4607,7 @@ const updateItineraryRow = (rowId, field, value) => {
                     </div>
                   </Field>
                   <Field label="ID cliente" style={{ gridColumn: 'span 4' }}>
-                    <input name="sCodigoCliente" value={socio.sCodigoCliente} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Codigo" />
+                    <input name="sCodigoCliente" value={socio.sCodigoCliente} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Código" />
                   </Field>
                   <Field label="Contacto" style={{ gridColumn: 'span 4' }}>
                     <input name="sContacto" value={socio.sContacto} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Persona de contacto" />
@@ -4453,14 +4615,14 @@ const updateItineraryRow = (rowId, field, value) => {
                   <Field label="Cargo" style={{ gridColumn: 'span 4' }}>
                     <input name="sCargo" value={socio.sCargo} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Cargo" />
                   </Field>
-                  <Field label="Telefono" style={{ gridColumn: 'span 4' }}>
-                    <input name="sTel" value={socio.sTel} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Telefono" />
+                  <Field label="Teléfono" style={{ gridColumn: 'span 4' }}>
+                    <input name="sTel" value={socio.sTel} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Teléfono" />
                   </Field>
                   <Field label="Correo" style={{ gridColumn: 'span 6' }}>
-                    <input name="sEmail" value={socio.sEmail} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Correo electronico" />
+                    <input name="sEmail" value={socio.sEmail} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Correo electrónico" />
                   </Field>
-                  <Field label="Direccion" style={{ gridColumn: 'span 6' }}>
-                    <input name="sDireccion" value={socio.sDireccion} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Direccion" />
+                  <Field label="Dirección" style={{ gridColumn: 'span 6' }}>
+                    <input name="sDireccion" value={socio.sDireccion} onChange={sChange} onBlur={handleGuardar} autoComplete="off" style={inputStyle} placeholder="Dirección" />
                   </Field>
                 </div>
               </AccordionSection>
@@ -4469,7 +4631,7 @@ const updateItineraryRow = (rowId, field, value) => {
                 id="costos"
                 label="Costos Operativos"
                 summary={costosResumen}
-                open={openSection === 'costos'}
+                open={isSectionOpen('costos')}
                 onToggle={toggleSection}
                 actions={<div style={{ padding: '6px 10px', borderRadius: 999, background: T.ambDim, color: T.AMB, fontSize: 11, fontWeight: 800 }}>{formatMoney(resData.subtotalOperativo, displayCurrency, moneyExchange)}</div>}
               >
@@ -4518,16 +4680,18 @@ const updateItineraryRow = (rowId, field, value) => {
                       Falta por cubrir: {remainingPax > 0 ? `${remainingPax} pax` : 'Completo'}
                     </div>
                   </div>
-                  <Field label="Descripcion" style={{ gridColumn: 'span 9' }}>
+                  <Field label="Descripción" style={{ gridColumn: 'span 9' }}>
                     <div style={{ position: 'relative' }}>
                       <textarea
                         name="cfDescripcion"
                         value={socio.cfDescripcion}
+                        rows={textareaRowsFor(socio.cfDescripcion)}
                         onChange={sChange}
                         onBlur={handleGuardar}
                         readOnly={socio.cfDescripcionMode === 'auto'}
                         style={{
                           ...areaStyle,
+                          minHeight: 44,
                           paddingRight: 42,
                           color: socio.cfDescripcionMode === 'auto' ? T.sub : T.txt,
                           cursor: socio.cfDescripcionMode === 'auto' ? 'default' : 'text',
@@ -4537,7 +4701,7 @@ const updateItineraryRow = (rowId, field, value) => {
                       <button
                         type="button"
                         onClick={toggleDescriptionMode}
-                        title={socio.cfDescripcionMode === 'auto' ? 'Pasar a descripcion manual' : 'Volver a descripcion vinculada'}
+                        title={socio.cfDescripcionMode === 'auto' ? 'Pasar a descripción manual' : 'Volver a descripción vinculada'}
                         style={{
                           position: 'absolute',
                           right: 10,
@@ -4558,7 +4722,35 @@ const updateItineraryRow = (rowId, field, value) => {
                       </button>
                     </div>
                   </Field>
-                  <div style={{ gridColumn: 'span 12', fontSize: 12, fontWeight: 700, color: T.sub, marginTop: 4 }}>Unidades del servicio</div>
+                  <div style={{ gridColumn: 'span 12', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: T.sub }}>Unidades del servicio</div>
+                    <button
+                      type="button"
+                      disabled={proformaLocked}
+                      onMouseDown={event => event.stopPropagation()}
+                      onClick={event => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleDisplayCurrency();
+                      }}
+                      title="Cambiar moneda de visualización"
+                      style={{
+                        minWidth: 34,
+                        height: 30,
+                        padding: '0 10px',
+                        borderRadius: 8,
+                        border: `1px solid ${T.AMB}44`,
+                        background: T.ambDim,
+                        color: T.AMB,
+                        cursor: proformaLocked ? 'not-allowed' : 'pointer',
+                        fontSize: 12,
+                        fontWeight: 800,
+                        lineHeight: 1,
+                      }}
+                    >
+                      {getCurrencyMeta(displayCurrency).symbol}
+                    </button>
+                  </div>
                   <div style={{ gridColumn: 'span 12', display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
                       {units.map((unit, index) => {
@@ -4624,22 +4816,35 @@ const updateItineraryRow = (rowId, field, value) => {
                         + (activeUnit.cobrarPeajes !== false ? Number(activeUnit.peajes || 0) : 0)
                         + (activeUnit.cobrarCarga !== false ? Number(activeUnit.carga || 0) : 0)
                         + (activeUnit.cobrarFerry !== false ? Number(activeUnit.ferry || 0) : 0);
-                      const itinerarySummary = summarizeItineraryRows(activeUnit.itineraryRows || []) || (activeUnit.itinerary ? summarizeItinerary(activeUnit.itinerary) : null);
+                      const dayStopCount = (activeUnit.itineraryDays || []).reduce((sum, day) => sum + (day.rows || []).filter(row => String(row.tipo || '').startsWith('inter')).length, 0);
+                      const dayKmSummary = Math.round(getItineraryDaysTotalKm(activeUnit.itineraryDays || []));
+                      const daysSummary = (activeUnit.itineraryDays || []).length ? {
+                        stops: dayStopCount,
+                        distance: `${dayKmSummary} km`,
+                        duration: formatDuration((activeUnit.itineraryDays || []).reduce((sum, day) => sum + (day.rows || []).reduce((daySum, row) => daySum + (Number(row.durationMin || 0) * 60), 0), 0)),
+                        days: activeUnit.itineraryDays.length,
+                      } : null;
+                      const visibleItinerarySummary = daysSummary || summarizeItineraryRows(activeUnit.itineraryRows || []) || (activeUnit.itinerary ? summarizeItinerary(activeUnit.itinerary) : null) || {
+                        stops: 0,
+                        distance: `${Math.round(Number(activeUnit.km || 0))} km`,
+                        duration: '0 min',
+                        days: 1,
+                      };
                       const unitPanelTabs = getUnitPanelTabs(socio.sTipoServicio);
                       const resolvedUnitTab = unitPanelTabs.some(tab => tab.id === activeUnitTab) ? activeUnitTab : 'operacion';
 
                       return (
                         <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 14 }}>
-                          {itinerarySummary && (
+                          {visibleItinerarySummary && (
                             <div style={{ marginBottom: 12, padding: 10, borderRadius: 10, background: T.grnDim, border: `1px solid ${T.GRN}33`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <Map size={16} color={T.GRN} />
-                                <span style={{ fontSize: 12, fontWeight: 700, color: T.GRN }}>{itinerarySummary.stops} paradas</span>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: T.GRN }}>{visibleItinerarySummary.stops} paradas</span>
                               </div>
                               <div style={{ display: 'flex', gap: 16, fontSize: 11 }}>
-                                <span style={{ color: T.GRN }}>{itinerarySummary.distance}</span>
-                                <span style={{ color: T.GRN }}>{itinerarySummary.duration}</span>
-                                {itinerarySummary.days > 1 && <span style={{ color: T.GRN }}>{itinerarySummary.days} d&iacute;as</span>}
+                                <span style={{ color: T.GRN }}>{visibleItinerarySummary.distance}</span>
+                                <span style={{ color: T.GRN }}>{visibleItinerarySummary.duration}</span>
+                                {visibleItinerarySummary.days > 1 && <span style={{ color: T.GRN }}>{visibleItinerarySummary.days} días</span>}
                               </div>
                             </div>
                           )}
@@ -4702,7 +4907,7 @@ const updateItineraryRow = (rowId, field, value) => {
                                   googleMapsApiKey={googleMapsApiKey}
                                   onUpdateDay={(dayId, field, value) => updateItineraryDay(dayId, field, value)}
                                   onUpdateStop={(dayId, stopId, field, value) => updateItineraryStop(dayId, stopId, field, value)}
-                                  onAddStop={(dayId) => addStop(dayId)}
+                                  onAddStop={(dayId, stopType) => addStop(dayId, stopType)}
                                   onRemoveStop={(dayId, stopId) => removeStop(dayId, stopId)}
                                   onAddDay={addDay}
                                   onRemoveLastDay={() => removeLastDay()}
@@ -4823,7 +5028,7 @@ const updateItineraryRow = (rowId, field, value) => {
                                               <span>{item.label}</span>
                                             </label>
                                             {item.readOnly ? (
-                                              <ReadOnlyFormattedInput value={item.value || 0} monetary inputStyle={{ color: T.txt, textAlign: 'right' }} />
+                                              <ReadOnlyFormattedInput value={item.value || 0} monetary currency={displayCurrency} exchange={moneyExchange} inputStyle={{ color: T.txt, textAlign: 'right' }} />
                                             ) : (
                                               <MonetaryInput
                                                 value={activeUnit[item.field]}
@@ -4838,7 +5043,7 @@ const updateItineraryRow = (rowId, field, value) => {
                                         <div style={{ display: 'grid', gridTemplateColumns: '92px minmax(0,1fr)', gap: 10, alignItems: 'center', marginTop: 2 }}>
                                           <div style={{ fontSize: 12, fontWeight: 700, color: T.mute, textAlign: 'right' }}>Total</div>
                                           <input
-                                            value={formatMoney(unitSubtotal, BASE_CURRENCY)}
+                                            value={formatMoney(unitSubtotal, displayCurrency, moneyExchange)}
                                             readOnly
                                             style={{ ...inputStyle, color: T.AMB, cursor: 'default', textAlign: 'right', fontWeight: 800 }}
                                           />
@@ -4861,15 +5066,15 @@ const updateItineraryRow = (rowId, field, value) => {
                 id="transfer"
                 label="Tarifa Transfer"
                 summary={transferResumen}
-                open={openSection === 'transfer'}
+                open={isSectionOpen('transfer')}
                 onToggle={toggleSection}
                 actions={<div style={{ padding: '6px 10px', borderRadius: 999, background: T.ambDim, color: T.AMB, fontSize: 11, fontWeight: 800 }}>{formatMoney(resData.subtotalTransfer, displayCurrency, moneyExchange)}</div>}
               >
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
                   <Field label="Tarifa diaria GAM" style={{ gridColumn: 'span 3' }}><MonetaryInput name="tarifaGAM" value={params.tarifaGAM} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                  <Field label="Dias GAM" style={{ gridColumn: 'span 3' }}><NumberInput name="diasGAM" value={params.diasGAM} onChange={pChange} onBlur={handleGuardar} /></Field>
+                  <Field label="Días GAM" style={{ gridColumn: 'span 3' }}><NumberInput name="diasGAM" value={params.diasGAM} onChange={pChange} onBlur={handleGuardar} /></Field>
                   <Field label="Tarifa media" style={{ gridColumn: 'span 3' }}><MonetaryInput name="mediaTarifa" value={params.mediaTarifa} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                  <Field label="Dias sin movimiento" style={{ gridColumn: 'span 3' }}><NumberInput name="diasSM" value={params.diasSM} onChange={pChange} onBlur={handleGuardar} /></Field>
+                  <Field label="Días sin movimiento" style={{ gridColumn: 'span 3' }}><NumberInput name="diasSM" value={params.diasSM} onChange={pChange} onBlur={handleGuardar} /></Field>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: T.sub }}>Transfers configurados</div>
@@ -4898,34 +5103,47 @@ const updateItineraryRow = (rowId, field, value) => {
                   id="extras"
                   label="Hospedaje y Viáticos"
                   summary={extrasResumen}
-                  open={openSection === 'extras'}
+                  open={isSectionOpen('extras')}
                   onToggle={toggleSection}
                   actions={<div style={{ padding: '6px 10px', borderRadius: 999, background: T.ambDim, color: T.AMB, fontSize: 11, fontWeight: 800 }}>{formatMoney(resData.subtotalExtras, displayCurrency, moneyExchange)}</div>}
                 >
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 16 }}>
                     <Field label="Hospedaje por noche" style={{ gridColumn: 'span 3' }}><MonetaryInput name="hospedaje" value={params.hospedaje} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                    <Field label="Numero de noches" style={{ gridColumn: 'span 3' }}><NumberInput name="noches" value={params.noches} onChange={pChange} onBlur={handleGuardar} /></Field>
+                    <Field label="Número de noches" style={{ gridColumn: 'span 3' }}><NumberInput name="noches" value={params.noches} onChange={pChange} onBlur={handleGuardar} /></Field>
                     <Field label="Personas con hospedaje" style={{ gridColumn: 'span 3' }}><NumberInput name="persHosp" value={params.persHosp} onChange={pChange} onBlur={handleGuardar} /></Field>
                     <Field label="Hospedaje total manual" style={{ gridColumn: 'span 3' }}><MonetaryInput name="hospedajeTotalManual" value={params.hospedajeTotalManual} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0,1fr))', gap: 14, marginTop: 14 }}>
-                    <Field label="Viatico diario por persona" style={{ gridColumn: 'span 3' }}><MonetaryInput name="viatDiario" value={params.viatDiario} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
-                    <Field label="Personas con viaticos" style={{ gridColumn: 'span 3' }}><NumberInput name="persViat" value={params.persViat} onChange={pChange} onBlur={handleGuardar} /></Field>
+                    <Field label="Viático diario por persona" style={{ gridColumn: 'span 3' }}><MonetaryInput name="viatDiario" value={params.viatDiario} onChange={pChange} onBlur={handleGuardar} symbol="₡" /></Field>
+                    <Field label="Personas con viáticos" style={{ gridColumn: 'span 3' }}><NumberInput name="persViat" value={params.persViat} onChange={pChange} onBlur={handleGuardar} /></Field>
                   </div>
                 </AccordionSection>
               )}
 
-              <AccordionSection id="comentarios" label="Comentarios" summary={commentsResumen} open={openSection === 'comentarios'} onToggle={toggleSection}>
-                <div style={{ marginTop: 16 }}>
-                  <textarea
-                    value={proformaComments}
-                    onChange={e => handleCommentsChange(e.target.value)}
-                    onBlur={handleGuardar}
-                    style={{ ...areaStyle, minHeight: 120 }}
-                    placeholder="Observaciones internas, acuerdos, alertas o cualquier comentario de la proforma."
-                  />
-                  <div style={{ marginTop: 8, fontSize: 11, color: T.mute }}>
-                    Este espacio es interno y sirve para trazabilidad operativa y comercial.
+              <AccordionSection id="comentarios" label="Comentarios" summary={commentsResumen} open={isSectionOpen('comentarios')} onToggle={toggleSection}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+                  <Field label="Comentarios PDF">
+                    <textarea
+                      value={proformaComments}
+                      onChange={e => handleCommentsChange(e.target.value)}
+                      onBlur={handleGuardar}
+                      rows={textareaRowsFor(proformaComments, 2, 6)}
+                      style={{ ...areaStyle, minHeight: 78 }}
+                      placeholder="Comentarios para la proforma."
+                    />
+                  </Field>
+                  <Field label="Términos PDF">
+                    <textarea
+                      value={proformaTerms}
+                      onChange={e => handleTermsChange(e.target.value)}
+                      onBlur={handleGuardar}
+                      rows={textareaRowsFor(proformaTerms, 2, 7)}
+                      style={{ ...areaStyle, minHeight: 78 }}
+                      placeholder="Términos y condiciones visibles para el cliente."
+                    />
+                  </Field>
+                  <div style={{ fontSize: 11, color: T.mute }}>
+                    Estos textos se usan en la proforma impresa.
                   </div>
                 </div>
               </AccordionSection>
@@ -4934,7 +5152,7 @@ const updateItineraryRow = (rowId, field, value) => {
                 id="adjuntos"
                 label="Adjuntos"
                 summary={attachmentsResumen}
-                open={openSection === 'adjuntos'}
+                open={isSectionOpen('adjuntos')}
                 onToggle={toggleSection}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
@@ -5069,7 +5287,7 @@ const updateItineraryRow = (rowId, field, value) => {
                 id="ia"
                 label="Trazabilidad IA"
                 summary={aiResumen}
-                open={openSection === 'ia'}
+                open={isSectionOpen('ia')}
                 onToggle={toggleSection}
                 actions={voiceFeedback?.routePreview ? <div style={{ padding: '6px 10px', borderRadius: 999, background: T.grnDim, color: T.GRN, fontSize: 11, fontWeight: 800 }}>Ruta lista</div> : null}
               >
@@ -5169,6 +5387,32 @@ const updateItineraryRow = (rowId, field, value) => {
                 <Field label="Validez">
                   <input type="number" name="cfValidez" value={socio.cfValidez} onChange={sChange} style={inputStyle} />
                 </Field>
+                <div style={{ gridColumn: 'span 2', padding: 10, borderRadius: 10, border: `1px solid ${T.bdr}`, background: T.card2 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: T.mute, letterSpacing: 0.3, whiteSpace: 'nowrap', marginBottom: 8 }}>VISTA PDF</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {[
+                      ['showRoute', 'Ruta'],
+                      ['showPassengers', 'Pax'],
+                      ['showUnits', 'Unid.'],
+                      ['showDrivers', 'Cond.'],
+                      ['showUnitImages', 'Fotos'],
+                      ['showUnitPlate', 'Placa'],
+                      ['showUnitName', 'Nombre'],
+                      ['showDriverPhone', 'Tel. cond.'],
+                      ['showDriverCedula', 'Cédula'],
+                    ].map(([key, label]) => (
+                      <label key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: T.sub, whiteSpace: 'nowrap' }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(proformaOptions[key])}
+                          onChange={() => toggleProformaOption(key)}
+                          style={{ width: 12, height: 12, accentColor: T.AMB }}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <div style={{ position: 'relative' }}>
@@ -5233,7 +5477,7 @@ const updateItineraryRow = (rowId, field, value) => {
                 {[
                   ['Costos Operativos', resData.subtotalOperativo],
                   resData.subtotalTransfer > 0 ? ['Tarifa transfer', resData.subtotalTransfer] : null,
-                  resData.subtotalExtras > 0 ? ['Hospedaje y viaticos', resData.subtotalExtras] : null,
+                  resData.subtotalExtras > 0 ? ['Hospedaje y viáticos', resData.subtotalExtras] : null,
                   resData.utilidadAmt > 0 ? [`Utilidad (${Number(params.utilidadPct || 0).toFixed(2)}%)`, resData.utilidadAmt] : null,
                   resData.descuentoAmt > 0 ? [`Descuento (${Number(params.descuentoPct || 0).toFixed(2)}%)`, -resData.descuentoAmt] : null,
                 ].filter(Boolean).map(([label, value]) => (

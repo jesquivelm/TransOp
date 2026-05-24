@@ -1,7 +1,14 @@
-/**
- * pdfGenerator.js
- * Genera una proforma premium en HTML y abre el dialogo de impresion/PDF.
- */
+const DEFAULT_PROFORMA_OPTIONS = {
+  showRoute: true,
+  showPassengers: true,
+  showUnits: true,
+  showDrivers: true,
+  showUnitImages: true,
+  showUnitPlate: true,
+  showUnitName: true,
+  showDriverPhone: true,
+  showDriverCedula: true,
+};
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -12,66 +19,47 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-function cleanServiceDescription(description, socio = {}) {
-  let text = String(description || '').trim();
-  if (!text) return 'Servicio de transporte ejecutivo segun las condiciones detalladas en esta proforma.';
-
-  [socio?.sNombre, socio?.sEmpresa]
-    .filter(Boolean)
-    .map(item => String(item).trim())
-    .filter(Boolean)
-    .forEach(item => {
-      const safe = item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      text = text.replace(new RegExp(safe, 'gi'), '').replace(/\s{2,}/g, ' ').trim();
-    });
-
-  return text
-    .replace(/\bcliente\b\s*:?\s*/gi, '')
-    .replace(/\bnombre cliente\b\s*:?\s*/gi, '')
-    .replace(/\s+\n/g, '\n')
-    .replace(/\n\s+/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/^[,.;:\-\s]+/, '')
-    .trim() || 'Servicio de transporte ejecutivo segun las condiciones detalladas en esta proforma.';
+function normalizeOptions(rawOptions = {}) {
+  return {
+    ...DEFAULT_PROFORMA_OPTIONS,
+    ...(rawOptions && typeof rawOptions === 'object' ? rawOptions : {}),
+  };
 }
 
-function buildClientSummary(socio = {}) {
-  const rows = [
-    socio.sNombre || socio.sEmpresa || 'Cliente por confirmar',
-    socio.sContacto ? `Contacto: ${socio.sContacto}${socio.sCargo ? `, ${socio.sCargo}` : ''}` : '',
-    [socio.sTel, socio.sEmail].filter(Boolean).join(' | '),
-    socio.sDireccion || '',
-  ].filter(Boolean);
-  return rows;
+function cleanText(value, fallback = '') {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  return text || fallback;
 }
 
-function buildDateMeta(socio = {}) {
-  const now = new Date();
-  const emission = now.toLocaleDateString('es-CR', { year: 'numeric', month: '2-digit', day: '2-digit' });
-  const validUntil = new Date(now.getTime() + (Number(socio.cfValidez) || 15) * 86400000)
-    .toLocaleDateString('es-CR', { year: 'numeric', month: '2-digit', day: '2-digit' });
-
-  return [
-    ['Emisión', emission],
-    ['Validez', validUntil],
-  ];
+function resolveAssetUrl(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  if (/^(https?:|data:|blob:)/i.test(raw)) return raw;
+  if (typeof window !== 'undefined' && raw.startsWith('/')) return `${window.location.origin}${raw}`;
+  return raw;
 }
 
-function buildFooterCompany(config = {}) {
-  return [
-    config.telefono || '',
-    config.email || '',
-    config.direccion || '',
-  ].filter(Boolean);
+function formatDateLong(value) {
+  if (!value) return 'Por confirmar';
+  const date = value instanceof Date ? value : new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('es-CR', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + Number(days || 0));
+  return next;
 }
 
 function getDisplayAmount(value, currency = 'CRC', params = {}) {
   const amount = Number(value) || 0;
   const crcPerUsd = Number(params.tc) || 512;
-  const eurPerUsd = Number(params.eurRate) || 0.92;
-  if (currency === 'USD') return amount / crcPerUsd;
-  if (currency === 'EUR') return (amount / crcPerUsd) * eurPerUsd;
-  return amount;
+  return currency === 'USD' ? amount / crcPerUsd : amount;
 }
 
 function formatMoney(value, currency = 'CRC', params = {}) {
@@ -88,987 +76,541 @@ function formatMoney(value, currency = 'CRC', params = {}) {
   }
 }
 
-function buildIntro(config = {}) {
-  const text = String(config.proforma_intro || '').trim();
-  if (!text) {
-    return 'Nos complace presentar la siguiente propuesta de transporte, preparada con el detalle necesario para su evaluacion comercial.';
-  }
-  return text;
+function formatDurationLabel(seconds) {
+  const totalMinutes = Math.round(Number(seconds || 0) / 60);
+  if (!totalMinutes) return '0 min';
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours && minutes) return `${hours} h ${minutes} min`;
+  if (hours) return `${hours} h`;
+  return `${minutes} min`;
 }
 
-function buildFooterHtml(config = {}) {
-  const items = buildFooterCompany(config);
-  if (!items.length) return '';
-  const icons = {
-    telefono: config.telefono_icon_svg || '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72l.34 2.26a2 2 0 0 1-.57 1.72L7.6 8.99a16 16 0 0 0 7.41 7.41l1.29-1.28a2 2 0 0 1 1.72-.57l2.26.34A2 2 0 0 1 22 16.92z"/></svg>',
-    email: config.email_icon_svg || '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg>',
-    direccion: config.direccion_icon_svg || '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-4.35 7-11a7 7 0 1 0-14 0c0 6.65 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/></svg>',
-  };
-  const ordered = [
-    config.telefono ? { key: 'telefono', value: config.telefono } : null,
-    config.email ? { key: 'email', value: config.email } : null,
-    config.direccion ? { key: 'direccion', value: config.direccion } : null,
-  ].filter(Boolean);
-  return ordered.map(item => `
-    <span class="footer-item">
-      <span class="footer-icon">${icons[item.key]}</span>
-      <span>${escapeHtml(item.value)}</span>
-    </span>
-  `).join('<span class="footer-sep">|</span>');
+function vehicleLabel(vehicle = {}, unit = {}) {
+  const model = [vehicle.marca, vehicle.modelo].filter(Boolean).join(' ');
+  return cleanText(unit.vehiculoLabel || model || vehicle.tipo, 'Unidad por asignar');
 }
 
-function sanitizeItineraryRows(rows = []) {
-  if (!Array.isArray(rows)) return [];
-  return rows
-    .map((row, index) => ({
-      id: row?.id || `itin-${index + 1}`,
-      fecha: String(row?.fecha || '').trim(),
-      hora: String(row?.hora || '').trim(),
-      origen: String(row?.origen || '').trim(),
-      destino: String(row?.destino || '').trim(),
-      recorrido: String(row?.recorrido || '').trim(),
-      tiempoEstimado: String(row?.tiempoEstimado || '').trim(),
-      vehiculoLabel: String(row?.vehiculoLabel || '').trim(),
-    }))
-    .filter(row => row.fecha || row.hora || row.origen || row.destino);
+function getVehicle(unit = {}, vehiculos = []) {
+  return vehiculos.find(item => item.id === unit.vehiculoId) || null;
 }
 
-function itineraryRowComplete(row) {
-  return Boolean(row?.fecha && row?.hora && row?.origen && row?.destino);
+function getDriver(unit = {}, vehicle = {}, conductores = []) {
+  const ids = [unit.condId, unit.conductorId, vehicle?.condId, vehicle?.conductorId, vehicle?.conductor_asignado_id].filter(Boolean);
+  return conductores.find(item => ids.includes(item.id)) || null;
 }
 
-function formatDateLong(value) {
-  if (!value) return 'Fecha por confirmar';
-  try {
-    return new Date(`${value}T00:00:00`).toLocaleDateString('es-CR', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
+function unitSubtotal(unit = {}) {
+  const km = Number(unit.km || 0);
+  const fuelPrice = Number(unit.precioCombustibleLitro || 0);
+  const rendimiento = Number(unit.rendimiento || 0);
+  const fuelCost = rendimiento > 0 ? km * (fuelPrice / rendimiento) : Number(unit.combustible || 0);
+  return fuelCost
+    + Number(unit.colaborador || 0)
+    + (unit.cobrarPeajes === false ? 0 : Number(unit.peajes || 0))
+    + (unit.cobrarCarga === false ? 0 : Number(unit.carga || 0))
+    + (unit.cobrarFerry === false ? 0 : Number(unit.ferry || 0));
+}
+
+function routeDaysForUnit(unit = {}, socio = {}) {
+  const days = Array.isArray(unit.itineraryDays) ? unit.itineraryDays : [];
+  if (days.length) {
+    return days.map((day, index) => {
+      const rows = Array.isArray(day.rows) ? day.rows : [];
+      const salida = rows.find(row => row.tipo === 'salida') || rows[0] || {};
+      const destino = rows.find(row => row.tipo === 'destino') || rows[Math.max(0, rows.length - 2)] || {};
+      const regreso = [...rows].reverse().find(row => row.tipo === 'regreso') || {};
+      return {
+        label: days.length > 1 ? `Día ${index + 1}` : 'Servicio',
+        fecha: day.fecha || unit.sFecha || socio.sFecha || '',
+        salida: cleanText(salida.lugar || unit.sOrigen || socio.sOrigen, 'Por confirmar'),
+        destino: cleanText(destino.lugar || unit.sDestino || socio.sDestino, 'Por confirmar'),
+        regreso: cleanText(regreso.lugar || unit.sRegreso || socio.sRegreso || socio.sOrigen, 'Por confirmar'),
+        horaSalida: salida.hora || unit.sHora || socio.sHora || '',
+        horaDestino: destino.hora || '',
+        horaRegreso: regreso.hora || unit.sHoraRegreso || '',
+      };
     });
-  } catch {
-    return value;
   }
+
+  return [{
+    label: 'Servicio',
+    fecha: unit.sFecha || socio.sFecha || '',
+    salida: cleanText(unit.sOrigen || socio.sOrigen, 'Por confirmar'),
+    destino: cleanText(unit.sDestino || socio.sDestino, 'Por confirmar'),
+    regreso: cleanText(unit.sRegreso || socio.sRegreso || socio.sOrigen, 'Por confirmar'),
+    horaSalida: unit.sHora || socio.sHora || '',
+    horaDestino: '',
+    horaRegreso: unit.sHoraRegreso || '',
+  }];
 }
 
-function formatDistanceLabel(rawValue) {
-  const normalized = String(rawValue || '').trim();
-  if (!normalized) return '—';
-  const numeric = Number.parseFloat(normalized.replace(',', '.'));
-  if (!Number.isFinite(numeric)) return normalized;
-  return `${new Intl.NumberFormat('es-CR', {
-    minimumFractionDigits: numeric % 1 === 0 ? 0 : 1,
-    maximumFractionDigits: 1,
-  }).format(numeric)} km`;
-}
-
-function formatDurationLabel(rawValue) {
-  const text = String(rawValue || '').trim();
-  if (!text) return '—';
-  return text.replace(/\s+/g, ' ');
-}
-
-function buildItinerarySummary(rows = []) {
-  const safeRows = sanitizeItineraryRows(rows).filter(itineraryRowComplete);
-  if (!safeRows.length) return null;
-  const days = new Set(safeRows.map(row => row.fecha).filter(Boolean)).size || 1;
-  return {
-    segments: safeRows.length,
-    days,
-    start: safeRows[0],
-    end: safeRows[safeRows.length - 1],
-  };
-}
-
-function buildItineraryHtml(rows = []) {
-  const safeRows = sanitizeItineraryRows(rows).filter(itineraryRowComplete);
-  if (!safeRows.length) return '';
-  return safeRows.map((row, index) => `
-    <div class="itinerary-row">
-      <div class="itinerary-step">
-        <div class="itinerary-badge">Tramo ${index + 1}</div>
-        <div class="itinerary-date">${escapeHtml(formatDateLong(row.fecha))}</div>
-        <div class="itinerary-time">${escapeHtml(row.hora || 'Hora por confirmar')}</div>
-      </div>
-      <div class="itinerary-route">
-        <div class="route-point">
-          <span class="route-label">Origen</span>
-          <span class="route-value">${escapeHtml(row.origen || 'Por confirmar')}</span>
-        </div>
-        <div class="route-divider"></div>
-        <div class="route-point">
-          <span class="route-label">Destino</span>
-          <span class="route-value">${escapeHtml(row.destino || 'Por confirmar')}</span>
-        </div>
-      </div>
-      <div class="itinerary-meta">
-        <div class="itinerary-chip">${escapeHtml(formatDistanceLabel(row.recorrido))}</div>
-        <div class="itinerary-chip">${escapeHtml(formatDurationLabel(row.tiempoEstimado))}</div>
-        ${row.vehiculoLabel ? `<div class="itinerary-chip muted">${escapeHtml(row.vehiculoLabel)}</div>` : ''}
-      </div>
+function routeHtml(unit = {}, socio = {}) {
+  return routeDaysForUnit(unit, socio).map(day => `
+    <div class="route-day">
+      <div class="route-date">${escapeHtml(day.label)} · ${escapeHtml(formatDateLong(day.fecha))}</div>
+      <div><strong>Salida:</strong> ${escapeHtml(day.salida)}${day.horaSalida ? ` · ${escapeHtml(day.horaSalida)}` : ''}</div>
+      <div><strong>Destino:</strong> ${escapeHtml(day.destino)}${day.horaDestino ? ` · ${escapeHtml(day.horaDestino)}` : ''}</div>
+      <div><strong>Regreso:</strong> ${escapeHtml(day.regreso)}${day.horaRegreso ? ` · ${escapeHtml(day.horaRegreso)}` : ''}</div>
     </div>
   `).join('');
 }
 
-export function pdfGen({ params, socio, resData, config = {}, seller = null, itineraryRows = [] }) {
-  const displayCurrency = socio?.cfMoneda || 'CRC';
-  const companyName = escapeHtml(config.nombre || 'TransOP S.A.');
-  const logoUrl = String(config.logo || '').trim();
-  const logoScale = Math.max(0.5, Math.min(3, Number(config.logo_scale || 1)));
-  const companyFont = String(config.fuente_empresa || 'Georgia, Times New Roman, serif');
-  const documentFont = String(config.fuente_documento || 'Segoe UI, Arial, sans-serif');
-  const companyColor = String(config.nombre_color || '#0f172a');
-  const lineColor = '#d7e0ea';
-  const softCard = '#f9fbfd';
-  const softInk = '#5d6d80';
-  const deepInk = '#1f2f46';
+function footerItems(config = {}) {
+  return [
+    config.telefono || config.tel || '',
+    config.email || config.correo || '',
+    config.direccion || '',
+    config.web || config.website || config.sitio || '',
+  ].filter(Boolean);
+}
 
-  const proformaNumber = escapeHtml(socio.cfNumero || 'PROFORMA');
-  const detail = escapeHtml(cleanServiceDescription(socio.cfDescripcion, socio)).replace(/\n/g, '<br>');
-  const introText = escapeHtml(buildIntro(config)).replace(/\n/g, '<br>');
-  const clientLines = buildClientSummary(socio).map((line, index) => `
-    <div class="client-line${index === 0 ? ' primary' : ''}">${escapeHtml(line)}</div>
-  `).join('');
-  const dateLines = buildDateMeta(socio).map(([label, value]) => `
-    <div class="meta-row">
-      <div class="meta-label">${escapeHtml(label)}</div>
-      <div class="meta-value">${escapeHtml(value)}</div>
-    </div>
-  `).join('');
-  const footerHtml = buildFooterHtml(config);
-  const sellerName = escapeHtml(
-    seller?.nombre
-    || seller?.name
-    || config.contacto_nombre
-    || 'Representante comercial'
+function defaultTerms(config = {}) {
+  return cleanText(
+    config.proforma_terms || config.terminos || config.terminos_condiciones,
+    'Precios sujetos a disponibilidad al momento de confirmar. La reserva se formaliza según las condiciones de pago indicadas y la confirmación escrita del cliente.'
   );
-  const sellerContact = [seller?.email || seller?.correo || config.email, seller?.telefono || seller?.tel || config.telefono]
-    .filter(Boolean)
-    .join(' | ');
-  const sellerContactLine = sellerContact ? `<div class="signature-sub">${escapeHtml(sellerContact)}</div>` : '';
+}
 
-  const paymentText = escapeHtml(socio.cfPago || '50% adelanto y saldo contra servicio.');
-  const disclaimer = 'Esta proforma no constituye un contrato vinculante hasta ser formalmente aceptada por el cliente mediante firma o confirmacion escrita.';
-  const itinerarySummary = buildItinerarySummary(itineraryRows);
-  const itineraryHtml = buildItineraryHtml(itineraryRows);
+function serviceDescription(socio = {}) {
+  return cleanText(
+    socio.cfDescripcion,
+    'Servicio de transporte privado según las condiciones comerciales detalladas en esta propuesta.'
+  );
+}
+
+export function pdfGen({
+  params = {},
+  socio = {},
+  resData = {},
+  config = {},
+  seller = null,
+  units = [],
+  vehiculos = [],
+  conductores = [],
+  proformaComments = '',
+  proformaTerms = '',
+  proformaOptions = {},
+}) {
+  const options = normalizeOptions(proformaOptions);
+  const displayCurrency = socio.cfMoneda || 'CRC';
+  const companyName = cleanText(config.nombre, 'Transportes Miguel');
+  const logoUrl = resolveAssetUrl(config.logo);
+  const logoScale = Math.max(0.6, Math.min(2.2, Number(config.logo_scale || 1)));
+  const proformaNumber = cleanText(socio.cfNumero, 'PF-PENDIENTE');
+  const now = new Date();
+  const validUntil = addDays(now, Number(socio.cfValidez || 15));
+  const serviceDate = units.find(unit => unit.sFecha)?.sFecha || socio.sFecha || '';
+  const safeUnits = units.length ? units : [{}];
+  const subtotal = Number(resData.subtotal ?? resData.subtotalOperativo ?? 0);
+  const discount = Number(resData.descuentoAmt || 0);
+  const tax = Number(resData.ivaAmt || 0);
+  const total = Number(resData.total ?? (subtotal - discount + tax));
+  const footer = footerItems(config);
+  const sellerName = cleanText(seller?.nombre || seller?.name || seller?.username || config.contacto_nombre, 'Ejecutivo comercial');
+  const sellerPhone = cleanText(seller?.telefono || seller?.tel || config.telefono || config.tel, '');
+  const sellerEmail = cleanText(seller?.email || seller?.correo || config.email || config.correo, '');
+  const clientLines = [
+    cleanText(socio.sEmpresa || socio.sNombre, 'Cliente por confirmar'),
+    socio.sContacto ? `Contacto: ${socio.sContacto}${socio.sCargo ? ` · ${socio.sCargo}` : ''}` : '',
+    socio.sTel ? `Teléfono: ${socio.sTel}` : '',
+    socio.sEmail ? `Correo: ${socio.sEmail}` : '',
+    socio.sCedula ? `Identificación: ${socio.sCedula}` : '',
+    socio.sDireccion ? `Dirección: ${socio.sDireccion}` : '',
+    socio.sNotas ? `Observaciones: ${socio.sNotas}` : '',
+  ].filter(Boolean);
+
+  const columns = [
+    options.showRoute ? { key: 'route', label: 'Itinerario', width: '36%' } : null,
+    options.showPassengers ? { key: 'passengers', label: 'Pasajeros', width: '12%' } : null,
+    options.showUnits ? { key: 'unit', label: 'Unidades', width: '21%' } : null,
+    options.showDrivers ? { key: 'driver', label: 'Conductores', width: '18%' } : null,
+    { key: 'subtotal', label: 'Subtotal', width: '13%' },
+  ].filter(Boolean);
+  const columnWidthTotal = columns.reduce((sum, column) => sum + Number.parseFloat(column.width), 0) || 100;
+  const tableColgroup = columns
+    .map(column => `<col style="width:${((Number.parseFloat(column.width) / columnWidthTotal) * 100).toFixed(2)}%">`)
+    .join('');
+
+  const tableRows = safeUnits.map((unit, index) => {
+    const vehicle = getVehicle(unit, vehiculos);
+    const driver = getDriver(unit, vehicle, conductores);
+    const driverParts = [
+      cleanText(driver?.nombre || unit.conductorNombre, 'Por asignar'),
+      options.showDriverPhone && (driver?.tel || driver?.telefono) ? `Tel. ${driver.tel || driver.telefono}` : '',
+      options.showDriverCedula && driver?.cedula ? `Céd. ${driver.cedula}` : '',
+    ].filter(Boolean);
+    const unitParts = [
+      options.showUnitName ? vehicleLabel(vehicle || {}, unit) : '',
+      options.showUnitPlate && vehicle?.placa ? `Placa ${vehicle.placa}` : '',
+      vehicle?.cap ? `${vehicle.cap} pax` : '',
+    ].filter(Boolean);
+    const cells = {
+      route: `<td>${routeHtml(unit, socio)}</td>`,
+      passengers: `<td class="center">${escapeHtml(unit.sPax || socio.sPax || 'Por confirmar')}</td>`,
+      unit: `<td>${escapeHtml(unitParts.join(' · ') || `Unidad ${index + 1}`)}</td>`,
+      driver: `<td>${escapeHtml(driverParts.join(' · '))}</td>`,
+      subtotal: `<td class="money">${escapeHtml(formatMoney(unitSubtotal(unit), displayCurrency, params))}</td>`,
+    };
+    return `<tr>${columns.map(column => cells[column.key]).join('')}</tr>`;
+  }).join('');
+
+  const unitCards = options.showUnits ? safeUnits.map((unit, index) => {
+    const vehicle = getVehicle(unit, vehiculos);
+    const driver = getDriver(unit, vehicle, conductores);
+    const imageUrl = resolveAssetUrl(vehicle?.foto_url);
+    return `
+      <article class="unit-card${options.showUnitImages ? '' : ' no-image'}">
+        ${options.showUnitImages ? `
+          <div class="unit-image">
+            ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(vehicleLabel(vehicle || {}, unit))}">` : '<span>Sin imagen</span>'}
+          </div>` : ''}
+        <div class="unit-copy">
+          <div class="unit-title">${escapeHtml(options.showUnitName ? vehicleLabel(vehicle || {}, unit) : `Unidad ${index + 1}`)}</div>
+          <div class="unit-meta">
+            ${options.showUnitPlate && vehicle?.placa ? `<span>Placa ${escapeHtml(vehicle.placa)}</span>` : ''}
+            ${vehicle?.cap ? `<span>${escapeHtml(vehicle.cap)} pasajeros</span>` : ''}
+            ${vehicle?.tipo ? `<span>${escapeHtml(vehicle.tipo)}</span>` : ''}
+          </div>
+          ${options.showDrivers ? `<div class="unit-driver">Conductor: ${escapeHtml(driver?.nombre || unit.conductorNombre || 'Por asignar')}</div>` : ''}
+        </div>
+      </article>
+    `;
+  }).join('') : '';
+
+  const driverCards = options.showDrivers ? safeUnits.map((unit, index) => {
+    const vehicle = getVehicle(unit, vehiculos);
+    const driver = getDriver(unit, vehicle, conductores);
+    return `
+      <div class="driver-row">
+        <span>Unidad ${index + 1}</span>
+        <strong>${escapeHtml(driver?.nombre || unit.conductorNombre || 'Por asignar')}</strong>
+        ${options.showDriverPhone && (driver?.tel || driver?.telefono) ? `<span>${escapeHtml(driver.tel || driver.telefono)}</span>` : ''}
+        ${options.showDriverCedula && driver?.cedula ? `<span>Céd. ${escapeHtml(driver.cedula)}</span>` : ''}
+      </div>
+    `;
+  }).join('') : '';
 
   const html = `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${proformaNumber}</title>
+  <base href="${typeof window !== 'undefined' ? `${window.location.origin}/` : ''}">
+  <title>Proforma ${escapeHtml(proformaNumber)}</title>
   <style>
     :root {
-      --brand: ${companyColor};
-      --ink: ${deepInk};
-      --muted: ${softInk};
-      --line: ${lineColor};
-      --soft: ${softCard};
+      --ink: #1F2937;
+      --muted: #6B7280;
+      --line: #E5E7EB;
+      --green: #14532D;
+      --bar: #8BC34A;
+      --soft: #F8FAFC;
+      --shadow: 0 12px 32px rgba(15, 23, 42, 0.10);
     }
-
     * { box-sizing: border-box; }
-
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: #edf2f7;
-    }
-
     body {
-      font-family: ${documentFont};
+      margin: 0;
+      background: #F3F4F6;
       color: var(--ink);
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
+      font-family: Calibri, "Carlito", "Segoe UI", Arial, sans-serif;
+      font-size: 12px;
+      line-height: 1.42;
     }
-
-    .page {
-      position: relative;
+    .sheet {
       width: 8.5in;
       min-height: 11in;
-      margin: 0 auto;
+      margin: 24px auto;
+      padding: 44px 46px 34px;
       background: #fff;
-      padding: 0.42in 0.5in 0.95in;
+      box-shadow: var(--shadow);
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 18px;
     }
-
     .header {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 24px;
-      padding: 6px 0 18px;
+      grid-template-columns: minmax(0, 1fr) 260px;
+      gap: 28px;
+      align-items: start;
+      padding-bottom: 14px;
       border-bottom: 1px solid var(--line);
     }
-
-    .brand {
+    .brand-logo {
+      width: 180px;
+      height: 80px;
       display: flex;
-      align-items: flex-start;
-      gap: 14px;
-      flex: 1;
-      min-width: 0;
-    }
-
-    .logo-box {
-      width: fit-content;
-      height: fit-content;
-      max-width: ${Math.round(132 * logoScale)}px;
-      max-height: ${Math.round(72 * logoScale)}px;
-      display: flex;
-      align-items: flex-start;
+      align-items: center;
       justify-content: flex-start;
-      flex-shrink: 0;
+      margin-bottom: 8px;
     }
-
-    .logo-box img {
-      width: auto;
-      height: auto;
-      max-width: ${Math.round(132 * logoScale)}px;
-      max-height: ${Math.round(72 * logoScale)}px;
+    .brand-logo img {
+      max-width: ${Math.round(180 * logoScale)}px;
+      max-height: ${Math.round(80 * logoScale)}px;
       object-fit: contain;
-      object-position: top left;
-      display: block;
     }
-
-    .brand-copy {
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-start;
-      padding-top: 1px;
-    }
-
-    .brand-name {
-      font-family: ${companyFont};
-      color: var(--brand);
-      font-size: 27px;
+    .brand-placeholder {
+      font-size: 26px;
       font-weight: 800;
-      line-height: 1;
-      letter-spacing: 0.01em;
+      color: var(--green);
     }
-
-    .brand-sub {
-      margin-top: 7px;
-      color: var(--muted);
-      font-size: 10px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      font-weight: 700;
-    }
-
-    .doc-box {
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-start;
-      text-align: right;
-      min-width: 200px;
-      padding-top: 2px;
-    }
-
-    .doc-title {
-      font-family: ${companyFont};
-      font-size: 23px;
-      line-height: 1;
-      color: var(--ink);
-      margin-bottom: 8px;
-      font-style: italic;
-    }
-
-    .doc-number {
-      font-size: 12px;
-      color: var(--muted);
-      font-weight: 700;
-    }
-
-    .top-grid {
+    .company { font-size: 18px; font-weight: 800; margin-top: 4px; }
+    .subtitle { font-size: 13px; font-weight: 700; color: var(--green); margin-top: 2px; }
+    .doc-word { font-size: 11px; text-transform: uppercase; color: var(--muted); font-weight: 800; letter-spacing: .7px; }
+    .doc-panel { text-align: right; }
+    .doc-title { font-size: 28px; font-weight: 800; color: var(--green); line-height: 1; }
+    .doc-id { font-size: 15px; font-weight: 800; margin: 6px 0 14px; }
+    .meta-line { display: flex; justify-content: flex-end; gap: 8px; color: var(--muted); margin-top: 4px; }
+    .meta-line strong { color: var(--ink); font-weight: 700; }
+    .grid-two {
       display: grid;
-      grid-template-columns: 3fr 1fr;
-      gap: 14px;
+      grid-template-columns: minmax(0, 1fr) 250px;
+      gap: 16px;
     }
-
-    .panel {
+    .box {
       border: 1px solid var(--line);
-      border-radius: 16px;
-      background: var(--soft);
-      padding: 14px 16px;
+      border-radius: 8px;
+      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.07);
+      background: #fff;
+      overflow: hidden;
+      break-inside: avoid;
     }
-
-    .panel-label {
-      font-size: 9px;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      color: #be8a2f;
+    .box-head {
+      background: var(--bar);
+      color: #0F2A16;
+      font-size: 12px;
       font-weight: 800;
-      margin-bottom: 10px;
-    }
-
-    .dates-panel {
-      text-align: right;
-    }
-
-    .dates-panel .panel-label {
-      text-align: left;
-    }
-
-    .client-line {
-      font-size: 12px;
-      line-height: 1.55;
-      color: var(--muted);
-      margin-bottom: 4px;
-    }
-
-    .client-line.primary {
-      font-size: 14px;
-      color: var(--ink);
-      font-weight: 800;
-      margin-bottom: 8px;
-    }
-
-    .meta-row + .meta-row {
-      margin-top: 10px;
-      padding-top: 10px;
-      border-top: 1px solid var(--line);
-    }
-
-    .meta-label {
-      font-size: 9px;
-      letter-spacing: 0.18em;
+      padding: 8px 12px;
       text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 4px;
-      font-weight: 500;
-      text-align: right;
+      letter-spacing: .25px;
     }
-
-    .meta-value {
-      font-size: 12px;
-      color: var(--ink);
-      font-weight: 400;
-      text-align: right;
-    }
-
-    .intro {
-      border-left: 2px solid #cf9f4a;
-      background: #fcf8f2;
-      border-radius: 0 14px 14px 0;
-      padding: 14px 16px;
-      font-size: 12px;
-      color: #4c5c70;
-      line-height: 1.78;
-      font-style: italic;
-      white-space: normal;
-    }
-
-    .table-card {
-      border: 1px solid transparent;
-    }
-
+    .box-body { padding: 11px 12px; }
+    .client-lines div { margin-bottom: 4px; color: var(--muted); }
+    .client-lines div:first-child { color: var(--ink); font-weight: 800; font-size: 14px; }
+    .description { color: var(--muted); margin-top: 8px; }
     table {
       width: 100%;
       border-collapse: collapse;
+      table-layout: fixed;
+      break-inside: auto;
     }
-
-    thead th {
-      background: #233750;
-      color: #fff;
-      font-size: 10px;
+    thead { display: table-header-group; }
+    th {
+      background: var(--bar);
+      color: #0F2A16;
+      font-size: 11px;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
+      letter-spacing: .2px;
+      padding: 9px 8px;
       text-align: left;
-      padding: 11px 14px;
-      font-weight: 800;
+      border-right: 1px solid rgba(20, 83, 45, .16);
     }
-
-    thead th:first-child { border-radius: 12px 0 0 12px; }
-    thead th:last-child { border-radius: 0 12px 12px 0; text-align: right; }
-
-    tbody td {
-      padding: 13px 14px;
+    th:last-child { border-right: none; text-align: right; }
+    td {
+      padding: 10px 8px;
       border-bottom: 1px solid var(--line);
       vertical-align: top;
-    }
-
-    .service-title {
-      font-size: 13px;
-      font-weight: 700;
+      overflow-wrap: anywhere;
       color: var(--ink);
     }
-
-    .service-desc {
-      font-size: 11.4px;
-      color: var(--muted);
-      line-height: 1.82;
-      white-space: normal;
-    }
-
-    .amount {
-      text-align: right;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--ink);
-      white-space: nowrap;
-    }
-
-    .totals-wrap {
-      display: flex;
-      justify-content: flex-end;
-      margin-top: 16px;
-    }
-
-    .totals {
-      width: 250px;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      overflow: hidden;
-      background: #fff;
-    }
-
-    .totals-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 11px 14px;
-      font-size: 12px;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .totals-row span:first-child { color: var(--muted); }
-    .totals-row span:last-child { color: var(--ink); font-weight: 600; }
-
-    .totals-row.total {
-      background: #233750;
-      border-bottom: none;
-    }
-
-    .totals-row.total span {
-      color: #fff;
-      font-weight: 800;
-      font-size: 13px;
-    }
-
-    .terms-grid {
+    tbody tr { break-inside: avoid; }
+    .center { text-align: center; }
+    .money { text-align: right; white-space: nowrap; font-weight: 800; color: var(--green); }
+    .route-day + .route-day { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+    .route-date { color: var(--green); font-weight: 800; margin-bottom: 3px; }
+    .unit-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 12px;
-      margin-top: 6px;
     }
-
-    .term-box {
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: var(--soft);
-      padding: 14px 16px;
-      min-height: 92px;
-    }
-
-    .term-title {
-      font-size: 9px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: #be8a2f;
-      font-weight: 800;
-      margin-bottom: 10px;
-    }
-
-    .term-body {
-      font-size: 11px;
-      line-height: 1.75;
-      color: #4c5c70;
-    }
-
-    .itinerary-section {
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      background: linear-gradient(180deg, #fffdf8 0%, #fff 100%);
-      padding: 18px;
-      margin-top: 6px;
-    }
-
-    .itinerary-section.second-page {
-      margin-top: 0;
-      border-radius: 22px;
-      padding: 22px;
-    }
-
-    .itinerary-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 14px;
-    }
-
-    .itinerary-kicker {
-      font-size: 10px;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      color: #be8a2f;
-      font-weight: 800;
-      margin-bottom: 6px;
-    }
-
-    .itinerary-title {
-      font-family: ${companyFont};
-      font-size: 22px;
-      color: var(--ink);
-      line-height: 1.05;
-    }
-
-    .itinerary-subtitle {
-      margin-top: 6px;
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.6;
-    }
-
-    .itinerary-summary {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-
-    .summary-pill {
-      min-width: 98px;
-      padding: 10px 12px;
-      border-radius: 14px;
-      border: 1px solid var(--line);
-      background: #fff;
-      text-align: left;
-    }
-
-    .summary-pill-label {
-      display: block;
-      font-size: 9px;
-      text-transform: uppercase;
-      letter-spacing: 0.15em;
-      color: var(--muted);
-      margin-bottom: 4px;
-      font-weight: 700;
-    }
-
-    .summary-pill-value {
-      display: block;
-      font-size: 15px;
-      color: var(--ink);
-      font-weight: 800;
-    }
-
-    .itinerary-list {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .itinerary-row {
+    .unit-card {
       display: grid;
-      grid-template-columns: 148px minmax(0, 1fr) 180px;
-      gap: 14px;
-      align-items: center;
-      padding: 14px;
+      grid-template-columns: 118px minmax(0, 1fr);
+      gap: 12px;
+      padding: 10px;
       border: 1px solid var(--line);
-      border-radius: 16px;
+      border-radius: 8px;
       background: #fff;
       break-inside: avoid;
-      page-break-inside: avoid;
     }
-
-    .itinerary-step {
+    .unit-card.no-image { grid-template-columns: 1fr; }
+    .unit-image {
+      height: 86px;
+      border-radius: 7px;
+      background: var(--soft);
+      border: 1px solid var(--line);
+      overflow: hidden;
       display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .itinerary-badge {
-      width: fit-content;
-      padding: 5px 10px;
-      border-radius: 999px;
-      background: #fcf3df;
-      color: #a26a17;
-      font-size: 10px;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-
-    .itinerary-date {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--ink);
-    }
-
-    .itinerary-time {
-      font-size: 20px;
-      font-weight: 800;
-      color: var(--brand);
-      line-height: 1;
-    }
-
-    .itinerary-route {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr);
-      gap: 10px;
       align-items: center;
-    }
-
-    .route-point {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-      min-width: 0;
-    }
-
-    .route-label {
-      font-size: 9px;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      color: var(--muted);
-      font-weight: 700;
-    }
-
-    .route-value {
-      font-size: 12px;
-      color: var(--ink);
-      font-weight: 700;
-      line-height: 1.5;
-      word-break: break-word;
-    }
-
-    .route-divider {
-      position: relative;
-      width: 20px;
-      height: 2px;
-      border-radius: 999px;
-      background: linear-gradient(90deg, #d4a146 0%, #233750 100%);
-    }
-
-    .route-divider::after {
-      content: '';
-      position: absolute;
-      right: -1px;
-      top: 50%;
-      transform: translateY(-50%);
-      border-top: 4px solid transparent;
-      border-bottom: 4px solid transparent;
-      border-left: 6px solid #233750;
-    }
-
-    .itinerary-meta {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-
-    .itinerary-chip {
-      padding: 7px 10px;
-      border-radius: 999px;
-      background: #eef4fa;
-      border: 1px solid #dde7f0;
-      color: #28405d;
-      font-size: 11px;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-
-    .itinerary-chip.muted {
-      background: #f8fafc;
-      color: var(--muted);
-    }
-
-    .footer-separator {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
       justify-content: center;
-      padding: 18px 0 58px;
-    }
-
-    .signatures {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 30px;
-      align-items: end;
-      margin: auto 0;
-    }
-
-    .signature {
-      text-align: center;
-      padding-top: 4px;
-    }
-
-    .signature-line {
-      width: 160px;
-      margin: 0 auto;
-      border-top: 1px solid #dbe3ec;
-      padding-top: 8px;
-      color: var(--ink);
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    .signature-sub {
-      margin-top: 4px;
-      font-size: 10px;
       color: var(--muted);
+      font-size: 11px;
     }
-
-    .footer {
-      position: absolute;
-      left: 0.5in;
-      right: 0.5in;
-      bottom: 0.34in;
-      padding-top: 12px;
+    .unit-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .unit-title { font-size: 14px; font-weight: 800; color: var(--ink); margin-bottom: 6px; }
+    .unit-meta { display: flex; flex-wrap: wrap; gap: 6px 10px; color: var(--muted); font-size: 11px; }
+    .unit-driver { margin-top: 8px; color: var(--green); font-weight: 700; }
+    .financial {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 260px;
+      gap: 16px;
+      align-items: start;
+    }
+    .summary { padding: 12px 14px; }
+    .summary-row { display: flex; justify-content: space-between; gap: 20px; padding: 5px 0; color: var(--muted); }
+    .summary-row strong { color: var(--ink); }
+    .total-row {
+      margin-top: 8px;
+      padding-top: 10px;
       border-top: 1px solid var(--line);
       display: flex;
-      justify-content: center;
-      align-items: center;
+      justify-content: space-between;
+      align-items: baseline;
+      color: var(--green);
+      font-size: 18px;
+      font-weight: 900;
+    }
+    .notes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .text-block { white-space: pre-wrap; color: var(--muted); }
+    .driver-list { display: flex; flex-direction: column; gap: 6px; }
+    .driver-row {
+      display: grid;
+      grid-template-columns: 70px minmax(0, 1fr) auto auto;
       gap: 10px;
-      flex-wrap: wrap;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--line);
       color: var(--muted);
-      font-size: 10px;
-      line-height: 1.65;
     }
-
-    .footer-item {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
+    .driver-row:last-child { border-bottom: none; }
+    .driver-row strong { color: var(--ink); }
+    .footer {
+      margin-top: auto;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      color: var(--muted);
+      font-size: 11px;
+      justify-content: center;
     }
-
-    .footer-icon {
-      display: inline-flex;
-      width: 12px;
-      height: 12px;
-      color: ${String(config.footer_icon_color || '#9aa8b8')};
-      flex: 0 0 auto;
-    }
-
-    .footer-icon svg {
-      width: 12px;
-      height: 12px;
-      display: block;
-    }
-
-    .footer-sep {
-      color: #b4c0cd;
-    }
-
-    @page {
-      size: Letter portrait;
-      margin: 0;
-    }
-
+    @page { size: Letter; margin: 0; }
     @media print {
       body { background: #fff; }
-      .page { margin: 0; }
+      .sheet {
+        width: auto;
+        min-height: 11in;
+        margin: 0;
+        padding: 38px 42px 28px;
+        box-shadow: none;
+      }
+      .box, .unit-card, .financial, .notes-grid { break-inside: avoid; }
     }
   </style>
 </head>
 <body>
-  <div class="page">
-    <div class="header" id="main-header">
-      <div class="brand">
-        <div class="logo-box">
-          ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${companyName}">` : ''}
+  <main class="sheet">
+    <header class="header">
+      <div>
+        <div class="brand-logo">
+          ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(companyName)}">` : `<div class="brand-placeholder">${escapeHtml(companyName)}</div>`}
         </div>
-        <div class="brand-copy">
-          <div class="brand-name">${companyName}</div>
-          <div class="brand-sub">Propuesta comercial</div>
-        </div>
+        <div class="company">${escapeHtml(companyName)}</div>
+        <div class="subtitle">Propuesta Comercial</div>
+        <div class="doc-word">Proforma</div>
       </div>
-      <div class="doc-box">
+      <div class="doc-panel">
         <div class="doc-title">Proforma</div>
-        <div class="doc-number">${proformaNumber}</div>
+        <div class="doc-id">${escapeHtml(proformaNumber)}</div>
+        <div class="meta-line"><span>Emitida:</span><strong>${escapeHtml(formatDateLong(now))}</strong></div>
+        <div class="meta-line"><span>Válida hasta:</span><strong>${escapeHtml(formatDateLong(validUntil))}</strong></div>
+        <div class="meta-line"><span>Servicio:</span><strong>${escapeHtml(formatDateLong(serviceDate))}</strong></div>
+        <div class="meta-line"><span>Ejecutivo:</span><strong>${escapeHtml(sellerName)}</strong></div>
+        ${sellerPhone ? `<div class="meta-line"><span>Teléfono:</span><strong>${escapeHtml(sellerPhone)}</strong></div>` : ''}
+        ${sellerEmail ? `<div class="meta-line"><span>Correo:</span><strong>${escapeHtml(sellerEmail)}</strong></div>` : ''}
       </div>
-    </div>
+    </header>
 
-    <div class="top-grid">
-      <div class="panel">
-        <div class="panel-label">Cliente</div>
-        ${clientLines}
-      </div>
-      <div class="panel dates-panel">
-        <div class="panel-label">Fechas</div>
-        ${dateLines}
-      </div>
-    </div>
-
-    <div class="intro">
-      ${introText}
-    </div>
-
-    <div class="table-card" id="service-card">
-      <table>
-        <thead>
-          <tr>
-            <th>Detalle del servicio</th>
-            <th>Subtotal</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>
-              <div class="service-desc">${detail}</div>
-            </td>
-            <td class="amount">${formatMoney(resData.subtotal, displayCurrency, params)}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div class="totals-wrap">
-        <div class="totals">
-          <div class="totals-row">
-            <span>Subtotal</span>
-            <span>${formatMoney(resData.subtotal, displayCurrency, params)}</span>
-          </div>
-          ${Number(resData.utilidadAmt || 0) > 0 ? `
-          <div class="totals-row">
-            <span>Utilidad (${Number(params.utilidadPct || 0).toFixed(2)}%)</span>
-            <span>${formatMoney(resData.utilidadAmt, displayCurrency, params)}</span>
-          </div>` : ''}
-          ${Number(resData.descuentoAmt || 0) > 0 ? `
-          <div class="totals-row">
-            <span>Descuento (${Number(params.descuentoPct || 0).toFixed(2)}%)</span>
-            <span>-${formatMoney(resData.descuentoAmt, displayCurrency, params)}</span>
-          </div>` : ''}
-          <div class="totals-row">
-            <span>Impuesto de ventas</span>
-            <span>${formatMoney(resData.ivaAmt, displayCurrency, params)}</span>
-          </div>
-          <div class="totals-row total">
-            <span>Total (${displayCurrency})</span>
-            <span>${formatMoney(resData.total, displayCurrency, params)}</span>
-          </div>
-          ${displayCurrency !== 'CRC' ? `
-          <div class="totals-row">
-            <span>Total base</span>
-            <span>${formatMoney(resData.total, 'CRC', params)}</span>
-          </div>` : ''}
+    <section class="grid-two">
+      <div class="box">
+        <div class="box-head">Cliente</div>
+        <div class="box-body client-lines">
+          ${clientLines.map(line => `<div>${escapeHtml(line)}</div>`).join('')}
         </div>
       </div>
-    </div>
-
-    <div class="terms-grid" id="terms-grid">
-      <div class="term-box">
-        <div class="term-title">Terminos de pago</div>
-        <div class="term-body">${paymentText}</div>
-      </div>
-      <div class="term-box">
-        <div class="term-title">Condiciones</div>
-        <div class="term-body">${escapeHtml(disclaimer)}</div>
-      </div>
-    </div>
-
-    ${itineraryHtml ? `
-    <section class="itinerary-section" id="itinerary-section">
-      <div class="itinerary-header">
-        <div>
-          <div class="itinerary-kicker">Ruta Operativa</div>
-          <div class="itinerary-title">Itinerario del Servicio</div>
-          <div class="itinerary-subtitle">
-            Hoja de ruta sugerida para ejecutar esta operación. Si el bloque completo no cabe en esta primera página,
-            se moverá automáticamente a una segunda hoja dedicada.
-          </div>
+      <div class="box">
+        <div class="box-head">Fechas</div>
+        <div class="box-body">
+          <div><strong>Emisión:</strong> ${escapeHtml(formatDateLong(now))}</div>
+          <div><strong>Validez:</strong> ${escapeHtml(formatDateLong(validUntil))}</div>
+          <div><strong>Servicio:</strong> ${escapeHtml(formatDateLong(serviceDate))}</div>
         </div>
-        ${itinerarySummary ? `
-        <div class="itinerary-summary">
-          <div class="summary-pill">
-            <span class="summary-pill-label">Tramos</span>
-            <span class="summary-pill-value">${itinerarySummary.segments}</span>
-          </div>
-          <div class="summary-pill">
-            <span class="summary-pill-label">Días</span>
-            <span class="summary-pill-value">${itinerarySummary.days}</span>
-          </div>
-        </div>` : ''}
-      </div>
-      <div class="itinerary-list">
-        ${itineraryHtml}
-      </div>
-    </section>` : ''}
-
-    <div class="footer-separator">
-      <div class="signatures">
-        <div class="signature">
-          <div class="signature-line">Firma del cliente</div>
-          <div class="signature-sub">${escapeHtml(socio.sNombre || 'Cliente')}</div>
-        </div>
-        <div class="signature">
-          <div class="signature-line">${sellerName}</div>
-          ${sellerContactLine}
-        </div>
-      </div>
-
-      <div class="footer">
-        ${footerHtml}
-      </div>
-    </div>
-  </div>
-
-  ${itineraryHtml ? `
-  <div class="page" id="itinerary-page" style="display:none;">
-    <div class="header">
-      <div class="brand">
-        <div class="logo-box">
-          ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${companyName}">` : ''}
-        </div>
-        <div class="brand-copy">
-          <div class="brand-name">${companyName}</div>
-          <div class="brand-sub">Continuación operativa</div>
-        </div>
-      </div>
-      <div class="doc-box">
-        <div class="doc-title">Itinerario</div>
-        <div class="doc-number">${proformaNumber}</div>
-      </div>
-    </div>
-    <section class="itinerary-section second-page" id="itinerary-section-clone">
-      <div class="itinerary-header">
-        <div>
-          <div class="itinerary-kicker">Ruta Operativa</div>
-          <div class="itinerary-title">Itinerario del Servicio</div>
-          <div class="itinerary-subtitle">
-            Distribución detallada por tramo, fecha, hora y ruta prevista.
-          </div>
-        </div>
-        ${itinerarySummary ? `
-        <div class="itinerary-summary">
-          <div class="summary-pill">
-            <span class="summary-pill-label">Tramos</span>
-            <span class="summary-pill-value">${itinerarySummary.segments}</span>
-          </div>
-          <div class="summary-pill">
-            <span class="summary-pill-label">Días</span>
-            <span class="summary-pill-value">${itinerarySummary.days}</span>
-          </div>
-        </div>` : ''}
-      </div>
-      <div class="itinerary-list">
-        ${itineraryHtml}
       </div>
     </section>
-  </div>` : ''}
 
+    <section class="box">
+      <div class="box-head">Detalle de la cotización</div>
+      <div class="box-body">
+        <table>
+          <colgroup>
+            ${tableColgroup}
+          </colgroup>
+          <thead>
+            <tr>${columns.map(column => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+        <div class="description">${escapeHtml(serviceDescription(socio))}</div>
+      </div>
+    </section>
+
+    ${unitCards ? `<section class="unit-grid">${unitCards}</section>` : ''}
+
+    <section class="financial">
+      <div class="box">
+        <div class="box-head">Resumen del servicio</div>
+        <div class="box-body text-block">
+${escapeHtml(`Pasajeros: ${socio.sPax || 'Por confirmar'}
+Unidades: ${safeUnits.length}
+Distancia estimada: ${Math.round(safeUnits.reduce((sum, unit) => sum + Number(unit.km || 0), 0))} km
+Tiempo estimado: ${formatDurationLabel(safeUnits.reduce((sum, unit) => {
+  const secondsFromDays = (unit.itineraryDays || []).reduce((daySum, day) => daySum + (day.rows || []).reduce((rowSum, row) => rowSum + Number(row.durationMin || 0) * 60, 0), 0);
+  return sum + secondsFromDays;
+}, 0))}`)}
+        </div>
+      </div>
+      <div class="box summary">
+        <div class="summary-row"><span>Subtotal</span><strong>${escapeHtml(formatMoney(subtotal, displayCurrency, params))}</strong></div>
+        ${discount > 0 ? `<div class="summary-row"><span>Descuento</span><strong>-${escapeHtml(formatMoney(discount, displayCurrency, params))}</strong></div>` : ''}
+        <div class="summary-row"><span>Impuestos (${escapeHtml(params.iva || 0)}%)</span><strong>${escapeHtml(formatMoney(tax, displayCurrency, params))}</strong></div>
+        <div class="total-row"><span>Total</span><span>${escapeHtml(formatMoney(total, displayCurrency, params))}</span></div>
+      </div>
+    </section>
+
+    <section class="notes-grid">
+      <div class="box">
+        <div class="box-head">Comentarios</div>
+        <div class="box-body text-block">${escapeHtml(cleanText(proformaComments, 'Sin comentarios adicionales.'))}</div>
+      </div>
+      <div class="box">
+        <div class="box-head">Términos y condiciones</div>
+        <div class="box-body text-block">${escapeHtml(cleanText(proformaTerms, defaultTerms(config)))}</div>
+      </div>
+    </section>
+
+    ${driverCards ? `
+      <section class="box">
+        <div class="box-head">Conductores</div>
+        <div class="box-body driver-list">${driverCards}</div>
+      </section>` : ''}
+
+    <footer class="footer">
+      ${footer.map(item => `<span>${escapeHtml(item)}</span>`).join('<span>·</span>')}
+    </footer>
+  </main>
   <script>
     window.onload = function() {
       window.requestAnimationFrame(function() {
-        const itinerarySection = document.getElementById('itinerary-section');
-        const itineraryPage = document.getElementById('itinerary-page');
-        if (itinerarySection && itineraryPage) {
-          const page = itinerarySection.closest('.page');
-          const footerSeparator = page ? page.querySelector('.footer-separator') : null;
-          const pageHeight = page ? page.clientHeight : 0;
-          const itineraryBottom = itinerarySection.offsetTop + itinerarySection.offsetHeight;
-          const footerTop = footerSeparator ? footerSeparator.offsetTop : pageHeight;
-          const available = footerTop - itinerarySection.offsetTop;
-          const needsSecondPage = itinerarySection.offsetHeight > available || itineraryBottom > footerTop;
-          if (needsSecondPage) {
-            itinerarySection.remove();
-            itineraryPage.style.display = 'flex';
-          } else {
-            itineraryPage.remove();
-          }
-        }
         window.print();
         window.onafterprint = function() { window.close(); };
       });
@@ -1079,7 +621,7 @@ export function pdfGen({ params, socio, resData, config = {}, seller = null, iti
 
   const win = window.open('', '_blank', 'width=960,height=740,scrollbars=yes');
   if (!win) {
-    alert('El navegador bloqueo la ventana emergente. Permite pop-ups para este sitio e intenta de nuevo.');
+    alert('El navegador bloqueó la ventana emergente. Permite ventanas emergentes para este sitio e intenta de nuevo.');
     return;
   }
 
