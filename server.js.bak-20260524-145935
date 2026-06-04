@@ -872,38 +872,6 @@ async function estimateRouteDistanceKm(origin, destination, options = {}) {
     return Math.max(1, Math.round(meters / 1000));
 }
 
-async function estimateRouteMetrics(origin, destination, options = {}) {
-    const [from, to] = await Promise.all([
-        resolveRoutePoint(origin, options.originCoords),
-        resolveRoutePoint(destination, options.destinationCoords),
-    ]);
-
-    if (!from || !to) return null;
-
-    const routeUrl = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=false`;
-    const response = await fetch(routeUrl, {
-        headers: {
-            'User-Agent': 'TransOP/1.0 (route-estimation)',
-            Accept: 'application/json',
-        },
-    });
-
-    if (!response.ok) {
-        throw new Error('No se pudo calcular la ruta entre origen y destino.');
-    }
-
-    const payload = await response.json().catch(() => ({}));
-    const route = payload?.routes?.[0];
-    const meters = Number(route?.distance || 0);
-    const seconds = Number(route?.duration || 0);
-    if (!Number.isFinite(meters) || meters <= 0) return null;
-
-    return {
-        km: Math.max(1, Math.round(meters / 1000)),
-        durationSeconds: Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0,
-    };
-}
-
 async function buildRoutePreview(origin, destination, options = {}) {
     const [from, to] = await Promise.all([
         resolveRoutePoint(origin, options.originCoords),
@@ -3354,12 +3322,12 @@ app.post('/api/tms/routes/estimate-distance', authenticateToken, async (req, res
             return res.status(400).json({ success: false, error: 'Debes indicar origen y destino para calcular la distancia.' });
         }
 
-        const metrics = await estimateRouteMetrics(origin, destination, { originCoords, destinationCoords });
-        if (!metrics?.km) {
+        const km = await estimateRouteDistanceKm(origin, destination, { originCoords, destinationCoords });
+        if (!km) {
             return res.status(404).json({ success: false, error: 'No se pudo estimar la distancia con las ubicaciones indicadas.' });
         }
 
-        res.json({ success: true, km: metrics.km, durationSeconds: metrics.durationSeconds });
+        res.json({ success: true, km });
     } catch (error) {
         console.error('Error estimando distancia:', error);
         res.status(500).json({ success: false, error: error.message || 'No se pudo estimar la distancia.' });

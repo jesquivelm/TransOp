@@ -145,33 +145,24 @@ function routeDaysForUnit(unit = {}, socio = {}) {
   }];
 }
 
-const SVG_PIN   = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:3px;flex-shrink:0"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>`;
-const SVG_FLAG  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:3px;flex-shrink:0"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>`;
-const SVG_CLOCK = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:2px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
-const SVG_BACK  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:3px;flex-shrink:0"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>`;
-
 function routeHtml(unit = {}, socio = {}) {
   return routeDaysForUnit(unit, socio).map(day => `
     <div class="route-day">
-      ${day.fecha ? `<div class="route-date">${escapeHtml(day.label !== 'Servicio' ? day.label + ' · ' : '')}${escapeHtml(formatDateLong(day.fecha))}</div>` : ''}
-      <div class="route-row">${SVG_PIN}<span><strong>Salida:</strong> ${escapeHtml(day.salida)}</span>${day.horaSalida ? `<span class="route-time">${SVG_CLOCK}${escapeHtml(day.horaSalida)}</span>` : ''}</div>
-      <div class="route-row">${SVG_FLAG}<span><strong>Destino:</strong> ${escapeHtml(day.destino)}</span>${day.horaDestino ? `<span class="route-time">${SVG_CLOCK}${escapeHtml(day.horaDestino)}</span>` : ''}</div>
-      <div class="route-row">${SVG_BACK}<span style="color:var(--muted)"><strong style="color:var(--muted)">Regreso:</strong> ${escapeHtml(day.regreso)}</span>${day.horaRegreso ? `<span class="route-time">${SVG_CLOCK}${escapeHtml(day.horaRegreso)}</span>` : ''}</div>
+      <div class="route-date">${escapeHtml(day.label)} · ${escapeHtml(formatDateLong(day.fecha))}</div>
+      <div><strong>Salida:</strong> ${escapeHtml(day.salida)}${day.horaSalida ? ` · ${escapeHtml(day.horaSalida)}` : ''}</div>
+      <div><strong>Destino:</strong> ${escapeHtml(day.destino)}${day.horaDestino ? ` · ${escapeHtml(day.horaDestino)}` : ''}</div>
+      <div><strong>Regreso:</strong> ${escapeHtml(day.regreso)}${day.horaRegreso ? ` · ${escapeHtml(day.horaRegreso)}` : ''}</div>
     </div>
   `).join('');
 }
 
 function footerItems(config = {}) {
-  const items = [];
-  const tel = config.telefono || config.tel || '';
-  const email = config.email || config.correo || '';
-  const dir = config.direccion || '';
-  const web = config.web || config.website || config.sitio || '';
-  if (tel) items.push({ type: 'tel', value: tel });
-  if (email) items.push({ type: 'email', value: email });
-  if (dir) items.push({ type: 'dir', value: dir });
-  if (web) items.push({ type: 'web', value: web });
-  return items;
+  return [
+    config.telefono || config.tel || '',
+    config.email || config.correo || '',
+    config.direccion || '',
+    config.web || config.website || config.sitio || '',
+  ].filter(Boolean);
 }
 
 function defaultTerms(config = {}) {
@@ -241,40 +232,24 @@ export function pdfGen({
     .map(column => `<col style="width:${((Number.parseFloat(column.width) / columnWidthTotal) * 100).toFixed(2)}%">`)
     .join('');
 
-  const SVG_PHONE_ICON = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:3px;flex-shrink:0"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.73a16 16 0 0 0 6.08 6.08l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>`;
-  const SVG_ID_ICON = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:3px;flex-shrink:0"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 8h.01M7 12h.01M11 8h6M11 12h6"/></svg>`;
-
   const tableRows = safeUnits.map((unit, index) => {
     const vehicle = getVehicle(unit, vehiculos);
     const driver = getDriver(unit, vehicle, conductores);
-    const imageUrl = resolveAssetUrl(vehicle?.foto_url);
-    const unitLabel = options.showUnitName ? vehicleLabel(vehicle || {}, unit) : `Unidad ${index + 1}`;
-    const plateLine = options.showUnitPlate && vehicle?.placa ? `<div style="color:var(--muted);font-size:10px;margin-top:2px;">${escapeHtml(vehicle.placa)}</div>` : '';
-
-    const unitCell = `<td>
-      <div style="display:flex;align-items:center;gap:8px;">
-        ${options.showUnitImages && imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(unitLabel)}" style="width:64px;height:44px;object-fit:cover;border-radius:5px;border:1px solid var(--line);flex-shrink:0;">` : ''}
-        <div>
-          <div style="font-weight:800;font-size:12px;">${escapeHtml(unitLabel)}</div>
-          ${plateLine}
-        </div>
-      </div>
-    </td>`;
-
-    const driverName = cleanText(driver?.nombre || unit.conductorNombre, 'Por asignar');
-    const driverTel = options.showDriverPhone ? (driver?.tel || driver?.telefono || '') : '';
-    const driverCedula = options.showDriverCedula ? (driver?.cedula || '') : '';
-    const driverCell = `<td>
-      <div style="font-weight:700;font-size:12px;margin-bottom:3px;">${escapeHtml(driverName)}</div>
-      ${driverTel ? `<div style="color:var(--muted);font-size:11px;display:flex;align-items:center;">${SVG_PHONE_ICON}${escapeHtml(driverTel)}</div>` : ''}
-      ${driverCedula ? `<div style="color:var(--muted);font-size:11px;display:flex;align-items:center;margin-top:2px;">${SVG_ID_ICON}${escapeHtml(driverCedula)}</div>` : ''}
-    </td>`;
-
+    const driverParts = [
+      cleanText(driver?.nombre || unit.conductorNombre, 'Por asignar'),
+      options.showDriverPhone && (driver?.tel || driver?.telefono) ? `Tel. ${driver.tel || driver.telefono}` : '',
+      options.showDriverCedula && driver?.cedula ? `Céd. ${driver.cedula}` : '',
+    ].filter(Boolean);
+    const unitParts = [
+      options.showUnitName ? vehicleLabel(vehicle || {}, unit) : '',
+      options.showUnitPlate && vehicle?.placa ? `Placa ${vehicle.placa}` : '',
+      vehicle?.cap ? `${vehicle.cap} pax` : '',
+    ].filter(Boolean);
     const cells = {
       route: `<td>${routeHtml(unit, socio)}</td>`,
       passengers: `<td class="center">${escapeHtml(unit.sPax || socio.sPax || 'Por confirmar')}</td>`,
-      unit: unitCell,
-      driver: driverCell,
+      unit: `<td>${escapeHtml(unitParts.join(' · ') || `Unidad ${index + 1}`)}</td>`,
+      driver: `<td>${escapeHtml(driverParts.join(' · '))}</td>`,
       subtotal: `<td class="money">${escapeHtml(formatMoney(unitSubtotal(unit), displayCurrency, params))}</td>`,
     };
     return `<tr>${columns.map(column => cells[column.key]).join('')}</tr>`;
@@ -442,10 +417,7 @@ export function pdfGen({
     .center { text-align: center; }
     .money { text-align: right; white-space: nowrap; font-weight: 800; color: var(--green); }
     .route-day + .route-day { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
-    .route-date { color: var(--green); font-weight: 800; margin-bottom: 4px; font-size: 11px; }
-    .route-row { display: flex; align-items: flex-start; gap: 2px; margin-bottom: 3px; font-size: 11.5px; line-height: 1.35; }
-    .route-row span { flex: 1; }
-    .route-time { display: flex; align-items: center; margin-left: 6px; color: var(--muted); font-size: 10.5px; white-space: nowrap; flex-shrink: 0; }
+    .route-date { color: var(--green); font-weight: 800; margin-bottom: 3px; }
     .unit-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -479,50 +451,25 @@ export function pdfGen({
     .unit-meta { display: flex; flex-wrap: wrap; gap: 6px 10px; color: var(--muted); font-size: 11px; }
     .unit-driver { margin-top: 8px; color: var(--green); font-weight: 700; }
     .financial {
-      display: flex;
-      justify-content: flex-end;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 260px;
+      gap: 16px;
+      align-items: start;
     }
-    .summary { padding: 0; min-width: 260px; border: none; box-shadow: none; background: transparent; }
-    .summary-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 6px;
-    }
-    .summary-label {
-      background: var(--bar);
-      color: #0F2A16;
-      font-size: 11px;
-      font-weight: 800;
-      padding: 5px 14px;
-      border-radius: 4px;
-      text-transform: uppercase;
-      letter-spacing: .2px;
-      min-width: 90px;
-      text-align: center;
-    }
-    .summary-amount { font-size: 13px; font-weight: 800; color: var(--ink); white-space: nowrap; }
+    .summary { padding: 12px 14px; }
+    .summary-row { display: flex; justify-content: space-between; gap: 20px; padding: 5px 0; color: var(--muted); }
+    .summary-row strong { color: var(--ink); }
     .total-row {
+      margin-top: 8px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      margin-top: 4px;
-    }
-    .total-label {
-      background: var(--bar);
-      color: #0F2A16;
-      font-size: 12px;
+      align-items: baseline;
+      color: var(--green);
+      font-size: 18px;
       font-weight: 900;
-      padding: 6px 14px;
-      border-radius: 4px;
-      text-transform: uppercase;
-      letter-spacing: .2px;
-      min-width: 90px;
-      text-align: center;
     }
-    .total-amount { font-size: 16px; font-weight: 900; color: var(--ink); white-space: nowrap; }
     .notes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .text-block { white-space: pre-wrap; color: var(--muted); }
     .driver-list { display: flex; flex-direction: column; gap: 6px; }
@@ -542,13 +489,11 @@ export function pdfGen({
       border-top: 1px solid var(--line);
       display: flex;
       flex-wrap: wrap;
-      gap: 8px 20px;
+      gap: 8px 14px;
       color: var(--muted);
       font-size: 11px;
       justify-content: center;
-      align-items: center;
     }
-    .footer-item { display: flex; align-items: center; gap: 5px; }
     @page { size: Letter; margin: 0; }
     @media print {
       body { background: #fff; }
@@ -619,11 +564,26 @@ export function pdfGen({
       </div>
     </section>
 
+    ${unitCards ? `<section class="unit-grid">${unitCards}</section>` : ''}
+
     <section class="financial">
-      <div class="summary">
-        ${discount > 0 ? `<div class="summary-row"><span class="summary-label">Descuento</span><span class="summary-amount">-${escapeHtml(formatMoney(discount, displayCurrency, params))}</span></div>` : ''}
-        <div class="summary-row"><span class="summary-label">Impuestos</span><span class="summary-amount">${escapeHtml(formatMoney(tax, displayCurrency, params))}</span></div>
-        <div class="total-row"><span class="total-label">Total</span><span class="total-amount">${escapeHtml(formatMoney(total, displayCurrency, params))}</span></div>
+      <div class="box">
+        <div class="box-head">Resumen del servicio</div>
+        <div class="box-body text-block">
+${escapeHtml(`Pasajeros: ${socio.sPax || 'Por confirmar'}
+Unidades: ${safeUnits.length}
+Distancia estimada: ${Math.round(safeUnits.reduce((sum, unit) => sum + Number(unit.km || 0), 0))} km
+Tiempo estimado: ${formatDurationLabel(safeUnits.reduce((sum, unit) => {
+  const secondsFromDays = (unit.itineraryDays || []).reduce((daySum, day) => daySum + (day.rows || []).reduce((rowSum, row) => rowSum + Number(row.durationMin || 0) * 60, 0), 0);
+  return sum + secondsFromDays;
+}, 0))}`)}
+        </div>
+      </div>
+      <div class="box summary">
+        <div class="summary-row"><span>Subtotal</span><strong>${escapeHtml(formatMoney(subtotal, displayCurrency, params))}</strong></div>
+        ${discount > 0 ? `<div class="summary-row"><span>Descuento</span><strong>-${escapeHtml(formatMoney(discount, displayCurrency, params))}</strong></div>` : ''}
+        <div class="summary-row"><span>Impuestos (${escapeHtml(params.iva || 0)}%)</span><strong>${escapeHtml(formatMoney(tax, displayCurrency, params))}</strong></div>
+        <div class="total-row"><span>Total</span><span>${escapeHtml(formatMoney(total, displayCurrency, params))}</span></div>
       </div>
     </section>
 
@@ -638,17 +598,14 @@ export function pdfGen({
       </div>
     </section>
 
+    ${driverCards ? `
+      <section class="box">
+        <div class="box-head">Conductores</div>
+        <div class="box-body driver-list">${driverCards}</div>
+      </section>` : ''}
 
     <footer class="footer">
-      ${footer.map(item => {
-        const icons = {
-          tel:   `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.73a16 16 0 0 0 6.08 6.08l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>`,
-          email: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>`,
-          dir:   `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>`,
-          web:   `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
-        };
-        return `<span class="footer-item">${icons[item.type] || ''}${escapeHtml(item.value)}</span>`;
-      }).join('<span style="color:var(--line)">|</span>')}
+      ${footer.map(item => `<span>${escapeHtml(item)}</span>`).join('<span>·</span>')}
     </footer>
   </main>
   <script>
