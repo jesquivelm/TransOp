@@ -21,7 +21,6 @@ import {
   RefreshCcw,
   Save,
   Search,
-  Settings2,
   Trash2,
   Upload,
   User,
@@ -2279,7 +2278,6 @@ export default function CotizadorView({
   const [showSocioSuggestions, setShowSocioSuggestions] = useState(() => initialDetailState?.showSocioSuggestions || false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(() => initialDetailState?.autoSaveEnabled || false);
   const [showStatusMenu, setShowStatusMenu] = useState(() => initialDetailState?.showStatusMenu || false);
-  const [showPdfSettings, setShowPdfSettings] = useState(false);
   const [mapPickerField, setMapPickerField] = useState(() => initialDetailState?.mapPickerField || '');
   const [clienteFromBD, setClienteFromBD] = useState(() => initialDetailState?.clienteFromBD || false);
   const [scheduledTasksByDate, setScheduledTasksByDate] = useState({});
@@ -5366,8 +5364,56 @@ const updateItineraryRow = (rowId, field, value) => {
                 {savedMsg && <div style={{ color: savedMsg.includes('Error') ? T.RED : T.GRN, fontSize: 12, fontWeight: 700 }}>{savedMsg}</div>}
               </div>
 
-
-
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="Forma de pago" style={{ gridColumn: 'span 2' }}>
+                  <input name="cfPago" value={socio.cfPago} onChange={sChange} onBlur={handleGuardar} style={inputStyle} />
+                </Field>
+                <Field label="Moneda">
+                  <select name="cfMoneda" value={displayCurrency} onChange={sChange} onBlur={handleGuardar} style={{ ...inputStyle, cursor: 'pointer' }}>
+                    {DISPLAY_CURRENCIES.map(item => (
+                      <option key={item.code} value={item.code}>{item.label}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Utilidad">
+                  <PercentInput name="utilidadPct" value={params.utilidadPct || 0} onChange={pChange} onBlur={handleGuardar} />
+                </Field>
+                <Field label="Descuento">
+                  <PercentInput name="descuentoPct" value={params.descuentoPct || 0} onChange={pChange} onBlur={handleGuardar} />
+                </Field>
+                <Field label="IVA">
+                  <PercentInput name="iva" value={params.iva || 0} onChange={pChange} onBlur={handleGuardar} />
+                </Field>
+                <Field label="Validez">
+                  <input type="number" name="cfValidez" value={socio.cfValidez} onChange={sChange} style={inputStyle} />
+                </Field>
+                <div style={{ gridColumn: 'span 2', padding: 10, borderRadius: 10, border: `1px solid ${T.bdr}`, background: T.card2 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: T.mute, letterSpacing: 0.3, whiteSpace: 'nowrap', marginBottom: 8 }}>VISTA PDF</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {[
+                      ['showRoute', 'Ruta'],
+                      ['showPassengers', 'Pax'],
+                      ['showUnits', 'Unid.'],
+                      ['showDrivers', 'Cond.'],
+                      ['showUnitImages', 'Fotos'],
+                      ['showUnitPlate', 'Placa'],
+                      ['showUnitName', 'Nombre'],
+                      ['showDriverPhone', 'Tel. cond.'],
+                      ['showDriverCedula', 'Cédula'],
+                    ].map(([key, label]) => (
+                      <label key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: T.sub, whiteSpace: 'nowrap' }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(proformaOptions[key])}
+                          onChange={() => toggleProformaOption(key)}
+                          style={{ width: 12, height: 12, accentColor: T.AMB }}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
 
               <div style={{ position: 'relative' }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: T.mute, letterSpacing: 0.3, marginBottom: 8 }}>ESTADO</div>
@@ -5543,133 +5589,27 @@ const updateItineraryRow = (rowId, field, value) => {
                 >
                   <Save size={16} /> Guardar Proforma
                 </button>
-                <div style={{ position: 'relative' }}>
-                  {/* Popover de configuración PDF */}
-                  {showPdfSettings && (
-                    <>
-                      {/* Overlay para cerrar al click fuera */}
-                      <div
-                        style={{ position: 'fixed', inset: 0, zIndex: 10 }}
-                        onClick={() => setShowPdfSettings(false)}
-                      />
-                      <div style={{
-                        position: 'absolute',
-                        bottom: 'calc(100% + 10px)',
-                        right: 0,
-                        width: 300,
-                        background: T.card,
-                        border: `1px solid ${T.bdr}`,
-                        borderRadius: 14,
-                        boxShadow: '0 18px 48px rgba(0,0,0,0.22)',
-                        zIndex: 20,
-                        padding: 16,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 12,
-                      }}>
-                        <div style={{ fontSize: 12, fontWeight: 800, color: T.txt, marginBottom: 2 }}>Configuración del PDF</div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                          <Field label="Forma de pago" style={{ gridColumn: 'span 2' }}>
-                            <input name="cfPago" value={socio.cfPago} onChange={sChange} onBlur={handleGuardar} style={inputStyle} />
-                          </Field>
-                          <Field label="Moneda">
-                            <select name="cfMoneda" value={displayCurrency} onChange={sChange} onBlur={handleGuardar} style={{ ...inputStyle, cursor: 'pointer' }}>
-                              {DISPLAY_CURRENCIES.map(item => (
-                                <option key={item.code} value={item.code}>{item.label}</option>
-                              ))}
-                            </select>
-                          </Field>
-                          <Field label="Validez (días)">
-                            <input type="number" name="cfValidez" value={socio.cfValidez} onChange={sChange} style={inputStyle} />
-                          </Field>
-                          <Field label="Utilidad %">
-                            <PercentInput name="utilidadPct" value={params.utilidadPct || 0} onChange={pChange} onBlur={handleGuardar} />
-                          </Field>
-                          <Field label="Descuento %">
-                            <PercentInput name="descuentoPct" value={params.descuentoPct || 0} onChange={pChange} onBlur={handleGuardar} />
-                          </Field>
-                          <Field label="IVA %">
-                            <PercentInput name="iva" value={params.iva || 0} onChange={pChange} onBlur={handleGuardar} />
-                          </Field>
-                        </div>
-
-                        <div style={{ borderTop: `1px solid ${T.bdr2}`, paddingTop: 10 }}>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: T.mute, letterSpacing: 0.3, marginBottom: 8 }}>VISTA PDF</div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                            {[
-                              ['showRoute', 'Ruta'],
-                              ['showPassengers', 'Pax'],
-                              ['showUnits', 'Unid.'],
-                              ['showDrivers', 'Cond.'],
-                              ['showUnitImages', 'Fotos'],
-                              ['showUnitPlate', 'Placa'],
-                              ['showUnitName', 'Nombre'],
-                              ['showDriverPhone', 'Tel. cond.'],
-                              ['showDriverCedula', 'Cédula'],
-                            ].map(([key, label]) => (
-                              <label key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: T.sub, whiteSpace: 'nowrap', cursor: 'pointer' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={Boolean(proformaOptions[key])}
-                                  onChange={() => toggleProformaOption(key)}
-                                  style={{ width: 12, height: 12, accentColor: T.AMB }}
-                                />
-                                {label}
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {/* Fila: botón engranaje + botón Generar PDF */}
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button
-                      type="button"
-                      onClick={() => setShowPdfSettings(prev => !prev)}
-                      title="Configuración del PDF"
-                      style={{
-                        flexShrink: 0,
-                        width: 46,
-                        height: 46,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        background: showPdfSettings ? T.ambDim : T.card2,
-                        border: `1px solid ${showPdfSettings ? `${T.AMB}88` : T.bdr}`,
-                        borderRadius: 12,
-                        color: showPdfSettings ? T.AMB : T.mute,
-                        cursor: 'pointer',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      <Settings2 size={18} />
-                    </button>
-                    <button
-                      onClick={generarPDF}
-                      disabled={proformaLocked}
-                      style={{
-                        flex: 1,
-                        padding: '13px 14px',
-                        background: proformaLocked ? T.card : T.ambDim,
-                        border: `1px solid ${proformaLocked ? T.bdr2 : `${T.AMB}55`}`,
-                        borderRadius: 12,
-                        color: proformaLocked ? T.mute : T.AMB,
-                        cursor: proformaLocked ? 'not-allowed' : 'pointer',
-                        fontSize: 13,
-                        fontWeight: 800,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 8,
-                      }}
-                    >
-                      <FileText size={16} /> Generar PDF
-                    </button>
-                  </div>
-                </div>
+                <button
+                  onClick={generarPDF}
+                  disabled={proformaLocked}
+                  style={{
+                    width: '100%',
+                    padding: '13px 14px',
+                    background: proformaLocked ? T.card : T.ambDim,
+                    border: `1px solid ${proformaLocked ? T.bdr2 : `${T.AMB}55`}`,
+                    borderRadius: 12,
+                    color: proformaLocked ? T.mute : T.AMB,
+                    cursor: proformaLocked ? 'not-allowed' : 'pointer',
+                    fontSize: 13,
+                    fontWeight: 800,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <FileText size={16} /> Generar PDF
+                </button>
               </div>
             </div>
           </>
