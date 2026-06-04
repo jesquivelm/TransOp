@@ -406,7 +406,7 @@ export function pdfGen({
     .company { font-size: 26px; font-weight: 800; color: var(--ink); line-height: 1.1; margin: 0; }
     .subtitle { font-size: 15px; font-weight: 700; color: var(--green); margin-top: 3px; }
     .doc-panel-right { margin-left: auto; text-align: right; }
-    .doc-label { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 2px; }
+    .doc-label { font-size: 17px; font-weight: 900; color: var(--ink); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 4px; }
     .doc-id { font-size: 20px; font-weight: 900; color: var(--ink); letter-spacing: -.3px; }
     .grid-two {
       display: grid;
@@ -504,15 +504,17 @@ export function pdfGen({
     .unit-title { font-size: 14px; font-weight: 800; color: var(--ink); margin-bottom: 6px; }
     .unit-meta { display: flex; flex-wrap: wrap; gap: 6px 10px; color: var(--muted); font-size: 11px; }
     .unit-driver { margin-top: 8px; color: var(--green); font-weight: 700; }
-    /* ── Bottom row: notes left, totals right ── */
+    /* ── Bottom row: totals above notes when totalizada ── */
     .bottom-row {
-      display: grid;
-      grid-template-columns: 1fr auto;
+      display: flex;
+      flex-direction: column;
       gap: 16px;
-      align-items: end;
     }
+    /* Totalizada: financial sits directly under the table, full width right-aligned */
     .financial { display: flex; justify-content: flex-end; }
     .summary { padding: 0; min-width: 260px; border: none; box-shadow: none; background: transparent; }
+    /* notes-grid: always 50/50 two columns, placed after financial */
+    .notes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .summary-row {
       display: flex;
       justify-content: space-between;
@@ -666,6 +668,15 @@ export function pdfGen({
     </section>
 
     <section class="bottom-row">
+      ${!isItemizada ? `
+      <div class="financial">
+        <div class="summary">
+          ${discount > 0 ? `<div class="summary-row"><span class="summary-label">Descuento</span><span class="summary-amount">-${escapeHtml(formatMoney(discount, displayCurrency, params))}</span></div>` : ''}
+          <div class="summary-row"><span class="summary-label">Impuestos</span><span class="summary-amount">${escapeHtml(formatMoney(tax, displayCurrency, params))}</span></div>
+          <div class="total-row"><span class="total-label">Total</span><span class="total-amount">${escapeHtml(formatMoney(total, displayCurrency, params))}</span></div>
+        </div>
+      </div>` : ''}
+
       <div class="notes-grid">
         <div class="box">
           <div class="box-head">Comentarios</div>
@@ -676,15 +687,6 @@ export function pdfGen({
           <div class="box-body text-block">${escapeHtml(cleanText(proformaTerms, defaultTerms(config)))}</div>
         </div>
       </div>
-
-      ${!isItemizada ? `
-      <div class="financial">
-        <div class="summary">
-          ${discount > 0 ? `<div class="summary-row"><span class="summary-label">Descuento</span><span class="summary-amount">-${escapeHtml(formatMoney(discount, displayCurrency, params))}</span></div>` : ''}
-          <div class="summary-row"><span class="summary-label">Impuestos</span><span class="summary-amount">${escapeHtml(formatMoney(tax, displayCurrency, params))}</span></div>
-          <div class="total-row"><span class="total-label">Total</span><span class="total-amount">${escapeHtml(formatMoney(total, displayCurrency, params))}</span></div>
-        </div>
-      </div>` : ''}
     </section>
 
     ${options.showSeller !== false && (sellerName || sellerPhone || sellerEmail) ? `
