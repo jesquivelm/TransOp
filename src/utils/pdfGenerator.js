@@ -223,14 +223,19 @@ export function pdfGen({
   const sellerName = cleanText(seller?.nombre || seller?.name || seller?.username || config.contacto_nombre, 'Ejecutivo comercial');
   const sellerPhone = cleanText(seller?.telefono || seller?.tel || config.telefono || config.tel, '');
   const sellerEmail = cleanText(seller?.email || seller?.correo || config.email || config.correo, '');
-  const clientLines = [
-    cleanText(socio.sEmpresa || socio.sNombre, 'Cliente por confirmar'),
-    socio.sContacto ? `Contacto: ${socio.sContacto}${socio.sCargo ? ` · ${socio.sCargo}` : ''}` : '',
-    socio.sTel ? `Teléfono: ${socio.sTel}` : '',
-    socio.sEmail ? `Correo: ${socio.sEmail}` : '',
-    socio.sCedula ? `Identificación: ${socio.sCedula}` : '',
-    socio.sDireccion ? `Dirección: ${socio.sDireccion}` : '',
-    socio.sNotas ? `Observaciones: ${socio.sNotas}` : '',
+  const SVG_TEL_CLIENT   = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:5px;flex-shrink:0;color:var(--muted)"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.73a16 16 0 0 0 6.08 6.08l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>`;
+  const SVG_MAIL_CLIENT  = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:5px;flex-shrink:0;color:var(--muted)"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>`;
+  const SVG_USER_CLIENT  = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:5px;flex-shrink:0;color:var(--muted)"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+
+  // clientHtmlLines: first entry is plain name (rendered bold), rest are icon+value HTML fragments
+  const clientHtmlLines = [
+    { plain: cleanText(socio.sEmpresa || socio.sNombre, 'Cliente por confirmar') },
+    socio.sContacto ? { html: `${SVG_USER_CLIENT}${escapeHtml(socio.sContacto)}${socio.sCargo ? ` <span style="color:var(--muted)">· ${escapeHtml(socio.sCargo)}</span>` : ''}` } : null,
+    socio.sTel      ? { html: `${SVG_TEL_CLIENT}${escapeHtml(socio.sTel)}` } : null,
+    socio.sEmail    ? { html: `${SVG_MAIL_CLIENT}${escapeHtml(socio.sEmail)}` } : null,
+    socio.sCedula   ? { plain: `Identificación: ${socio.sCedula}` } : null,
+    socio.sDireccion ? { plain: `Dirección: ${socio.sDireccion}` } : null,
+    socio.sNotas    ? { plain: `Observaciones: ${socio.sNotas}` } : null,
   ].filter(Boolean);
 
   const tipoProforma = options.tipoProforma || 'totalizada';
@@ -406,7 +411,7 @@ export function pdfGen({
     .company { font-size: 26px; font-weight: 800; color: var(--ink); line-height: 1.1; margin: 0; }
     .subtitle { font-size: 15px; font-weight: 700; color: var(--green); margin-top: 3px; }
     .doc-panel-right { margin-left: auto; text-align: right; }
-    .doc-label { font-size: 17px; font-weight: 900; color: var(--ink); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 4px; }
+    .doc-label { font-size: 17px; font-weight: 900; color: var(--ink); letter-spacing: .5px; margin-bottom: 4px; }
     .doc-id { font-size: 20px; font-weight: 900; color: var(--ink); letter-spacing: -.3px; }
     .grid-two {
       display: grid;
@@ -508,13 +513,13 @@ export function pdfGen({
     .bottom-row {
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 0;
     }
     /* Totalizada: financial sits directly under the table, full width right-aligned */
-    .financial { display: flex; justify-content: flex-end; }
+    .financial { display: flex; justify-content: flex-end; margin-top: 6px; }
     .summary { padding: 0; min-width: 260px; border: none; box-shadow: none; background: transparent; }
-    /* notes-grid: always 50/50 two columns, placed after financial */
-    .notes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    /* notes-grid: always 50/50 two columns, more breathing room from financial */
+    .notes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 28px; }
     .summary-row {
       display: flex;
       justify-content: space-between;
@@ -525,7 +530,7 @@ export function pdfGen({
     .summary-label {
       background: var(--bar);
       color: #fff;
-      font-size: 11px;
+      font-size: 14px;
       font-weight: 700;
       padding: 7px 14px;
       border-radius: 4px;
@@ -548,7 +553,7 @@ export function pdfGen({
     .total-label {
       background: var(--bar);
       color: #fff;
-      font-size: 12px;
+      font-size: 14px;
       font-weight: 700;
       padding: 7px 14px;
       border-radius: 4px;
@@ -640,7 +645,11 @@ export function pdfGen({
       <div class="box">
         <div class="box-head">Cliente</div>
         <div class="box-body client-lines">
-          ${clientLines.map(line => `<div>${escapeHtml(line)}</div>`).join('')}
+          ${clientHtmlLines.map(entry =>
+            entry.html
+              ? `<div style="display:flex;align-items:center;">${entry.html}</div>`
+              : `<div>${escapeHtml(entry.plain)}</div>`
+          ).join('')}
         </div>
       </div>
       <div class="box">
