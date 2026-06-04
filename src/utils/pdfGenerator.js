@@ -8,6 +8,7 @@ const DEFAULT_PROFORMA_OPTIONS = {
   showUnitName: true,
   showDriverPhone: true,
   showDriverCedula: true,
+  showSeller: true,
 };
 
 function escapeHtml(value) {
@@ -253,7 +254,7 @@ export function pdfGen({
 
     const unitCell = `<td>
       <div style="display:flex;align-items:center;gap:8px;">
-        ${options.showUnitImages && imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(unitLabel)}" style="width:64px;height:44px;object-fit:cover;border-radius:5px;border:1px solid var(--line);flex-shrink:0;">` : ''}
+        ${options.showUnitImages && imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(unitLabel)}" style="width:64px;height:44px;object-fit:cover;border-radius:4px;flex-shrink:0;">` : ''}
         <div>
           <div style="font-weight:800;font-size:12px;">${escapeHtml(unitLabel)}</div>
           ${plateLine}
@@ -328,8 +329,8 @@ export function pdfGen({
       --ink: #1F2937;
       --muted: #6B7280;
       --line: #E5E7EB;
-      --green: #14532D;
-      --bar: #8BC34A;
+      --green: #5a9e1a;
+      --bar: #7dc21e;
       --soft: #F8FAFC;
       --shadow: 0 12px 32px rgba(15, 23, 42, 0.10);
     }
@@ -354,39 +355,34 @@ export function pdfGen({
       gap: 18px;
     }
     .header {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 260px;
-      gap: 28px;
-      align-items: start;
-      padding-bottom: 14px;
-      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding-bottom: 0;
     }
     .brand-logo {
-      width: 180px;
+      width: 120px;
       height: 80px;
       display: flex;
       align-items: center;
       justify-content: flex-start;
-      margin-bottom: 8px;
+      flex-shrink: 0;
     }
     .brand-logo img {
-      max-width: ${Math.round(180 * logoScale)}px;
+      max-width: ${Math.round(120 * logoScale)}px;
       max-height: ${Math.round(80 * logoScale)}px;
       object-fit: contain;
     }
     .brand-placeholder {
       font-size: 26px;
       font-weight: 800;
-      color: var(--green);
+      color: var(--ink);
     }
-    .company { font-size: 18px; font-weight: 800; margin-top: 4px; }
-    .subtitle { font-size: 13px; font-weight: 700; color: var(--green); margin-top: 2px; }
-    .doc-word { font-size: 11px; text-transform: uppercase; color: var(--muted); font-weight: 800; letter-spacing: .7px; }
-    .doc-panel { text-align: right; }
-    .doc-title { font-size: 28px; font-weight: 800; color: var(--green); line-height: 1; }
-    .doc-id { font-size: 15px; font-weight: 800; margin: 6px 0 14px; }
-    .meta-line { display: flex; justify-content: flex-end; gap: 8px; color: var(--muted); margin-top: 4px; }
-    .meta-line strong { color: var(--ink); font-weight: 700; }
+    .header-text { display: flex; flex-direction: column; justify-content: center; }
+    .company { font-size: 26px; font-weight: 800; color: var(--ink); line-height: 1.1; margin: 0; }
+    .subtitle { font-size: 15px; font-weight: 700; color: var(--green); margin-top: 3px; }
+    .doc-panel-right { margin-left: auto; text-align: right; }
+    .doc-id-only { font-size: 13px; font-weight: 800; color: var(--ink); }
     .grid-two {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 250px;
@@ -402,12 +398,11 @@ export function pdfGen({
     }
     .box-head {
       background: var(--bar);
-      color: #0F2A16;
+      color: #fff;
       font-size: 12px;
-      font-weight: 800;
+      font-weight: 700;
       padding: 8px 12px;
-      text-transform: uppercase;
-      letter-spacing: .25px;
+      letter-spacing: .1px;
     }
     .box-body { padding: 11px 12px; }
     .client-lines div { margin-bottom: 4px; color: var(--muted); }
@@ -422,13 +417,13 @@ export function pdfGen({
     thead { display: table-header-group; }
     th {
       background: var(--bar);
-      color: #0F2A16;
+      color: #fff;
       font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .2px;
+      font-weight: 700;
+      letter-spacing: .1px;
       padding: 9px 8px;
       text-align: left;
-      border-right: 1px solid rgba(20, 83, 45, .16);
+      border-right: 1px solid rgba(255,255,255,.25);
     }
     th:last-child { border-right: none; text-align: right; }
     td {
@@ -492,15 +487,13 @@ export function pdfGen({
     }
     .summary-label {
       background: var(--bar);
-      color: #0F2A16;
+      color: #fff;
       font-size: 11px;
-      font-weight: 800;
+      font-weight: 700;
       padding: 5px 14px;
       border-radius: 4px;
-      text-transform: uppercase;
-      letter-spacing: .2px;
-      min-width: 90px;
-      text-align: center;
+      min-width: 110px;
+      text-align: right;
     }
     .summary-amount { font-size: 13px; font-weight: 800; color: var(--ink); white-space: nowrap; }
     .total-row {
@@ -512,17 +505,25 @@ export function pdfGen({
     }
     .total-label {
       background: var(--bar);
-      color: #0F2A16;
+      color: #fff;
       font-size: 12px;
-      font-weight: 900;
+      font-weight: 700;
       padding: 6px 14px;
       border-radius: 4px;
-      text-transform: uppercase;
-      letter-spacing: .2px;
-      min-width: 90px;
-      text-align: center;
+      min-width: 110px;
+      text-align: right;
     }
     .total-amount { font-size: 16px; font-weight: 900; color: var(--ink); white-space: nowrap; }
+    .signature-block {
+      margin-top: 8px;
+      padding-top: 14px;
+    }
+    .signature-line {
+      width: 220px;
+      border-top: 1px solid var(--ink);
+      margin-bottom: 5px;
+    }
+    .signature-info { font-size: 11px; color: var(--muted); line-height: 1.6; }
     .notes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .text-block { white-space: pre-wrap; color: var(--muted); }
     .driver-list { display: flex; flex-direction: column; gap: 6px; }
@@ -566,23 +567,15 @@ export function pdfGen({
 <body>
   <main class="sheet">
     <header class="header">
-      <div>
-        <div class="brand-logo">
-          ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(companyName)}">` : `<div class="brand-placeholder">${escapeHtml(companyName)}</div>`}
-        </div>
+      <div class="brand-logo">
+        ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(companyName)}">` : `<div class="brand-placeholder">${escapeHtml(companyName)}</div>`}
+      </div>
+      <div class="header-text">
         <div class="company">${escapeHtml(companyName)}</div>
         <div class="subtitle">Propuesta Comercial</div>
-        <div class="doc-word">Proforma</div>
       </div>
-      <div class="doc-panel">
-        <div class="doc-title">Proforma</div>
-        <div class="doc-id">${escapeHtml(proformaNumber)}</div>
-        <div class="meta-line"><span>Emitida:</span><strong>${escapeHtml(formatDateLong(now))}</strong></div>
-        <div class="meta-line"><span>Válida hasta:</span><strong>${escapeHtml(formatDateLong(validUntil))}</strong></div>
-        <div class="meta-line"><span>Servicio:</span><strong>${escapeHtml(formatDateLong(serviceDate))}</strong></div>
-        <div class="meta-line"><span>Ejecutivo:</span><strong>${escapeHtml(sellerName)}</strong></div>
-        ${sellerPhone ? `<div class="meta-line"><span>Teléfono:</span><strong>${escapeHtml(sellerPhone)}</strong></div>` : ''}
-        ${sellerEmail ? `<div class="meta-line"><span>Correo:</span><strong>${escapeHtml(sellerEmail)}</strong></div>` : ''}
+      <div class="doc-panel-right">
+        <div class="doc-id-only">${escapeHtml(proformaNumber)}</div>
       </div>
     </header>
 
@@ -604,8 +597,7 @@ export function pdfGen({
     </section>
 
     <section class="box">
-      <div class="box-head">Detalle de la cotización</div>
-      <div class="box-body">
+      <div class="box-body" style="padding:0;">
         <table>
           <colgroup>
             ${tableColgroup}
@@ -615,7 +607,6 @@ export function pdfGen({
           </thead>
           <tbody>${tableRows}</tbody>
         </table>
-        <div class="description">${escapeHtml(serviceDescription(socio))}</div>
       </div>
     </section>
 
@@ -630,13 +621,23 @@ export function pdfGen({
     <section class="notes-grid">
       <div class="box">
         <div class="box-head">Comentarios</div>
-        <div class="box-body text-block">${escapeHtml(cleanText(proformaComments, 'Sin comentarios adicionales.'))}</div>
+        <div class="box-body text-block">${escapeHtml(cleanText(proformaComments, ''))}</div>
       </div>
       <div class="box">
-        <div class="box-head">Términos y condiciones</div>
+        <div class="box-head">Términos y Condiciones</div>
         <div class="box-body text-block">${escapeHtml(cleanText(proformaTerms, defaultTerms(config)))}</div>
       </div>
     </section>
+
+    ${options.showSeller !== false && (sellerName || sellerPhone || sellerEmail) ? `
+    <div class="signature-block">
+      <div class="signature-line"></div>
+      <div class="signature-info">
+        ${sellerName ? `<div>${escapeHtml(sellerName)}</div>` : ''}
+        ${sellerEmail ? `<div>${escapeHtml(sellerEmail)}</div>` : ''}
+        ${sellerPhone ? `<div>${escapeHtml(sellerPhone)}</div>` : ''}
+      </div>
+    </div>` : ''}
 
 
     <footer class="footer">
