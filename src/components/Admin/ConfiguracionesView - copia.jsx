@@ -1364,25 +1364,10 @@ function TipoCambioPanel() {
 }
 
 // ─────────────────────────────────────────────────────────────
-const DEFAULT_PROFORMA_OPTIONS_CONFIG = {
-  tipoProforma: 'totalizada',
-  showRoute: true,
-  showPassengers: true,
-  showUnits: true,
-  showDrivers: true,
-  showUnitImages: true,
-  showUnitPlate: true,
-  showUnitName: true,
-  showDriverPhone: true,
-  showDriverCedula: true,
-  showSeller: true,
-};
-
 function CotizacionesPanel() {
   const { token } = useAuth();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
-  const [activeTab, setActiveTab] = useState('moneda');
   const [form, setForm] = useState({
     monedaBase: 'CRC',
     monedaDefault: 'CRC',
@@ -1399,7 +1384,6 @@ function CotizacionesPanel() {
       { id: 'transfer-in-ctg', descripcion: 'Transfer IN Aeropuerto Cartago', costo: 33280, activo: true },
       { id: 'transfer-out-ctg', descripcion: 'Transfer OUT Aeropuerto Cartago', costo: 30720, activo: true },
     ],
-    proformaOptions: { ...DEFAULT_PROFORMA_OPTIONS_CONFIG },
   });
 
   const authHeaders = useMemo(() => ({
@@ -1429,9 +1413,6 @@ function CotizacionesPanel() {
             costo: Number(item.costo) || 0,
             activo: item.activo !== false,
           })) : prev.transfers,
-          proformaOptions: (data.proformaOptions && typeof data.proformaOptions === 'object')
-            ? { ...DEFAULT_PROFORMA_OPTIONS_CONFIG, ...data.proformaOptions }
-            : prev.proformaOptions,
         }));
       }
     } catch (error) {
@@ -1467,20 +1448,6 @@ function CotizacionesPanel() {
     }));
   };
 
-  const toggleProformaOpt = (key) => {
-    setForm(prev => ({
-      ...prev,
-      proformaOptions: { ...prev.proformaOptions, [key]: !prev.proformaOptions[key] },
-    }));
-  };
-
-  const setProformaOpt = (key, value) => {
-    setForm(prev => ({
-      ...prev,
-      proformaOptions: { ...prev.proformaOptions, [key]: value },
-    }));
-  };
-
   const handleSave = async (event) => {
     event.preventDefault();
     setLoading(true);
@@ -1502,7 +1469,6 @@ function CotizacionesPanel() {
           costo: Number(item.costo) || 0,
           activo: item.activo !== false,
         })).filter(item => item.descripcion),
-        proformaOptions: { ...DEFAULT_PROFORMA_OPTIONS_CONFIG, ...form.proformaOptions },
       };
       const res = await fetch('/api/tms/config/cotizaciones', {
         method: 'POST',
@@ -1517,229 +1483,116 @@ function CotizacionesPanel() {
     setLoading(false);
   };
 
-  const COTIZ_TABS = [
-    { id: 'moneda',    label: 'Moneda' },
-    { id: 'operativos', label: 'Operativos' },
-    { id: 'transfers', label: 'Transfers' },
-    { id: 'diseno',    label: 'Diseño de Proforma' },
-  ];
-
-  const tabBtnStyle = (id) => ({
-    padding: '7px 16px',
-    borderRadius: 8,
-    border: 'none',
-    background: activeTab === id ? T.card : 'transparent',
-    color: activeTab === id ? T.BLU : T.mute,
-    fontWeight: activeTab === id ? 700 : 500,
-    fontSize: 13,
-    cursor: 'pointer',
-    transition: 'all 0.15s',
-    whiteSpace: 'nowrap',
-  });
-
   return (
-    <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-      {/* Tab bar */}
-      <div style={{ display: 'flex', gap: 4, borderBottom: `1px solid ${T.bdr}`, paddingBottom: 0 }}>
-        {COTIZ_TABS.map(t => (
-          <button key={t.id} type="button" onClick={() => setActiveTab(t.id)} style={tabBtnStyle(t.id)}>
-            {t.label}
-          </button>
-        ))}
+    <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div style={{ padding: 18, borderRadius: 14, border: `1px solid ${T.bdr}`, background: T.card2 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: T.txt, marginBottom: 6 }}>Moneda base del sistema</div>
+        <div style={{ fontSize: 12, color: T.sub, marginBottom: 14 }}>Todos los cálculos internos de proformas se guardan y operan en colones.</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <Field label="Moneda base">
+            <input value={form.monedaBase} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} />
+          </Field>
+          <Field label="Moneda por defecto en proforma">
+            <select value={form.monedaDefault} onChange={e => setForm(prev => ({ ...prev, monedaDefault: e.target.value }))} style={{ ...inputStyle, cursor: 'pointer' }}>
+              {DISPLAY_CURRENCIES.map(item => (
+                <option key={item.code} value={item.code}>{item.label}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
       </div>
 
-      {/* ── TAB: MONEDA ── */}
-      {activeTab === 'moneda' && (
-        <div style={{ padding: 18, borderRadius: 14, border: `1px solid ${T.bdr}`, background: T.card2 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: T.txt, marginBottom: 6 }}>Moneda base del sistema</div>
-          <div style={{ fontSize: 12, color: T.sub, marginBottom: 14 }}>Todos los cálculos internos de proformas se guardan y operan en colones.</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Field label="Moneda base">
-              <input value={form.monedaBase} readOnly style={{ ...inputStyle, color: T.sub, cursor: 'default' }} />
-            </Field>
-            <Field label="Moneda por defecto en proforma">
-              <select value={form.monedaDefault} onChange={e => setForm(prev => ({ ...prev, monedaDefault: e.target.value }))} style={{ ...inputStyle, cursor: 'pointer' }}>
-                {DISPLAY_CURRENCIES.map(item => (
-                  <option key={item.code} value={item.code}>{item.label}</option>
-                ))}
-              </select>
-            </Field>
-          </div>
-        </div>
-      )}
-
-      {/* ── TAB: OPERATIVOS ── */}
-      {activeTab === 'operativos' && (
-        <div style={{ padding: 18, borderRadius: 14, border: `1px solid ${T.bdr}`, background: T.card2 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: T.txt, marginBottom: 6 }}>Operativos de Proforma</div>
-          <div style={{ fontSize: 12, color: T.sub, marginBottom: 14 }}>Valores que se arrastran automáticamente al crear una proforma nueva.</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 16 }}>
-            <Field label="Colaborador">
-              <div style={{ position: 'relative' }}>
-                <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
-                <input type="number" min="0" step="0.01" value={form.colaborador || 0} onChange={e => setForm(prev => ({ ...prev, colaborador: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
-              </div>
-            </Field>
-            <Field label="Peajes">
-              <div style={{ position: 'relative' }}>
-                <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
-                <input type="number" min="0" step="0.01" value={form.peajes || 0} onChange={e => setForm(prev => ({ ...prev, peajes: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
-              </div>
-            </Field>
-            <Field label="Carga">
-              <div style={{ position: 'relative' }}>
-                <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
-                <input type="number" min="0" step="0.01" value={form.carga || 0} onChange={e => setForm(prev => ({ ...prev, carga: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
-              </div>
-            </Field>
-            <Field label="Viáticos">
-              <div style={{ position: 'relative' }}>
-                <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
-                <input type="number" min="0" step="0.01" value={form.viaticos || 0} onChange={e => setForm(prev => ({ ...prev, viaticos: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
-              </div>
-            </Field>
-            <Field label="Ferry">
-              <div style={{ position: 'relative' }}>
-                <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
-                <input type="number" min="0" step="0.01" value={form.ferry || 0} onChange={e => setForm(prev => ({ ...prev, ferry: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
-              </div>
-            </Field>
-            <Field label="Utilidad">
-              <div style={{ position: 'relative' }}>
-                <input type="number" min="0" step="0.01" value={form.utilidadPct || 0} onChange={e => setForm(prev => ({ ...prev, utilidadPct: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingRight: 28 }} />
-                <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>%</span>
-              </div>
-            </Field>
-            <Field label="IVA">
-              <div style={{ position: 'relative' }}>
-                <input type="number" min="0" step="0.01" value={form.iva || 0} onChange={e => setForm(prev => ({ ...prev, iva: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingRight: 28 }} />
-                <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>%</span>
-              </div>
-            </Field>
-          </div>
-        </div>
-      )}
-
-      {/* ── TAB: TRANSFERS ── */}
-      {activeTab === 'transfers' && (
-        <div style={{ padding: 18, borderRadius: 14, border: `1px solid ${T.bdr}`, background: T.card2 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: T.txt }}>Transfers configurables</div>
-              <div style={{ fontSize: 12, color: T.sub }}>Estos transfers aparecerán como selección directa dentro de la proforma.</div>
+      <div style={{ padding: 18, borderRadius: 14, border: `1px solid ${T.bdr}`, background: T.card2 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: T.txt, marginBottom: 6 }}>Defaults operativos de proforma</div>
+        <div style={{ fontSize: 12, color: T.sub, marginBottom: 14 }}>Estos valores se cargan automáticamente al crear una proforma nueva.</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 16 }}>
+          <Field label="Colaborador">
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+              <input type="number" min="0" step="0.01" value={form.colaborador || 0} onChange={e => setForm(prev => ({ ...prev, colaborador: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
             </div>
-            <button type="button" onClick={addTransfer} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${T.AMB}44`, background: T.ambDim, color: T.AMB, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
-              Agregar transfer
-            </button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {form.transfers.map((item, index) => (
-              <div key={item.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) 180px 120px auto', gap: 12, alignItems: 'end', padding: 14, borderRadius: 12, border: `1px solid ${T.bdr}`, background: T.card }}>
-                <Field label="Descripción">
-                  <input value={item.descripcion} onChange={e => updateTransfer(index, 'descripcion', e.target.value)} style={inputStyle} placeholder="Nombre del transfer" />
-                </Field>
-                <Field label="Costo">
-                  <div style={{ position: 'relative' }}>
-                    <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
-                    <input type="number" min="0" step="0.01" value={item.costo || 0} onChange={e => updateTransfer(index, 'costo', e.target.value)} style={{ ...inputStyle, paddingLeft: 28 }} />
-                  </div>
-                </Field>
-                <Field label="Activo">
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, color: T.sub, fontSize: 13 }}>
-                    <input type="checkbox" checked={item.activo !== false} onChange={e => updateTransfer(index, 'activo', e.target.checked)} />
-                    Visible
-                  </label>
-                </Field>
-                <button type="button" onClick={() => removeTransfer(index)} style={{ padding: '10px 12px', borderRadius: 10, border: 'none', background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
-                  Quitar
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── TAB: DISEÑO DE PROFORMA ── */}
-      {activeTab === 'diseno' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-          {/* Tipo de proforma */}
-          <div style={{ padding: 18, borderRadius: 14, border: `1px solid ${T.bdr}`, background: T.card2 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: T.txt, marginBottom: 4 }}>Tipo de proforma</div>
-            <div style={{ fontSize: 12, color: T.sub, marginBottom: 14 }}>Define cómo se presentan los montos en el PDF generado.</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              {[
-                ['totalizada', 'Totalizada', 'Suma al final con impuestos y total global. Ideal para cotizaciones con múltiples unidades.'],
-                ['itemizada', 'Itemizada', 'Subtotal, impuestos y total por cada ítem/viaje. Sin totalizador al final.'],
-              ].map(([val, label, desc]) => {
-                const active = (form.proformaOptions?.tipoProforma || 'totalizada') === val;
-                return (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => setProformaOpt('tipoProforma', val)}
-                    style={{
-                      padding: '14px 16px',
-                      borderRadius: 12,
-                      border: `2px solid ${active ? T.BLU : T.bdr}`,
-                      background: active ? `${T.BLU}18` : T.card,
-                      color: active ? T.BLU : T.sub,
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      transition: 'all 0.15s',
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{label}</div>
-                    <div style={{ fontSize: 11, color: active ? T.BLU : T.mute, lineHeight: 1.4 }}>{desc}</div>
-                  </button>
-                );
-              })}
+          </Field>
+          <Field label="Peajes">
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+              <input type="number" min="0" step="0.01" value={form.peajes || 0} onChange={e => setForm(prev => ({ ...prev, peajes: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
             </div>
-          </div>
-
-          {/* Columnas visibles */}
-          <div style={{ padding: 18, borderRadius: 14, border: `1px solid ${T.bdr}`, background: T.card2 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: T.txt, marginBottom: 4 }}>Columnas visibles en la tabla</div>
-            <div style={{ fontSize: 12, color: T.sub, marginBottom: 14 }}>Selecciona qué columnas aparecen en el PDF de la proforma.</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-              {[
-                ['showRoute',       'Itinerario / Ruta'],
-                ['showPassengers',  'Pasajeros'],
-                ['showUnits',       'Unidades'],
-                ['showDrivers',     'Conductores'],
-                ['showUnitImages',  'Fotos de unidad'],
-                ['showUnitPlate',   'Placa'],
-                ['showUnitName',    'Nombre de unidad'],
-                ['showDriverPhone', 'Teléfono conductor'],
-                ['showDriverCedula','Cédula conductor'],
-                ['showSeller',      'Firma ejecutivo'],
-              ].map(([key, label]) => {
-                const checked = Boolean(form.proformaOptions?.[key] ?? DEFAULT_PROFORMA_OPTIONS_CONFIG[key]);
-                return (
-                  <label key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 10, border: `1px solid ${checked ? T.BLU : T.bdr}`, background: checked ? `${T.BLU}12` : T.card, color: checked ? T.BLU : T.sub, fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleProformaOpt(key)}
-                      style={{ width: 14, height: 14, accentColor: T.BLU, cursor: 'pointer' }}
-                    />
-                    {label}
-                  </label>
-                );
-              })}
+          </Field>
+          <Field label="Carga">
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+              <input type="number" min="0" step="0.01" value={form.carga || 0} onChange={e => setForm(prev => ({ ...prev, carga: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
             </div>
-          </div>
-
+          </Field>
+          <Field label="Viáticos">
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+              <input type="number" min="0" step="0.01" value={form.viaticos || 0} onChange={e => setForm(prev => ({ ...prev, viaticos: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
+            </div>
+          </Field>
+          <Field label="Ferry">
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+              <input type="number" min="0" step="0.01" value={form.ferry || 0} onChange={e => setForm(prev => ({ ...prev, ferry: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingLeft: 28 }} />
+            </div>
+          </Field>
+          <Field label="Utilidad por defecto">
+            <div style={{ position: 'relative' }}>
+              <input type="number" min="0" step="0.01" value={form.utilidadPct || 0} onChange={e => setForm(prev => ({ ...prev, utilidadPct: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingRight: 28 }} />
+              <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>%</span>
+            </div>
+          </Field>
+          <Field label="IVA por defecto">
+            <div style={{ position: 'relative' }}>
+              <input type="number" min="0" step="0.01" value={form.iva || 0} onChange={e => setForm(prev => ({ ...prev, iva: Number(e.target.value || 0) }))} style={{ ...inputStyle, paddingRight: 28 }} />
+              <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>%</span>
+            </div>
+          </Field>
         </div>
-      )}
+      </div>
 
-      {/* Guardar — siempre visible */}
+      <div style={{ padding: 18, borderRadius: 14, border: `1px solid ${T.bdr}`, background: T.card2 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.txt }}>Transfers configurables</div>
+            <div style={{ fontSize: 12, color: T.sub }}>Estos transfers aparecerán como selección directa dentro de la proforma.</div>
+          </div>
+          <button type="button" onClick={addTransfer} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${T.AMB}44`, background: T.ambDim, color: T.AMB, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+            Agregar transfer
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {form.transfers.map((item, index) => (
+            <div key={item.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) 180px 120px auto', gap: 12, alignItems: 'end', padding: 14, borderRadius: 12, border: `1px solid ${T.bdr}`, background: T.card }}>
+              <Field label="Descripción">
+                <input value={item.descripcion} onChange={e => updateTransfer(index, 'descripcion', e.target.value)} style={inputStyle} placeholder="Nombre del transfer" />
+              </Field>
+              <Field label="Costo">
+                <div style={{ position: 'relative' }}>
+                  <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.mute, fontSize: 13 }}>₡</span>
+                  <input type="number" min="0" step="0.01" value={item.costo || 0} onChange={e => updateTransfer(index, 'costo', e.target.value)} style={{ ...inputStyle, paddingLeft: 28 }} />
+                </div>
+              </Field>
+              <Field label="Activo">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 40, color: T.sub, fontSize: 13 }}>
+                  <input type="checkbox" checked={item.activo !== false} onChange={e => updateTransfer(index, 'activo', e.target.checked)} />
+                  Visible
+                </label>
+              </Field>
+              <button type="button" onClick={() => removeTransfer(index)} style={{ padding: '10px 12px', borderRadius: 10, border: 'none', background: T.redDim, color: T.RED, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                Quitar
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <button type="submit" disabled={loading} style={{ padding: '12px 24px', borderRadius: 10, border: 'none', background: T.BLU, color: '#fff', fontSize: 14, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Save size={18} /> Guardar Cotizaciones
         </button>
-        <div style={{ fontSize: 12, color: status.toLowerCase().includes('error') ? T.RED : T.mute }}>{status || (loading ? 'Cargando...' : 'Los cambios se aplican a todas las proformas nuevas.')}</div>
+        <div style={{ fontSize: 12, color: status.toLowerCase().includes('error') ? T.RED : T.mute }}>{status || (loading ? 'Cargando...' : 'Administra la tabla de transfers y la moneda visual por defecto.')}</div>
       </div>
     </form>
   );

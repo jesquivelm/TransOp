@@ -73,8 +73,6 @@ const DEFAULT_PROFORMA_OPTIONS = {
   showUnitName: true,
   showDriverPhone: true,
   showDriverCedula: true,
-  showSeller: true,
-  tipoProforma: 'totalizada',
 };
 
 const PARAMS_DEFAULT = {
@@ -2450,9 +2448,6 @@ export default function CotizadorView({
           monedaBase: BASE_CURRENCY,
           monedaDefault: qData?.monedaDefault || prev.monedaDefault || BASE_CURRENCY,
           transfers: normalizeTransferCatalog(qData?.transfers, nextTc || DEFAULT_CRC_PER_USD),
-          proformaOptions: (qData?.proformaOptions && typeof qData.proformaOptions === 'object')
-            ? { ...DEFAULT_PROFORMA_OPTIONS, ...qData.proformaOptions }
-            : prev.proformaOptions || { ...DEFAULT_PROFORMA_OPTIONS },
         }));
         nextDraftDefaults = {
           ...nextDraftDefaults,
@@ -3242,7 +3237,7 @@ export default function CotizadorView({
         itineraryRows: previewRows,
         proformaComments: '',
         proformaTerms: '',
-        proformaOptions: normalizeProformaOptions(cotizacionesConfig.proformaOptions),
+        proformaOptions: normalizeProformaOptions(),
         proformaAttachments: [],
         activeUnitTab: 'operacion',
         vehiculoActivo: null,
@@ -3288,7 +3283,7 @@ export default function CotizadorView({
         itineraryRows: [],
         proformaComments: '',
         proformaTerms: '',
-        proformaOptions: normalizeProformaOptions(cotizacionesConfig.proformaOptions),
+        proformaOptions: normalizeProformaOptions(),
         proformaAttachments: [],
         activeUnitTab: 'operacion',
         vehiculoActivo: null,
@@ -5601,39 +5596,6 @@ const updateItineraryRow = (rowId, field, value) => {
 
                         <div style={{ borderTop: `1px solid ${T.bdr2}`, paddingTop: 10 }}>
                           <div style={{ fontSize: 11, fontWeight: 800, color: T.mute, letterSpacing: 0.3, marginBottom: 8 }}>VISTA PDF</div>
-
-                          {/* Tipo de proforma */}
-                          <div style={{ marginBottom: 10 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: T.sub, marginBottom: 5 }}>Tipo de proforma</div>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                              {[
-                                ['totalizada', 'Totalizada', 'Suma al final con impuestos y total global'],
-                                ['itemizada', 'Itemizada', 'Subtotal, impuestos y total por cada ítem/viaje'],
-                              ].map(([val, label, hint]) => (
-                                <button
-                                  key={val}
-                                  type="button"
-                                  title={hint}
-                                  onClick={() => setProformaOptions(prev => ({ ...prev, tipoProforma: val }))}
-                                  style={{
-                                    flex: 1,
-                                    padding: '5px 8px',
-                                    fontSize: 11,
-                                    fontWeight: 700,
-                                    borderRadius: 8,
-                                    border: `1px solid ${(proformaOptions.tipoProforma || 'totalizada') === val ? T.AMB : T.bdr}`,
-                                    background: (proformaOptions.tipoProforma || 'totalizada') === val ? T.ambDim : T.card2,
-                                    color: (proformaOptions.tipoProforma || 'totalizada') === val ? T.AMB : T.sub,
-                                    cursor: 'pointer',
-                                    transition: 'all 0.15s',
-                                  }}
-                                >
-                                  {label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                             {[
                               ['showRoute', 'Ruta'],

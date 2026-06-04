@@ -9,9 +9,6 @@ const DEFAULT_PROFORMA_OPTIONS = {
   showDriverPhone: true,
   showDriverCedula: true,
   showSeller: true,
-  // 'totalizada' (default): suma al final con impuestos y total
-  // 'itemizada': cada fila muestra subtotal, impuestos y total; sin resumen al final
-  tipoProforma: 'totalizada',
 };
 
 function escapeHtml(value) {
@@ -233,28 +230,13 @@ export function pdfGen({
     socio.sNotas ? `Observaciones: ${socio.sNotas}` : '',
   ].filter(Boolean);
 
-  const tipoProforma = options.tipoProforma || 'totalizada';
-  const isItemizada = tipoProforma === 'itemizada';
-  const taxRate = Number(params.iva || 0) / 100;
-
-  // Widths adapt based on mode: itemizada needs 3 extra numeric columns
-  const columns = isItemizada
-    ? [
-        options.showRoute      ? { key: 'route',      label: 'Itinerario',   width: '30%' } : null,
-        options.showPassengers ? { key: 'passengers',  label: 'Pax',          width: '7%'  } : null,
-        options.showUnits      ? { key: 'unit',        label: 'Unidades',     width: '16%' } : null,
-        options.showDrivers    ? { key: 'driver',      label: 'Cond.',        width: '13%' } : null,
-        { key: 'subtotal',  label: 'Subtotal',   width: '11%' },
-        { key: 'impuestos', label: 'Impuestos',  width: '11%' },
-        { key: 'total',     label: 'Total',      width: '12%' },
-      ].filter(Boolean)
-    : [
-        options.showRoute      ? { key: 'route',      label: 'Itinerario',   width: '38%' } : null,
-        options.showPassengers ? { key: 'passengers',  label: 'Pax',          width: '9%'  } : null,
-        options.showUnits      ? { key: 'unit',        label: 'Unidades',     width: '20%' } : null,
-        options.showDrivers    ? { key: 'driver',      label: 'Conductores',  width: '16%' } : null,
-        { key: 'subtotal',  label: 'Subtotal',   width: '11%' },
-      ].filter(Boolean);
+  const columns = [
+    options.showRoute ? { key: 'route', label: 'Itinerario', width: '36%' } : null,
+    options.showPassengers ? { key: 'passengers', label: 'Pasajeros', width: '12%' } : null,
+    options.showUnits ? { key: 'unit', label: 'Unidades', width: '21%' } : null,
+    options.showDrivers ? { key: 'driver', label: 'Conductores', width: '18%' } : null,
+    { key: 'subtotal', label: 'Subtotal', width: '13%' },
+  ].filter(Boolean);
   const columnWidthTotal = columns.reduce((sum, column) => sum + Number.parseFloat(column.width), 0) || 100;
   const tableColgroup = columns
     .map(column => `<col style="width:${((Number.parseFloat(column.width) / columnWidthTotal) * 100).toFixed(2)}%">`)
@@ -289,18 +271,12 @@ export function pdfGen({
       ${driverCedula ? `<div style="color:var(--muted);font-size:11px;display:flex;align-items:center;margin-top:2px;">${SVG_ID_ICON}${escapeHtml(driverCedula)}</div>` : ''}
     </td>`;
 
-    const rowSubtotal = unitSubtotal(unit);
-    const rowTax = rowSubtotal * taxRate;
-    const rowTotal = rowSubtotal + rowTax;
-
     const cells = {
-      route:      `<td>${routeHtml(unit, socio)}</td>`,
+      route: `<td>${routeHtml(unit, socio)}</td>`,
       passengers: `<td class="center">${escapeHtml(unit.sPax || socio.sPax || 'Por confirmar')}</td>`,
-      unit:       unitCell,
-      driver:     driverCell,
-      subtotal:   `<td class="money">${escapeHtml(formatMoney(rowSubtotal, displayCurrency, params))}</td>`,
-      impuestos:  `<td class="money muted-money">${escapeHtml(formatMoney(rowTax, displayCurrency, params))}</td>`,
-      total:      `<td class="money total-cell">${escapeHtml(formatMoney(rowTotal, displayCurrency, params))}</td>`,
+      unit: unitCell,
+      driver: driverCell,
+      subtotal: `<td class="money">${escapeHtml(formatMoney(unitSubtotal(unit), displayCurrency, params))}</td>`,
     };
     return `<tr>${columns.map(column => cells[column.key]).join('')}</tr>`;
   }).join('');
@@ -406,8 +382,7 @@ export function pdfGen({
     .company { font-size: 26px; font-weight: 800; color: var(--ink); line-height: 1.1; margin: 0; }
     .subtitle { font-size: 15px; font-weight: 700; color: var(--green); margin-top: 3px; }
     .doc-panel-right { margin-left: auto; text-align: right; }
-    .doc-label { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 2px; }
-    .doc-id { font-size: 20px; font-weight: 900; color: var(--ink); letter-spacing: -.3px; }
+    .doc-id-only { font-size: 13px; font-weight: 800; color: var(--ink); }
     .grid-two {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 250px;
@@ -424,12 +399,10 @@ export function pdfGen({
     .box-head {
       background: var(--bar);
       color: #fff;
-      font-size: 14px;
+      font-size: 12px;
       font-weight: 700;
-      padding: 5px 12px;
+      padding: 8px 12px;
       letter-spacing: .1px;
-      print-color-adjust: exact;
-      -webkit-print-color-adjust: exact;
     }
     .box-body { padding: 11px 12px; }
     .client-lines div { margin-bottom: 4px; color: var(--muted); }
@@ -445,14 +418,12 @@ export function pdfGen({
     th {
       background: var(--bar);
       color: #fff;
-      font-size: 14px;
+      font-size: 11px;
       font-weight: 700;
       letter-spacing: .1px;
-      padding: 5px 8px;
+      padding: 9px 8px;
       text-align: left;
       border-right: 1px solid rgba(255,255,255,.25);
-      print-color-adjust: exact;
-      -webkit-print-color-adjust: exact;
     }
     th:last-child { border-right: none; text-align: right; }
     td {
@@ -465,8 +436,6 @@ export function pdfGen({
     tbody tr { break-inside: avoid; }
     .center { text-align: center; }
     .money { text-align: right; white-space: nowrap; font-weight: 800; color: var(--green); }
-    .muted-money { color: var(--muted); font-weight: 700; }
-    .total-cell { color: var(--ink); font-weight: 900; }
     .route-day + .route-day { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
     .route-date { color: var(--green); font-weight: 800; margin-bottom: 4px; font-size: 11px; }
     .route-row { display: flex; align-items: flex-start; gap: 2px; margin-bottom: 3px; font-size: 11.5px; line-height: 1.35; }
@@ -504,19 +473,15 @@ export function pdfGen({
     .unit-title { font-size: 14px; font-weight: 800; color: var(--ink); margin-bottom: 6px; }
     .unit-meta { display: flex; flex-wrap: wrap; gap: 6px 10px; color: var(--muted); font-size: 11px; }
     .unit-driver { margin-top: 8px; color: var(--green); font-weight: 700; }
-    /* ── Bottom row: notes left, totals right ── */
-    .bottom-row {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 16px;
-      align-items: end;
+    .financial {
+      display: flex;
+      justify-content: flex-end;
     }
-    .financial { display: flex; justify-content: flex-end; }
     .summary { padding: 0; min-width: 260px; border: none; box-shadow: none; background: transparent; }
     .summary-row {
       display: flex;
       justify-content: space-between;
-      align-items: stretch;
+      align-items: center;
       gap: 12px;
       margin-bottom: 6px;
     }
@@ -525,21 +490,16 @@ export function pdfGen({
       color: #fff;
       font-size: 11px;
       font-weight: 700;
-      padding: 7px 14px;
+      padding: 5px 14px;
       border-radius: 4px;
       min-width: 110px;
       text-align: right;
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      print-color-adjust: exact;
-      -webkit-print-color-adjust: exact;
     }
-    .summary-amount { font-size: 13px; font-weight: 800; color: var(--ink); white-space: nowrap; display: flex; align-items: center; }
+    .summary-amount { font-size: 13px; font-weight: 800; color: var(--ink); white-space: nowrap; }
     .total-row {
       display: flex;
       justify-content: space-between;
-      align-items: stretch;
+      align-items: center;
       gap: 12px;
       margin-top: 4px;
     }
@@ -548,31 +508,21 @@ export function pdfGen({
       color: #fff;
       font-size: 12px;
       font-weight: 700;
-      padding: 7px 14px;
+      padding: 6px 14px;
       border-radius: 4px;
       min-width: 110px;
       text-align: right;
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      print-color-adjust: exact;
-      -webkit-print-color-adjust: exact;
     }
-    .total-amount { font-size: 16px; font-weight: 900; color: var(--ink); white-space: nowrap; display: flex; align-items: center; }
+    .total-amount { font-size: 16px; font-weight: 900; color: var(--ink); white-space: nowrap; }
     .signature-block {
       margin-top: 8px;
       padding-top: 14px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
     }
     .signature-line {
       width: 220px;
-      border-top: 1px solid #9CA3AF;
-      margin-bottom: 6px;
+      border-top: 1px solid var(--ink);
+      margin-bottom: 5px;
     }
-    .signature-name { font-size: 13px; font-weight: 800; color: var(--ink); margin-bottom: 2px; }
     .signature-info { font-size: 11px; color: var(--muted); line-height: 1.6; }
     .notes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .text-block { white-space: pre-wrap; color: var(--muted); }
@@ -610,11 +560,7 @@ export function pdfGen({
         padding: 38px 42px 28px;
         box-shadow: none;
       }
-      .box, .unit-card, .financial, .notes-grid, .bottom-row { break-inside: avoid; }
-      .box-head, th, .summary-label, .total-label {
-        print-color-adjust: exact;
-        -webkit-print-color-adjust: exact;
-      }
+      .box, .unit-card, .financial, .notes-grid { break-inside: avoid; }
     }
   </style>
 </head>
@@ -629,8 +575,7 @@ export function pdfGen({
         <div class="subtitle">Propuesta Comercial</div>
       </div>
       <div class="doc-panel-right">
-        <div class="doc-label">Proforma</div>
-        <div class="doc-id">${escapeHtml(proformaNumber)}</div>
+        <div class="doc-id-only">${escapeHtml(proformaNumber)}</div>
       </div>
     </header>
 
@@ -665,33 +610,30 @@ export function pdfGen({
       </div>
     </section>
 
-    <section class="bottom-row">
-      <div class="notes-grid">
-        <div class="box">
-          <div class="box-head">Comentarios</div>
-          <div class="box-body text-block">${escapeHtml(cleanText(proformaComments, ''))}</div>
-        </div>
-        <div class="box">
-          <div class="box-head">Términos y Condiciones</div>
-          <div class="box-body text-block">${escapeHtml(cleanText(proformaTerms, defaultTerms(config)))}</div>
-        </div>
+    <section class="financial">
+      <div class="summary">
+        ${discount > 0 ? `<div class="summary-row"><span class="summary-label">Descuento</span><span class="summary-amount">-${escapeHtml(formatMoney(discount, displayCurrency, params))}</span></div>` : ''}
+        <div class="summary-row"><span class="summary-label">Impuestos</span><span class="summary-amount">${escapeHtml(formatMoney(tax, displayCurrency, params))}</span></div>
+        <div class="total-row"><span class="total-label">Total</span><span class="total-amount">${escapeHtml(formatMoney(total, displayCurrency, params))}</span></div>
       </div>
+    </section>
 
-      ${!isItemizada ? `
-      <div class="financial">
-        <div class="summary">
-          ${discount > 0 ? `<div class="summary-row"><span class="summary-label">Descuento</span><span class="summary-amount">-${escapeHtml(formatMoney(discount, displayCurrency, params))}</span></div>` : ''}
-          <div class="summary-row"><span class="summary-label">Impuestos</span><span class="summary-amount">${escapeHtml(formatMoney(tax, displayCurrency, params))}</span></div>
-          <div class="total-row"><span class="total-label">Total</span><span class="total-amount">${escapeHtml(formatMoney(total, displayCurrency, params))}</span></div>
-        </div>
-      </div>` : ''}
+    <section class="notes-grid">
+      <div class="box">
+        <div class="box-head">Comentarios</div>
+        <div class="box-body text-block">${escapeHtml(cleanText(proformaComments, ''))}</div>
+      </div>
+      <div class="box">
+        <div class="box-head">Términos y Condiciones</div>
+        <div class="box-body text-block">${escapeHtml(cleanText(proformaTerms, defaultTerms(config)))}</div>
+      </div>
     </section>
 
     ${options.showSeller !== false && (sellerName || sellerPhone || sellerEmail) ? `
     <div class="signature-block">
       <div class="signature-line"></div>
-      <div class="signature-name">${escapeHtml(sellerName)}</div>
       <div class="signature-info">
+        ${sellerName ? `<div>${escapeHtml(sellerName)}</div>` : ''}
         ${sellerEmail ? `<div>${escapeHtml(sellerEmail)}</div>` : ''}
         ${sellerPhone ? `<div>${escapeHtml(sellerPhone)}</div>` : ''}
       </div>
