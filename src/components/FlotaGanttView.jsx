@@ -127,7 +127,13 @@ export default function FlotaGanttView({ apiFetch, conductores, vehiculos, ausen
 
   const visibleFrom = useMemo(() => startOfRange(baseDate, rangeId), [baseDate, rangeId]);
   const visibleTo = useMemo(() => endOfRange(baseDate, rangeId), [baseDate, rangeId]);
-  const visibleDays = useMemo(() => buildTimelineDays(visibleFrom, visibleTo), [visibleFrom, visibleTo]);
+  const visibleDays = useMemo(() => {
+    const baseDays = buildTimelineDays(visibleFrom, visibleTo);
+    const baseSet = new Set(baseDays);
+    const taskDates = tasks.map(t => t.fecha).filter(d => d && !baseSet.has(d));
+    if (taskDates.length === 0) return baseDays;
+    return [...baseDays, ...new Set(taskDates)].sort();
+  }, [visibleFrom, visibleTo, tasks]);
 
   useEffect(() => {
     let cancelled = false;

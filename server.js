@@ -2698,8 +2698,16 @@ app.get('/api/tms/tareas', authenticateToken, async (req, res) => {
                 TO_CHAR(fecha_salida, 'YYYY-MM-DD') AS fecha,
                 notas_operativas AS notas
              FROM tareas
-             WHERE fecha_salida::date BETWEEN $1::date AND $2::date
-               AND estado != 'cancelada'
+             WHERE (
+                 fecha_salida::date BETWEEN $1::date AND $2::date
+                 OR evento_id IN (
+                     SELECT DISTINCT t2.evento_id
+                     FROM tareas t2
+                     WHERE t2.fecha_salida::date BETWEEN $1::date AND $2::date
+                       AND t2.evento_id IS NOT NULL
+                 )
+             )
+             AND estado != 'cancelada'
              ORDER BY fecha_salida ASC`,
             [desde, hasta]
         );
